@@ -27,7 +27,10 @@ type Group struct {
 }
 
 type GroupMember struct {
-	BaseResource
-	User  string `json:"user"`
-	Group string `json:"group"`
+	User struct {
+		Value string `json:"value"`
+	} `json:"user"`
+	Group struct {
+		Value string `json:"value"`
+	} `json:"group"`
 }

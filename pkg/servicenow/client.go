@@ -17,8 +17,10 @@ const TableAPIBaseURL = BaseURL + "/now/table"
 
 const (
 	UsersBaseUrl       = TableAPIBaseURL + "/sys_user"
+	UserBaseUrl        = UsersBaseUrl + "/%s"
+	GroupsBaseUrl      = TableAPIBaseURL + "/sys_user_group"
+	GroupBaseUrl       = GroupsBaseUrl + "/%s"
 	RolesBaseUrl       = TableAPIBaseURL + "/sys_user_role"
-	GroupBaseUrl       = TableAPIBaseURL + "/sys_user_group"
 	GroupMemberBaseUrl = TableAPIBaseURL + "/sys_user_grmember"
 )
 
@@ -36,14 +38,20 @@ func NewClient(httpClient *http.Client, auth string, deployment string) *Client 
 	}
 }
 
-type Response[T any] struct {
+type ListResponse[T any] struct {
 	Result []T `json:"result"`
 }
 
-type UsersResponse = Response[User]
-type RolesResponse = Response[Role]
-type GroupsResponse = Response[Group]
-type GroupMembersResponse = Response[GroupMember]
+type SingleResponse[T any] struct {
+	Result T `json:"result"`
+}
+
+type UserResponse = SingleResponse[User]
+type UsersResponse = ListResponse[User]
+type RolesResponse = ListResponse[Role]
+type GroupsResponse = ListResponse[Group]
+type GroupResponse = SingleResponse[Group]
+type GroupMembersResponse = ListResponse[GroupMember]
 
 type QueryParam interface {
 	setup(params *url.Values)
@@ -79,38 +87,40 @@ func (fV *FilterVars) setup(params *url.Values) {
 	}
 }
 
-func PreparePagingVars(limit int, offset int) PaginationVars {
-	return PaginationVars{
-		Limit:  limit,
-		Offset: offset,
-	}
-}
-
-func PrepareUserFilters() FilterVars {
-	return FilterVars{
+func prepareUserFilters() *FilterVars {
+	return &FilterVars{
 		Fields: []string{
 			"sys_id", "name", "roles", "user_name", "email", "first_name", "last_name", "active",
 		},
 	}
 }
 
-func PrepareRoleFilters() FilterVars {
-	return FilterVars{
+func prepareRoleFilters() *FilterVars {
+	return &FilterVars{
 		Fields: []string{
 			"sys_id", "grantable", "name",
 		},
 	}
 }
 
-func PrepareGroupFilters() FilterVars {
-	return FilterVars{
+func prepareGroupFilters() *FilterVars {
+	return &FilterVars{
 		Fields: []string{
 			"sys_id", "description", "name",
 		},
 	}
 }
 
-func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, filterVars FilterVars) ([]User, int, error) {
+func prepareGroupMemberFilter(groupId string) *FilterVars {
+	return &FilterVars{
+		Fields: []string{
+			"user", "group",
+		},
+		Query: fmt.Sprintf("group=%s", groupId),
+	}
+}
+
+func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars) ([]User, error) {
 	var usersResponse UsersResponse
 
 	err := c.doRequest(
@@ -119,18 +129,96 @@ func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, fi
 		&usersResponse,
 		[]QueryParam{
 			&paginationVars,
-			&filterVars,
+			prepareUserFilters(),
 		}...,
 	)
 
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
-	return usersResponse.Result, paginationVars.Offset, nil
+	return usersResponse.Result, nil
 }
 
-func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars, filterVars FilterVars) ([]Role, int, error) {
+func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
+	var userResponse UserResponse
+
+	err := c.doRequest(
+		ctx,
+		fmt.Sprintf(UserBaseUrl, c.deployment, userId),
+		&userResponse,
+		[]QueryParam{
+			prepareUserFilters(),
+		}...,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &userResponse.Result, nil
+}
+
+func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars) ([]Group, error) {
+	var groupsResponse GroupsResponse
+
+	err := c.doRequest(
+		ctx,
+		fmt.Sprintf(GroupsBaseUrl, c.deployment),
+		&groupsResponse,
+		[]QueryParam{
+			&paginationVars,
+			prepareGroupFilters(),
+		}...,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return groupsResponse.Result, nil
+}
+
+func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
+	var groupResponse GroupResponse
+
+	err := c.doRequest(
+		ctx,
+		fmt.Sprintf(GroupBaseUrl, c.deployment, groupId),
+		&groupResponse,
+		[]QueryParam{
+			prepareGroupFilters(),
+		}...,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &groupResponse.Result, nil
+}
+
+func (c *Client) GetGroupMembers(ctx context.Context, groupId string, paginationVars PaginationVars) ([]GroupMember, error) {
+	var groupMembersResponse GroupMembersResponse
+
+	err := c.doRequest(
+		ctx,
+		fmt.Sprintf(GroupMemberBaseUrl, c.deployment),
+		&groupMembersResponse,
+		[]QueryParam{
+			&paginationVars,
+			prepareGroupMemberFilter(groupId),
+		}...,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return groupMembersResponse.Result, nil
+}
+
+func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([]Role, error) {
 	var rolesResponse RolesResponse
 
 	err := c.doRequest(
@@ -139,35 +227,15 @@ func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars, fi
 		&rolesResponse,
 		[]QueryParam{
 			&paginationVars,
-			&filterVars,
+			prepareRoleFilters(),
 		}...,
 	)
 
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
-	return rolesResponse.Result, paginationVars.Offset, nil
-}
-
-func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars, filterVars FilterVars) ([]Group, int, error) {
-	var groupsResponse GroupsResponse
-
-	err := c.doRequest(
-		ctx,
-		fmt.Sprintf(GroupBaseUrl, c.deployment),
-		&groupsResponse,
-		[]QueryParam{
-			&paginationVars,
-			&filterVars,
-		}...,
-	)
-
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return groupsResponse.Result, paginationVars.Offset, nil
+	return rolesResponse.Result, nil
 }
 
 func (c *Client) doRequest(
