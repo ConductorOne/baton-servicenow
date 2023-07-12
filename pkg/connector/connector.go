@@ -20,6 +20,20 @@ var (
 		},
 		Annotations: annotationsForUserResourceType(),
 	}
+	resourceTypeRole = &v2.ResourceType{
+		Id:          "role",
+		DisplayName: "Role",
+		Traits: []v2.ResourceType_Trait{
+			v2.ResourceType_TRAIT_ROLE,
+		},
+	}
+	resourceTypeGroup = &v2.ResourceType{
+		Id:          "group",
+		DisplayName: "Group",
+		Traits: []v2.ResourceType_Trait{
+			v2.ResourceType_TRAIT_GROUP,
+		},
+	}
 )
 
 type ServiceNow struct {
@@ -29,6 +43,8 @@ type ServiceNow struct {
 func (b *ServiceNow) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
 	return []connectorbuilder.ResourceSyncer{
 		userBuilder(b.client),
+		roleBuilder(b.client),
+		groupBuilder(b.client),
 	}
 }
 
