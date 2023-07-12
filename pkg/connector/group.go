@@ -88,6 +88,10 @@ func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagi
 		rv = append(rv, rr)
 	}
 
+	if len(groups) < ResourcesPageSize {
+		return rv, "", nil, nil
+	}
+
 	return rv, nextPage, nil, nil
 }
 
@@ -140,7 +144,7 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 
 	var rv []*v2.Grant
 	for _, member := range groupMembers {
-		user, err := g.client.GetUser(ctx, member)
+		user, err := g.client.GetUser(ctx, member.User.Value)
 
 		// There could be unreachable users, but available in group members table
 		if err != nil {
@@ -162,6 +166,10 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 				ur.Id,
 			),
 		)
+	}
+
+	if len(groupMembers) < ResourcesPageSize {
+		return rv, "", nil, nil
 	}
 
 	return rv, nextPage, nil, nil

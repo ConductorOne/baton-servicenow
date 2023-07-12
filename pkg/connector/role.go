@@ -83,6 +83,10 @@ func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		rv = append(rv, rr)
 	}
 
+	if len(roles) < ResourcesPageSize {
+		return rv, "", nil, nil
+	}
+
 	return rv, nextPage, nil, nil
 }
 

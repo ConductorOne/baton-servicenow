@@ -88,6 +88,10 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		rv = append(rv, ur)
 	}
 
+	if len(users) < ResourcesPageSize {
+		return rv, "", nil, nil
+	}
+
 	return rv, nextPage, nil, nil
 }
 
