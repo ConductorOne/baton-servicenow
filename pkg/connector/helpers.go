@@ -49,16 +49,29 @@ func parsePageToken(i string, resourceID *v2.ResourceId) (*pagination.Bag, int, 
 	return b, page, nil
 }
 
+func handleRoleGrantsPagination(
+	grants []*v2.Grant,
+	bag *pagination.Bag,
+) ([]*v2.Grant, string, annotations.Annotations, error) {
+	bag.Pop()
+
+	if bag.Current() == nil {
+		return grants, "", nil, nil
+	}
+
+	nextPage, err := bag.Marshal()
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	return grants, nextPage, nil, nil
+}
+
 // convertPageToken converts a string token into an int.
 func convertPageToken(token string) (int, error) {
 	if token == "" {
 		return 0, nil
 	}
 
-	page, err := strconv.ParseInt(token, 10, 32)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse page token: %w", err)
-	}
-
-	return int(page), nil
+	return strconv.Atoi(token)
 }

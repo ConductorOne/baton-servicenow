@@ -8,8 +8,12 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
+	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 )
+
+const roleMembership = "member"
 
 type roleResourceType struct {
 	resourceType *v2.ResourceType
@@ -91,11 +95,152 @@ func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 }
 
 func (r *roleResourceType) Entitlements(ctx context.Context, resource *v2.Resource, token *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+	var rv []*v2.Entitlement
+
+	assignmentOptions := []ent.EntitlementOption{
+		ent.WithGrantableTo(resourceTypeUser, resourceTypeGroup),
+		ent.WithDisplayName(fmt.Sprintf("%s Role %s", resource.DisplayName, roleMembership)),
+		ent.WithDescription(fmt.Sprintf("Access to %s role in ServiceNow", resource.DisplayName)),
+	}
+
+	rv = append(rv, ent.NewAssignmentEntitlement(
+		resource,
+		roleMembership,
+		assignmentOptions...,
+	))
+
+	return rv, "", nil, nil
 }
 
-func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, token *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+	bag, offset, err := parsePageToken(pt.Token, resource.Id)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	var rv []*v2.Grant
+	switch bag.ResourceTypeID() {
+	case resourceTypeRole.Id:
+		bag.Pop()
+		bag.Push(pagination.PageState{
+			ResourceTypeID: resourceTypeGroup.Id,
+		})
+		bag.Push(pagination.PageState{
+			ResourceTypeID: resourceTypeUser.Id,
+		})
+
+	case resourceTypeUser.Id:
+		usersToRoles, err := r.client.GetUsersToRole(
+			ctx,
+			resource.Id.Resource,
+			servicenow.PaginationVars{
+				Limit:  ResourcesPageSize,
+				Offset: offset,
+			},
+		)
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list users under role %s: %w", resource.Id.Resource, err)
+		}
+
+		if len(usersToRoles) == 0 {
+			return handleRoleGrantsPagination(rv, bag)
+		}
+
+		// for each user, create a grant
+		for _, userToRole := range usersToRoles {
+			user, err := r.client.GetUser(ctx, userToRole.User.Value)
+			if err != nil {
+				return nil, "", nil, fmt.Errorf("servicenow-connector: failed to get user %s: %w", userToRole.User.Value, err)
+			}
+
+			userCopy := user
+			ur, err := userResource(ctx, userCopy)
+			if err != nil {
+				return nil, "", nil, err
+			}
+
+			rv = append(
+				rv,
+				grant.NewGrant(
+					resource,
+					roleMembership,
+					ur.Id,
+				),
+			)
+		}
+
+		if len(usersToRoles) < ResourcesPageSize {
+			bag.Pop()
+
+			return handleRoleGrantsPagination(rv, bag)
+		}
+
+		err = bag.Next(fmt.Sprintf("%d", offset+ResourcesPageSize))
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+	case resourceTypeGroup.Id:
+		groupsToRoles, err := r.client.GetGroupsToRole(
+			ctx,
+			resource.Id.Resource,
+			servicenow.PaginationVars{
+				Limit:  ResourcesPageSize,
+				Offset: offset,
+			},
+		)
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list groups under role %s: %w", resource.Id.Resource, err)
+		}
+
+		if len(groupsToRoles) == 0 {
+			return handleRoleGrantsPagination(rv, bag)
+		}
+
+		// for each group, create a grant
+		for _, groupToRole := range groupsToRoles {
+			group, err := r.client.GetGroup(ctx, groupToRole.Group.Value)
+			if err != nil {
+				return nil, "", nil, fmt.Errorf("servicenow-connector: failed to get group %s: %w", groupToRole.Group.Value, err)
+			}
+
+			groupCopy := group
+			gr, err := groupResource(ctx, groupCopy)
+			if err != nil {
+				return nil, "", nil, err
+			}
+
+			rv = append(
+				rv,
+				grant.NewGrant(
+					resource,
+					roleMembership,
+					gr.Id,
+				),
+			)
+		}
+
+		if len(groupsToRoles) < ResourcesPageSize {
+			bag.Pop()
+
+			return handleRoleGrantsPagination(rv, bag)
+		}
+
+		err = bag.Next(fmt.Sprintf("%d", offset+ResourcesPageSize))
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+	default:
+		return nil, "", nil, fmt.Errorf("unknown resource type: %s", bag.ResourceTypeID())
+	}
+
+	nextPage, err := bag.Marshal()
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	return rv, nextPage, nil, nil
 }
 
 func roleBuilder(client *servicenow.Client) *roleResourceType {

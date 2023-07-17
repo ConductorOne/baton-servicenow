@@ -34,3 +34,29 @@ type GroupMember struct {
 		Value string `json:"value"`
 	} `json:"group"`
 }
+
+type UserToRole struct {
+	Inherited string `json:"inherited"`
+	User      struct {
+		Value string `json:"value"`
+	} `json:"user"`
+	Role struct {
+		Value string `json:"value"`
+	} `json:"role"`
+}
+
+type GroupToRole struct {
+	Inherits string `json:"inherits"`
+	Group    struct {
+		Value string `json:"value"`
+	} `json:"group"`
+	Role struct {
+		Value string `json:"value"`
+	} `json:"role"`
+}
+
+type UserRoles struct {
+	UserName  string   `json:"user_name"`
+	FromRole  []string `json:"from_role"`
+	FromGroup []string `json:"from_group"`
+}

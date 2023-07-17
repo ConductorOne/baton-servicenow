@@ -95,7 +95,7 @@ func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagi
 	return rv, nextPage, nil, nil
 }
 
-func (g *groupResourceType) Entitlements(ctx context.Context, resource *v2.Resource, token *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (g *groupResourceType) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var rv []*v2.Entitlement
 
 	assignmentOptions := []ent.EntitlementOption{
@@ -109,8 +109,6 @@ func (g *groupResourceType) Entitlements(ctx context.Context, resource *v2.Resou
 		groupMembership,
 		assignmentOptions...,
 	))
-
-	// TODO: add entitlements for roles that could be shared throug groups
 
 	return rv, "", nil, nil
 }
@@ -158,6 +156,7 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 			return nil, "", nil, err
 		}
 
+		// grant group membership
 		rv = append(
 			rv,
 			grant.NewGrant(

@@ -12,31 +12,22 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const BaseURL = "https://%s.service-now.com/api"
-const TableAPIBaseURL = BaseURL + "/now/table"
-
 const (
+	BaseURL          = "https://%s.service-now.com/api"
+	TableAPIBaseURL  = BaseURL + "/now/table"
+	GlobalApiBaseURL = BaseURL + "/global"
+
 	UsersBaseUrl       = TableAPIBaseURL + "/sys_user"
 	UserBaseUrl        = UsersBaseUrl + "/%s"
 	GroupsBaseUrl      = TableAPIBaseURL + "/sys_user_group"
 	GroupBaseUrl       = GroupsBaseUrl + "/%s"
 	RolesBaseUrl       = TableAPIBaseURL + "/sys_user_role"
 	GroupMemberBaseUrl = TableAPIBaseURL + "/sys_user_grmember"
+	UserRolesBaseUrl   = TableAPIBaseURL + "/sys_user_has_role"
+	GroupRolesBaseUrl  = TableAPIBaseURL + "/sys_group_has_role"
+
+	UserRoleInheritanceBaseUrl = GlobalApiBaseURL + "/user_role_inheritance"
 )
-
-type Client struct {
-	httpClient *http.Client
-	auth       string
-	deployment string
-}
-
-func NewClient(httpClient *http.Client, auth string, deployment string) *Client {
-	return &Client{
-		httpClient: httpClient,
-		auth:       auth,
-		deployment: deployment,
-	}
-}
 
 type ListResponse[T any] struct {
 	Result []T `json:"result"`
@@ -52,71 +43,21 @@ type RolesResponse = ListResponse[Role]
 type GroupsResponse = ListResponse[Group]
 type GroupResponse = SingleResponse[Group]
 type GroupMembersResponse = ListResponse[GroupMember]
+type UserRolesResponse = SingleResponse[UserRoles]
+type UserToRoleResponse ListResponse[UserToRole]
+type GroupToRoleResponse ListResponse[GroupToRole]
 
-type QueryParam interface {
-	setup(params *url.Values)
+type Client struct {
+	httpClient *http.Client
+	auth       string
+	deployment string
 }
 
-type PaginationVars struct {
-	Limit  int
-	Offset int
-}
-
-func (pV *PaginationVars) setup(params *url.Values) {
-	if pV.Limit != 0 {
-		params.Set("sysparm_limit", fmt.Sprintf("%d", pV.Limit))
-	}
-
-	if pV.Offset != 0 {
-		params.Set("sysparm_offset", fmt.Sprintf("%d", pV.Offset))
-	}
-}
-
-type FilterVars struct {
-	Fields []string
-	Query  string
-}
-
-func (fV *FilterVars) setup(params *url.Values) {
-	if len(fV.Fields) != 0 {
-		params.Set("sysparm_fields", strings.Join(fV.Fields, ","))
-	}
-
-	if fV.Query != "" {
-		params.Set("sysparm_query", fV.Query)
-	}
-}
-
-func prepareUserFilters() *FilterVars {
-	return &FilterVars{
-		Fields: []string{
-			"sys_id", "name", "roles", "user_name", "email", "first_name", "last_name", "active",
-		},
-	}
-}
-
-func prepareRoleFilters() *FilterVars {
-	return &FilterVars{
-		Fields: []string{
-			"sys_id", "grantable", "name",
-		},
-	}
-}
-
-func prepareGroupFilters() *FilterVars {
-	return &FilterVars{
-		Fields: []string{
-			"sys_id", "description", "name",
-		},
-	}
-}
-
-func prepareGroupMemberFilter(groupId string) *FilterVars {
-	return &FilterVars{
-		Fields: []string{
-			"user", "group",
-		},
-		Query: fmt.Sprintf("group=%s", groupId),
+func NewClient(httpClient *http.Client, auth string, deployment string) *Client {
+	return &Client{
+		httpClient: httpClient,
+		auth:       auth,
+		deployment: deployment,
 	}
 }
 
@@ -236,6 +177,88 @@ func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([
 	}
 
 	return rolesResponse.Result, nil
+}
+
+func (c *Client) GetUsersToRole(ctx context.Context, roleId string, paginationVars PaginationVars) ([]UserToRole, error) {
+	var userToRoleResponse UserToRoleResponse
+
+	err := c.doRequest(
+		ctx,
+		fmt.Sprintf(UserRolesBaseUrl, c.deployment),
+		&userToRoleResponse,
+		[]QueryParam{
+			&paginationVars,
+			prepareRoleUsersFilter(roleId),
+		}...,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return userToRoleResponse.Result, nil
+}
+
+func (c *Client) GetGroupsToRole(ctx context.Context, roleId string, paginationVars PaginationVars) ([]GroupToRole, error) {
+	var groupToRoleResponse GroupToRoleResponse
+
+	err := c.doRequest(
+		ctx,
+		fmt.Sprintf(GroupRolesBaseUrl, c.deployment),
+		&groupToRoleResponse,
+		[]QueryParam{
+			&paginationVars,
+			prepareRoleGroupsFilter(roleId),
+		}...,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return groupToRoleResponse.Result, nil
+}
+
+func (c *Client) GetUserRoles(ctx context.Context, userId string) (*UserRoles, error) {
+	var userRolesResponse UserRolesResponse
+
+	err := c.doRequest(
+		ctx,
+		fmt.Sprintf(UserRoleInheritanceBaseUrl, c.deployment),
+		&userRolesResponse,
+		[]QueryParam{
+			&FilterVars{
+				UserId: userId,
+			},
+		}...,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	userRoles := UserRoles{
+		FromRole:  []string{},
+		FromGroup: []string{},
+		UserName:  userRolesResponse.Result.UserName,
+	}
+
+	// verbose flag in later for this
+	for _, role := range userRolesResponse.Result.FromRole {
+		after, _ := strings.CutPrefix(role, "/")
+		if strings.Count(after, "/") == 0 {
+			userRoles.FromRole = append(userRoles.FromRole, role)
+		}
+	}
+
+	for _, role := range userRolesResponse.Result.FromGroup {
+		after, _ := strings.CutPrefix(role, "/")
+		if strings.Count(after, "/") == 0 {
+			userRoles.FromGroup = append(userRoles.FromGroup, role)
+		}
+	}
+
+	return &userRoles, nil
 }
 
 func (c *Client) doRequest(
