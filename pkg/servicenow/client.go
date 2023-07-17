@@ -162,6 +162,8 @@ func (c *Client) GetGroupMembers(ctx context.Context, groupId string, pagination
 func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([]Role, error) {
 	var rolesResponse RolesResponse
 
+	paginationVars.Limit++
+
 	err := c.doRequest(
 		ctx,
 		fmt.Sprintf(RolesBaseUrl, c.deployment),
