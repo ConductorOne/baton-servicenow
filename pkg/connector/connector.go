@@ -61,32 +61,32 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 		Limit: 1,
 	}
 
-	_, err := s.client.GetUsers(ctx, pagination)
+	_, _, err := s.client.GetUsers(ctx, pagination)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list users: %w", err)
 	}
 
-	roles, err := s.client.GetRoles(ctx, pagination)
+	roles, _, err := s.client.GetRoles(ctx, pagination)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list roles: %w", err)
 	}
 
-	groups, err := s.client.GetGroups(ctx, pagination)
+	groups, _, err := s.client.GetGroups(ctx, pagination)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list groups: %w", err)
 	}
 
-	_, err = s.client.GetUserToGroup(ctx, "", groups[0].Id, pagination)
+	_, _, err = s.client.GetUserToGroup(ctx, "", groups[0].Id, pagination)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list group members: %w", err)
 	}
 
-	_, err = s.client.GetUserToRole(ctx, "", roles[0].Id, pagination)
+	_, _, err = s.client.GetUserToRole(ctx, "", roles[0].Id, pagination)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list users to roles: %w", err)
 	}
 
-	_, err = s.client.GetGroupToRole(ctx, "", groups[0].Id, pagination)
+	_, _, err = s.client.GetGroupToRole(ctx, "", groups[0].Id, pagination)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list groups to roles: %w", err)
 	}

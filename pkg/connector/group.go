@@ -58,7 +58,7 @@ func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagi
 		return nil, "", nil, err
 	}
 
-	groups, err := g.client.GetGroups(
+	groups, total, err := g.client.GetGroups(
 		ctx,
 		servicenow.PaginationVars{
 			Limit:  ResourcesPageSize,
@@ -67,10 +67,6 @@ func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagi
 	)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list groups: %w", err)
-	}
-
-	if len(groups) == 0 {
-		return nil, "", nil, nil
 	}
 
 	nextPage, err := handleNextPage(bag, offset+ResourcesPageSize)
@@ -90,7 +86,7 @@ func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagi
 		rv = append(rv, rr)
 	}
 
-	if len(groups) < ResourcesPageSize {
+	if (offset + len(groups)) == total {
 		return rv, "", nil, nil
 	}
 
@@ -121,7 +117,7 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 		return nil, "", nil, err
 	}
 
-	groupMembers, err := g.client.GetUserToGroup(
+	groupMembers, total, err := g.client.GetUserToGroup(
 		ctx,
 		"", // all users
 		resource.Id.Resource,
@@ -132,10 +128,6 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 	)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list groupMembers: %w", err)
-	}
-
-	if len(groupMembers) == 0 {
-		return nil, "", nil, nil
 	}
 
 	nextPage, err := handleNextPage(bag, offset+ResourcesPageSize)
@@ -170,7 +162,7 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 		)
 	}
 
-	if len(groupMembers) < ResourcesPageSize {
+	if (offset + len(groupMembers)) == total {
 		return rv, "", nil, nil
 	}
 
@@ -195,7 +187,7 @@ func (r *groupResourceType) Grant(ctx context.Context, principal *v2.Resource, e
 		return nil, err
 	}
 
-	groupMembers, err := r.client.GetUserToGroup(
+	groupMembers, _, err := r.client.GetUserToGroup(
 		ctx,
 		principal.Id.Resource,
 		resourceId,
@@ -250,7 +242,7 @@ func (r *groupResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annota
 		return nil, err
 	}
 
-	groupMembers, err := r.client.GetUserToGroup(
+	groupMembers, _, err := r.client.GetUserToGroup(
 		ctx,
 		principal.Id.Resource,
 		entitlementId,

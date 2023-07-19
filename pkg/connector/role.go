@@ -57,7 +57,7 @@ func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		return nil, "", nil, err
 	}
 
-	roles, err := r.client.GetRoles(
+	roles, total, err := r.client.GetRoles(
 		ctx,
 		servicenow.PaginationVars{
 			Limit:  ResourcesPageSize,
@@ -66,10 +66,6 @@ func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 	)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list roles: %w", err)
-	}
-
-	if len(roles) == 0 {
-		return nil, "", nil, nil
 	}
 
 	nextPage, err := handleNextPage(bag, offset+ResourcesPageSize)
@@ -89,7 +85,7 @@ func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		rv = append(rv, rr)
 	}
 
-	if len(roles) < ResourcesPageSize {
+	if (offset + len(roles)) == total {
 		return rv, "", nil, nil
 	}
 
@@ -132,7 +128,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 		})
 
 	case resourceTypeUser.Id:
-		usersToRoles, err := r.client.GetUserToRole(
+		usersToRoles, total, err := r.client.GetUserToRole(
 			ctx,
 			"", // all users
 			resource.Id.Resource,
@@ -143,10 +139,6 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 		)
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list users under role %s: %w", resource.Id.Resource, err)
-		}
-
-		if len(usersToRoles) == 0 {
-			return handleRoleGrantsPagination(rv, bag)
 		}
 
 		// for each user, create a grant
@@ -172,7 +164,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			)
 		}
 
-		if len(usersToRoles) < ResourcesPageSize {
+		if (offset + len(usersToRoles)) == total {
 			bag.Pop()
 
 			return handleRoleGrantsPagination(rv, bag)
@@ -184,7 +176,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 		}
 
 	case resourceTypeGroup.Id:
-		groupsToRoles, err := r.client.GetGroupToRole(
+		groupsToRoles, total, err := r.client.GetGroupToRole(
 			ctx,
 			"", // all groups
 			resource.Id.Resource,
@@ -195,10 +187,6 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 		)
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list groups under role %s: %w", resource.Id.Resource, err)
-		}
-
-		if len(groupsToRoles) == 0 {
-			return handleRoleGrantsPagination(rv, bag)
 		}
 
 		// for each group, create a grant
@@ -224,7 +212,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			)
 		}
 
-		if len(groupsToRoles) < ResourcesPageSize {
+		if (offset + len(groupsToRoles)) == total {
 			bag.Pop()
 
 			return handleRoleGrantsPagination(rv, bag)
@@ -248,7 +236,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 }
 
 func (r *roleResourceType) GrantToUser(ctx context.Context, l *zap.Logger, principal string, entitlementId string) (annotations.Annotations, error) {
-	userRoles, err := r.client.GetUserToRole(
+	userRoles, _, err := r.client.GetUserToRole(
 		ctx,
 		principal,
 		entitlementId,
@@ -286,7 +274,7 @@ func (r *roleResourceType) GrantToUser(ctx context.Context, l *zap.Logger, princ
 }
 
 func (r *roleResourceType) GrantToGroup(ctx context.Context, l *zap.Logger, principal string, entitlementId string) (annotations.Annotations, error) {
-	groupRoles, err := r.client.GetGroupToRole(
+	groupRoles, _, err := r.client.GetGroupToRole(
 		ctx,
 		principal,
 		entitlementId,
@@ -357,7 +345,7 @@ func (r *roleResourceType) Grant(ctx context.Context, principal *v2.Resource, en
 
 func (r *roleResourceType) RevokeFromUser(ctx context.Context, l *zap.Logger, principal *v2.Resource, entitlementId string) (annotations.Annotations, error) {
 	// check if role is present
-	userRoles, err := r.client.GetUserToRole(
+	userRoles, _, err := r.client.GetUserToRole(
 		ctx,
 		principal.Id.Resource,
 		entitlementId,
@@ -395,7 +383,7 @@ func (r *roleResourceType) RevokeFromUser(ctx context.Context, l *zap.Logger, pr
 
 func (r *roleResourceType) RevokeFromGroup(ctx context.Context, l *zap.Logger, principal *v2.Resource, entitlementId string) (annotations.Annotations, error) {
 	// check if role is present
-	groupRoles, err := r.client.GetGroupToRole(
+	groupRoles, _, err := r.client.GetGroupToRole(
 		ctx,
 		principal.Id.Resource,
 		entitlementId,

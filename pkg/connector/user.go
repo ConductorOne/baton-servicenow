@@ -56,7 +56,7 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		return nil, "", nil, err
 	}
 
-	users, err := u.client.GetUsers(
+	users, total, err := u.client.GetUsers(
 		ctx,
 		servicenow.PaginationVars{
 			Limit:  ResourcesPageSize,
@@ -65,10 +65,6 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 	)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list users: %w", err)
-	}
-
-	if len(users) == 0 {
-		return nil, "", nil, nil
 	}
 
 	nextPage, err := handleNextPage(bag, offset+ResourcesPageSize)
@@ -88,7 +84,7 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		rv = append(rv, ur)
 	}
 
-	if len(users) < ResourcesPageSize {
+	if (offset + len(users)) == total {
 		return rv, "", nil, nil
 	}
 

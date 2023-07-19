@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -67,10 +68,10 @@ func NewClient(httpClient *http.Client, auth string, deployment string) *Client 
 }
 
 // Table `sys_user` (Users).
-func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars) ([]User, error) {
+func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars) ([]User, int, error) {
 	var usersResponse UsersResponse
 
-	err := c.get(
+	total, err := c.get(
 		ctx,
 		fmt.Sprintf(UsersBaseUrl, c.deployment),
 		&usersResponse,
@@ -81,16 +82,16 @@ func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars) ([
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, total, err
 	}
 
-	return usersResponse.Result, nil
+	return usersResponse.Result, total, nil
 }
 
 func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 	var userResponse UserResponse
 
-	err := c.get(
+	_, err := c.get(
 		ctx,
 		fmt.Sprintf(UserBaseUrl, c.deployment, userId),
 		&userResponse,
@@ -107,10 +108,10 @@ func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 }
 
 // Table `sys_user_group` (Groups).
-func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars) ([]Group, error) {
+func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars) ([]Group, int, error) {
 	var groupsResponse GroupsResponse
 
-	err := c.get(
+	total, err := c.get(
 		ctx,
 		fmt.Sprintf(GroupsBaseUrl, c.deployment),
 		&groupsResponse,
@@ -121,16 +122,16 @@ func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars) (
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, total, err
 	}
 
-	return groupsResponse.Result, nil
+	return groupsResponse.Result, total, nil
 }
 
 func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
 	var groupResponse GroupResponse
 
-	err := c.get(
+	_, err := c.get(
 		ctx,
 		fmt.Sprintf(GroupBaseUrl, c.deployment, groupId),
 		&groupResponse,
@@ -147,10 +148,10 @@ func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
 }
 
 // Table `sys_user_grmember` (Group Members).
-func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId string, paginationVars PaginationVars) ([]GroupMember, error) {
+func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId string, paginationVars PaginationVars) ([]GroupMember, int, error) {
 	var groupMembersResponse GroupMembersResponse
 
-	err := c.get(
+	total, err := c.get(
 		ctx,
 		fmt.Sprintf(GroupMembersBaseUrl, c.deployment),
 		&groupMembersResponse,
@@ -161,10 +162,10 @@ func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId stri
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, total, err
 	}
 
-	return groupMembersResponse.Result, nil
+	return groupMembersResponse.Result, total, nil
 }
 
 func (c *Client) AddUserToGroup(ctx context.Context, record GroupMemberPayload) error {
@@ -185,12 +186,12 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, id string) error {
 }
 
 // Table `sys_user_role` (Roles).
-func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([]Role, error) {
+func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([]Role, int, error) {
 	var rolesResponse RolesResponse
 
 	paginationVars.Limit++
 
-	err := c.get(
+	total, err := c.get(
 		ctx,
 		fmt.Sprintf(RolesBaseUrl, c.deployment),
 		&rolesResponse,
@@ -201,17 +202,17 @@ func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, total, err
 	}
 
-	return rolesResponse.Result, nil
+	return rolesResponse.Result, total, nil
 }
 
 // Table `sys_user_has_role` (User to Role).
-func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string, paginationVars PaginationVars) ([]UserToRole, error) {
+func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string, paginationVars PaginationVars) ([]UserToRole, int, error) {
 	var userToRoleResponse UserToRoleResponse
 
-	err := c.get(
+	total, err := c.get(
 		ctx,
 		fmt.Sprintf(UserRolesBaseUrl, c.deployment),
 		&userToRoleResponse,
@@ -222,10 +223,10 @@ func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, total, err
 	}
 
-	return userToRoleResponse.Result, nil
+	return userToRoleResponse.Result, total, nil
 }
 
 func (c *Client) GrantRoleToUser(ctx context.Context, record UserToRolePayload) error {
@@ -247,10 +248,10 @@ func (c *Client) RevokeRoleFromUser(ctx context.Context, id string) error {
 }
 
 // Table `sys_group_has_role` (Group to Role).
-func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId string, paginationVars PaginationVars) ([]GroupToRole, error) {
+func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId string, paginationVars PaginationVars) ([]GroupToRole, int, error) {
 	var groupToRoleResponse GroupToRoleResponse
 
-	err := c.get(
+	total, err := c.get(
 		ctx,
 		fmt.Sprintf(GroupRolesBaseUrl, c.deployment),
 		&groupToRoleResponse,
@@ -261,10 +262,10 @@ func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId stri
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, total, err
 	}
 
-	return groupToRoleResponse.Result, nil
+	return groupToRoleResponse.Result, total, nil
 }
 
 func (c *Client) GrantRoleToGroup(ctx context.Context, record GroupToRolePayload) error {
@@ -287,10 +288,10 @@ func (c *Client) RevokeRoleFromGroup(ctx context.Context, id string) error {
 
 // User Role Inheritance API containing roles attached to a user
 // TODO: decide to remove this or not
-func (c *Client) GetUserRoles(ctx context.Context, userId string) (*UserRoles, error) {
+func (c *Client) GetUserRoles(ctx context.Context, userId string) (*UserRoles, int, error) {
 	var userRolesResponse UserRolesResponse
 
-	err := c.get(
+	total, err := c.get(
 		ctx,
 		fmt.Sprintf(UserRoleInheritanceBaseUrl, c.deployment),
 		&userRolesResponse,
@@ -302,7 +303,7 @@ func (c *Client) GetUserRoles(ctx context.Context, userId string) (*UserRoles, e
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, total, err
 	}
 
 	userRoles := UserRoles{
@@ -326,7 +327,7 @@ func (c *Client) GetUserRoles(ctx context.Context, userId string) (*UserRoles, e
 		}
 	}
 
-	return &userRoles, nil
+	return &userRoles, total, nil
 }
 
 func (c *Client) get(
@@ -334,7 +335,7 @@ func (c *Client) get(
 	urlAddress string,
 	resourceResponse interface{},
 	paramOptions ...QueryParam,
-) error {
+) (int, error) {
 	return c.doRequest(
 		ctx,
 		urlAddress,
@@ -353,7 +354,7 @@ func (c *Client) post(
 	data interface{},
 	paramOptions ...QueryParam,
 ) error {
-	return c.doRequest(
+	_, err := c.doRequest(
 		ctx,
 		urlAddress,
 		http.MethodPost,
@@ -361,6 +362,8 @@ func (c *Client) post(
 		&resourceResponse,
 		paramOptions...,
 	)
+
+	return err
 }
 
 // TODO: implement `X-no-response-body` header to avoid parsing the response body
@@ -370,7 +373,7 @@ func (c *Client) delete(
 	resourceResponse interface{},
 	paramOptions ...QueryParam,
 ) error {
-	return c.doRequest(
+	_, err := c.doRequest(
 		ctx,
 		urlAddress,
 		http.MethodDelete,
@@ -378,6 +381,8 @@ func (c *Client) delete(
 		&resourceResponse,
 		paramOptions...,
 	)
+
+	return err
 }
 
 // TODO: implement annotations for X-Total-Count header
@@ -388,13 +393,13 @@ func (c *Client) doRequest(
 	data interface{},
 	resourceResponse interface{},
 	paramOptions ...QueryParam,
-) error {
+) (int, error) {
 	var body io.Reader
 
 	if data != nil {
 		jsonBody, err := json.Marshal(data)
 		if err != nil {
-			return err
+			return 0, err
 		}
 
 		body = bytes.NewBuffer(jsonBody)
@@ -402,7 +407,7 @@ func (c *Client) doRequest(
 
 	req, err := http.NewRequestWithContext(ctx, method, urlAddress, body)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	queryParams := url.Values{}
@@ -418,18 +423,29 @@ func (c *Client) doRequest(
 
 	rawResponse, err := c.httpClient.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	defer rawResponse.Body.Close()
 
 	if rawResponse.StatusCode >= 300 {
-		return status.Error(codes.Code(rawResponse.StatusCode), "Request failed")
+		return 0, status.Error(codes.Code(rawResponse.StatusCode), "Request failed")
 	}
 
 	if err := json.NewDecoder(rawResponse.Body).Decode(&resourceResponse); err != nil {
-		return err
+		return 0, err
 	}
 
-	return nil
+	// extract header X-Total-Count and return it
+	xTotalCount := rawResponse.Header.Get("X-Total-Count")
+	if xTotalCount != "" {
+		total, err := strconv.Atoi(xTotalCount)
+		if err != nil {
+			return 0, err
+		}
+
+		return total, nil
+	}
+
+	return 0, nil
 }
