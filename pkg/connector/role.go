@@ -68,7 +68,7 @@ func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list roles: %w", err)
 	}
 
-	nextPage, err := handleNextPage(bag, offset+ResourcesPageSize)
+	nextPage, err := handleNextPage(bag, offset+ResourcesPageSize+1)
 	if err != nil {
 		return nil, "", nil, err
 	}

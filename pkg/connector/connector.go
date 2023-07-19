@@ -52,7 +52,7 @@ func (s *ServiceNow) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 func (s *ServiceNow) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error) {
 	return &v2.ConnectorMetadata{
 		DisplayName: "ServiceNow",
-		Description: "Connector syncing ServiceNow Users their roles and groupsto Baton.",
+		Description: "Connector syncing ServiceNow users, their roles and groups to Baton.",
 	}, nil
 }
 
