@@ -76,17 +76,17 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list groups: %w", err)
 	}
 
-	_, err = s.client.GetGroupMembers(ctx, groups[0].Id, pagination)
+	_, err = s.client.GetUserToGroup(ctx, "", groups[0].Id, pagination)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list group members: %w", err)
 	}
 
-	_, err = s.client.GetUsersToRole(ctx, roles[0].Id, pagination)
+	_, err = s.client.GetUserToRole(ctx, "", roles[0].Id, pagination)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list users to roles: %w", err)
 	}
 
-	_, err = s.client.GetGroupsToRole(ctx, groups[0].Id, pagination)
+	_, err = s.client.GetGroupToRole(ctx, "", groups[0].Id, pagination)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list groups to roles: %w", err)
 	}

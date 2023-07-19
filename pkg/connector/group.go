@@ -11,6 +11,8 @@ import (
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 )
 
 type groupResourceType struct {
@@ -119,8 +121,9 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 		return nil, "", nil, err
 	}
 
-	groupMembers, err := g.client.GetGroupMembers(
+	groupMembers, err := g.client.GetUserToGroup(
 		ctx,
+		"", // all users
 		resource.Id.Resource,
 		servicenow.PaginationVars{
 			Limit:  ResourcesPageSize,
@@ -172,6 +175,116 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 	}
 
 	return rv, nextPage, nil, nil
+}
+
+func (r *groupResourceType) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
+	if principal.Id.ResourceType != resourceTypeUser.Id {
+		l.Warn(
+			"baton-servicenow: only users can have group membership granted",
+			zap.String("principal_type", principal.Id.ResourceType),
+			zap.String("principal_id", principal.Id.Resource),
+		)
+
+		return nil, nil
+	}
+
+	resourceId, err := extractResourceId(entitlement.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	groupMembers, err := r.client.GetUserToGroup(
+		ctx,
+		principal.Id.Resource,
+		resourceId,
+		servicenow.PaginationVars{Limit: 1},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("servicenow-connector: failed to get group members for %s: %w", entitlement.Id, err)
+	}
+
+	// check if user is already a member of the group
+	if len(groupMembers) > 0 {
+		l.Warn(
+			"baton-servicenow: cannot add user who already is a member of the group",
+			zap.String("group", entitlement.Id),
+			zap.String("user", principal.Id.Resource),
+		)
+
+		return nil, fmt.Errorf("servicenow-connector: cannot add user who already is a member of the group")
+	}
+
+	// grant group membership to the user
+	err = r.client.AddUserToGroup(
+		ctx,
+		servicenow.GroupMemberPayload{
+			User:  principal.Id.Resource,
+			Group: resourceId,
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("servicenow-connector: failed to add user %s to group %s: %w", principal.Id.Resource, resourceId, err)
+	}
+
+	return nil, nil
+}
+
+func (r *groupResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
+	entitlement := grant.Entitlement
+	principal := grant.Principal
+
+	if principal.Id.ResourceType != resourceTypeUser.Id {
+		l.Warn(
+			"baton-servicenow: only users can have group membership revoked",
+			zap.String("principal_type", principal.Id.ResourceType),
+			zap.String("principal_id", principal.Id.Resource),
+		)
+	}
+
+	entitlementId, err := extractResourceId(entitlement.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	groupMembers, err := r.client.GetUserToGroup(
+		ctx,
+		principal.Id.Resource,
+		entitlementId,
+		servicenow.PaginationVars{Limit: 1},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("servicenow-connector: failed to get user roles for %s: %w", grant.Principal.Id.Resource, err)
+	}
+
+	// check if group is empty
+	if len(groupMembers) == 0 {
+		l.Warn(
+			"baton-servicenow: cannot remove user from group they are not a member of",
+			zap.String("group", entitlement.Id),
+			zap.String("user", principal.Id.Resource),
+		)
+
+		return nil, fmt.Errorf("servicenow-connector: cannot remove user from group they are not a member of")
+	}
+
+	// revoke all group memberships from the user
+	for _, grpMember := range groupMembers {
+		err = r.client.RemoveUserFromGroup(
+			ctx,
+			grpMember.Id,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("servicenow-connector: failed to remove user %s from group: %w", grant.Principal.Id.Resource, err)
+		}
+
+		l.Debug("revoked role from user", zap.String("role", grant.Entitlement.Id))
+	}
+
+	return nil, nil
 }
 
 func groupBuilder(client *servicenow.Client) *groupResourceType {

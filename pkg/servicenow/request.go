@@ -70,29 +70,69 @@ func prepareGroupFilters() *FilterVars {
 	}
 }
 
-func prepareGroupMemberFilter(groupId string) *FilterVars {
+func prepareUserToGroupFilter(userId string, groupId string) *FilterVars {
+	var query string
+
+	if userId != "" {
+		query = fmt.Sprintf("user=%s", userId)
+	}
+
+	if groupId != "" {
+		if query != "" {
+			query = fmt.Sprintf("%s^group=%s", query, groupId)
+		} else {
+			query = fmt.Sprintf("group=%s", groupId)
+		}
+	}
+
 	return &FilterVars{
 		Fields: []string{
-			"user", "group",
+			"sys_id", "user", "group",
 		},
-		Query: fmt.Sprintf("group=%s", groupId),
+		Query: query,
 	}
 }
 
-func prepareRoleUsersFilter(roleId string) *FilterVars {
+func prepareUserToRoleFilter(userId string, roleId string) *FilterVars {
+	var query string
+	if userId != "" {
+		query = fmt.Sprintf("user=%s", userId)
+	}
+
+	if roleId != "" {
+		if query != "" {
+			query = fmt.Sprintf("%s^role=%s", query, roleId)
+		} else {
+			query = fmt.Sprintf("role=%s", roleId)
+		}
+	}
+
 	return &FilterVars{
 		Fields: []string{
-			"role", "user", "inherited",
+			"sys_id", "user", "role", "inherited",
 		},
-		Query: fmt.Sprintf("role=%s^inherited=false", roleId),
+		Query: query,
 	}
 }
 
-func prepareRoleGroupsFilter(roleId string) *FilterVars {
+func prepareGroupToRoleFilter(groupId string, roleId string) *FilterVars {
+	var query string
+	if groupId != "" {
+		query = fmt.Sprintf("group=%s", groupId)
+	}
+
+	if roleId != "" {
+		if query != "" {
+			query = fmt.Sprintf("%s^role=%s", query, roleId)
+		} else {
+			query = fmt.Sprintf("role=%s", roleId)
+		}
+	}
+
 	return &FilterVars{
 		Fields: []string{
-			"role", "group", "inherits",
+			"sys_id", "role", "group", "inherits",
 		},
-		Query: fmt.Sprintf("role=%s^inherits=true", roleId),
+		Query: query,
 	}
 }

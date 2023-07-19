@@ -26,33 +26,43 @@ type Group struct {
 	Roles       string `json:"roles"`
 }
 
+type RecordValue struct {
+	Value string `json:"value"`
+}
+
 type GroupMember struct {
-	User struct {
-		Value string `json:"value"`
-	} `json:"user"`
-	Group struct {
-		Value string `json:"value"`
-	} `json:"group"`
+	BaseResource
+	User  RecordValue `json:"user"`
+	Group RecordValue `json:"group"`
+}
+
+type GroupMemberPayload struct {
+	User  string `json:"user"`
+	Group string `json:"group"`
 }
 
 type UserToRole struct {
-	Inherited string `json:"inherited"`
-	User      struct {
-		Value string `json:"value"`
-	} `json:"user"`
-	Role struct {
-		Value string `json:"value"`
-	} `json:"role"`
+	BaseResource
+	Inherited string      `json:"inherited"`
+	User      RecordValue `json:"user"`
+	Role      RecordValue `json:"role"`
+}
+
+type UserToRolePayload struct {
+	User string `json:"user"`
+	Role string `json:"role"`
 }
 
 type GroupToRole struct {
-	Inherits string `json:"inherits"`
-	Group    struct {
-		Value string `json:"value"`
-	} `json:"group"`
-	Role struct {
-		Value string `json:"value"`
-	} `json:"role"`
+	BaseResource
+	Inherits string      `json:"inherits"`
+	Group    RecordValue `json:"group"`
+	Role     RecordValue `json:"role"`
+}
+
+type GroupToRolePayload struct {
+	Group string `json:"group"`
+	Role  string `json:"role"`
 }
 
 type UserRoles struct {
