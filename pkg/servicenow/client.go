@@ -257,7 +257,6 @@ func (c *Client) RevokeRoleFromUser(ctx context.Context, id string) error {
 		ctx,
 		fmt.Sprintf(UserRoleDetailBaseUrl, c.deployment, id),
 		nil,
-		nil,
 	)
 }
 
@@ -295,7 +294,6 @@ func (c *Client) RevokeRoleFromGroup(ctx context.Context, id string) error {
 	return c.delete(
 		ctx,
 		fmt.Sprintf(GroupRoleDetailBaseUrl, c.deployment, id),
-		nil,
 		nil,
 	)
 }
@@ -446,8 +444,10 @@ func (c *Client) doRequest(
 		return 0, status.Error(codes.Code(rawResponse.StatusCode), "Request failed")
 	}
 
-	if err := json.NewDecoder(rawResponse.Body).Decode(&resourceResponse); err != nil {
-		return 0, err
+	if method != http.MethodDelete {
+		if err := json.NewDecoder(rawResponse.Body).Decode(&resourceResponse); err != nil {
+			return 0, err
+		}
 	}
 
 	// extract header X-Total-Count and return it
