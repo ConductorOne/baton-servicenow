@@ -61,7 +61,7 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 		Limit: 1,
 	}
 
-	_, _, err := s.client.GetUsers(ctx, pagination)
+	_, _, err := s.client.GetUsers(ctx, pagination, nil)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list users: %w", err)
 	}
@@ -71,7 +71,7 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list roles: %w", err)
 	}
 
-	groups, _, err := s.client.GetGroups(ctx, pagination)
+	groups, _, err := s.client.GetGroups(ctx, pagination, nil)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list groups: %w", err)
 	}

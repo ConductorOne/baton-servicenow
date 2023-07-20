@@ -141,15 +141,26 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list users under role %s: %w", resource.Id.Resource, err)
 		}
 
-		// for each user, create a grant
-		for _, userToRole := range usersToRoles {
-			user, err := r.client.GetUser(ctx, userToRole.User.Value)
-			if err != nil {
-				return nil, "", nil, fmt.Errorf("servicenow-connector: failed to get user %s: %w", userToRole.User.Value, err)
-			}
+		if len(usersToRoles) == 0 {
+			return handleRoleGrantsPagination(rv, bag)
+		}
 
+		userIds := prepareIds(mapUsers(usersToRoles))
+		targetUsers, _, err := r.client.GetUsers(
+			ctx,
+			servicenow.PaginationVars{
+				Limit: len(userIds),
+			},
+			userIds,
+		)
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list users under role %s: %w", resource.Id.Resource, err)
+		}
+
+		// for each user, create a grant
+		for _, user := range targetUsers {
 			userCopy := user
-			ur, err := userResource(ctx, userCopy)
+			ur, err := userResource(ctx, &userCopy)
 			if err != nil {
 				return nil, "", nil, err
 			}
@@ -165,8 +176,6 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 		}
 
 		if (offset + len(usersToRoles)) == total {
-			bag.Pop()
-
 			return handleRoleGrantsPagination(rv, bag)
 		}
 
@@ -189,15 +198,26 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list groups under role %s: %w", resource.Id.Resource, err)
 		}
 
-		// for each group, create a grant
-		for _, groupToRole := range groupsToRoles {
-			group, err := r.client.GetGroup(ctx, groupToRole.Group.Value)
-			if err != nil {
-				return nil, "", nil, fmt.Errorf("servicenow-connector: failed to get group %s: %w", groupToRole.Group.Value, err)
-			}
+		if len(groupsToRoles) == 0 {
+			return handleRoleGrantsPagination(rv, bag)
+		}
 
+		groupIds := prepareIds(mapGroups(groupsToRoles))
+		targetGroups, _, err := r.client.GetGroups(
+			ctx,
+			servicenow.PaginationVars{
+				Limit: len(groupIds),
+			},
+			groupIds,
+		)
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list users under role %s: %w", resource.Id.Resource, err)
+		}
+
+		// for each group, create a grant
+		for _, group := range targetGroups {
 			groupCopy := group
-			gr, err := groupResource(ctx, groupCopy)
+			gr, err := groupResource(ctx, &groupCopy)
 			if err != nil {
 				return nil, "", nil, err
 			}
@@ -213,8 +233,6 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 		}
 
 		if (offset + len(groupsToRoles)) == total {
-			bag.Pop()
-
 			return handleRoleGrantsPagination(rv, bag)
 		}
 

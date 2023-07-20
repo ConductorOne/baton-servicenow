@@ -68,17 +68,24 @@ func NewClient(httpClient *http.Client, auth string, deployment string) *Client 
 }
 
 // Table `sys_user` (Users).
-func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars) ([]User, int, error) {
+func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, userIds []string) ([]User, int, error) {
 	var usersResponse UsersResponse
+
+	queryParams := []QueryParam{
+		&paginationVars,
+	}
+
+	if userIds != nil {
+		queryParams = append(queryParams, prepareUsersFilters(userIds))
+	} else {
+		queryParams = append(queryParams, prepareUserFilters())
+	}
 
 	total, err := c.get(
 		ctx,
 		fmt.Sprintf(UsersBaseUrl, c.deployment),
 		&usersResponse,
-		[]QueryParam{
-			&paginationVars,
-			prepareUserFilters(),
-		}...,
+		queryParams...,
 	)
 
 	if err != nil {
@@ -108,17 +115,24 @@ func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 }
 
 // Table `sys_user_group` (Groups).
-func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars) ([]Group, int, error) {
+func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars, groupIds []string) ([]Group, int, error) {
 	var groupsResponse GroupsResponse
+
+	queryParams := []QueryParam{
+		&paginationVars,
+	}
+
+	if groupIds != nil {
+		queryParams = append(queryParams, prepareGroupsFilters(groupIds))
+	} else {
+		queryParams = append(queryParams, prepareGroupFilters())
+	}
 
 	total, err := c.get(
 		ctx,
 		fmt.Sprintf(GroupsBaseUrl, c.deployment),
 		&groupsResponse,
-		[]QueryParam{
-			&paginationVars,
-			prepareGroupFilters(),
-		}...,
+		queryParams...,
 	)
 
 	if err != nil {

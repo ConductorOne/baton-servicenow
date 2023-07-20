@@ -6,6 +6,12 @@ import (
 	"strings"
 )
 
+var (
+	UserFields  = []string{"sys_id", "name", "roles", "user_name", "email", "first_name", "last_name", "active"}
+	RoleFields  = []string{"sys_id", "grantable", "name"}
+	GroupFields = []string{"sys_id", "description", "name"}
+)
+
 type QueryParam interface {
 	setup(params *url.Values)
 }
@@ -47,26 +53,34 @@ func (fV *FilterVars) setup(params *url.Values) {
 
 func prepareUserFilters() *FilterVars {
 	return &FilterVars{
-		Fields: []string{
-			"sys_id", "name", "roles", "user_name", "email", "first_name", "last_name", "active",
-		},
+		Fields: UserFields,
+	}
+}
+
+func prepareUsersFilters(ids []string) *FilterVars {
+	return &FilterVars{
+		Fields: UserFields,
+		Query:  strings.Join(ids, "^OR"),
 	}
 }
 
 func prepareRoleFilters() *FilterVars {
 	return &FilterVars{
-		Fields: []string{
-			"sys_id", "grantable", "name",
-		},
-		Query: "grantable=true",
+		Fields: RoleFields,
+		Query:  "grantable=true",
 	}
 }
 
 func prepareGroupFilters() *FilterVars {
 	return &FilterVars{
-		Fields: []string{
-			"sys_id", "description", "name",
-		},
+		Fields: GroupFields,
+	}
+}
+
+func prepareGroupsFilters(ids []string) *FilterVars {
+	return &FilterVars{
+		Fields: GroupFields,
+		Query:  strings.Join(ids, "^OR"),
 	}
 }
 

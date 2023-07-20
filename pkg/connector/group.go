@@ -64,6 +64,7 @@ func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagi
 			Limit:  ResourcesPageSize,
 			Offset: offset,
 		},
+		nil,
 	)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list groups: %w", err)
@@ -130,23 +131,31 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list groupMembers: %w", err)
 	}
 
+	if len(groupMembers) == 0 {
+		return nil, "", nil, nil
+	}
+
 	nextPage, err := handleNextPage(bag, offset+ResourcesPageSize)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
+	memberIds := prepareIds(mapGroupMembers(groupMembers))
+	targetMembers, _, err := g.client.GetUsers(
+		ctx,
+		servicenow.PaginationVars{
+			Limit: len(memberIds),
+		},
+		memberIds,
+	)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list members under group %s: %w", resource.Id.Resource, err)
+	}
+
 	var rv []*v2.Grant
-	for _, member := range groupMembers {
-		user, err := g.client.GetUser(ctx, member.User.Value)
-
-		// There could be unreachable users, but available in group members table
-		if err != nil {
-			continue
-		}
-
-		userCopy := user
-
-		ur, err := userResource(ctx, userCopy)
+	for _, member := range targetMembers {
+		memberCopy := member
+		ur, err := userResource(ctx, &memberCopy)
 		if err != nil {
 			return nil, "", nil, err
 		}

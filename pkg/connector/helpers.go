@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ConductorOne/baton-servicenow/pkg/servicenow"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -87,4 +88,44 @@ func extractResourceId(fullId string) (string, error) {
 	}
 
 	return idParts[1], nil
+}
+
+func mapUsers(resources []servicenow.UserToRole) []string {
+	users := make([]string, len(resources))
+
+	for i, r := range resources {
+		users[i] = r.User.Value
+	}
+
+	return users
+}
+
+func mapGroups(resources []servicenow.GroupToRole) []string {
+	groups := make([]string, len(resources))
+
+	for i, r := range resources {
+		groups[i] = r.Group.Value
+	}
+
+	return groups
+}
+
+func mapGroupMembers(resources []servicenow.GroupMember) []string {
+	members := make([]string, len(resources))
+
+	for i, r := range resources {
+		members[i] = r.User.Value
+	}
+
+	return members
+}
+
+func prepareIds(ids []string) []string {
+	var preparedIds []string
+
+	for _, id := range ids {
+		preparedIds = append(preparedIds, fmt.Sprintf("sys_id=%s", id))
+	}
+
+	return preparedIds
 }
