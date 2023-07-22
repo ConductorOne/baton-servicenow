@@ -26,14 +26,10 @@ type Group struct {
 	Roles       string `json:"roles"`
 }
 
-type RecordValue struct {
-	Value string `json:"value"`
-}
-
 type GroupMember struct {
 	BaseResource
-	User  RecordValue `json:"user"`
-	Group RecordValue `json:"group"`
+	User  string `json:"user"`
+	Group string `json:"group"`
 }
 
 type GroupMemberPayload struct {
@@ -43,9 +39,9 @@ type GroupMemberPayload struct {
 
 type UserToRole struct {
 	BaseResource
-	Inherited string      `json:"inherited"`
-	User      RecordValue `json:"user"`
-	Role      RecordValue `json:"role"`
+	Inherited string `json:"inherited"`
+	User      string `json:"user"`
+	Role      string `json:"role"`
 }
 
 type UserToRolePayload struct {
@@ -55,9 +51,9 @@ type UserToRolePayload struct {
 
 type GroupToRole struct {
 	BaseResource
-	Inherits string      `json:"inherits"`
-	Group    RecordValue `json:"group"`
-	Role     RecordValue `json:"role"`
+	Inherits string `json:"inherits"`
+	Group    string `json:"group"`
+	Role     string `json:"role"`
 }
 
 type GroupToRolePayload struct {

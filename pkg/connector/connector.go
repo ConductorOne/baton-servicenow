@@ -56,6 +56,7 @@ func (s *ServiceNow) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error
 	}, nil
 }
 
+// Validates that the user has read access to all relevant tables (more information in the readme).
 func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, error) {
 	pagination := servicenow.PaginationVars{
 		Limit: 1,
@@ -90,8 +91,6 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list groups to roles: %w", err)
 	}
-
-	// TODO: add warnings in case of granting/revoking permissions?
 
 	return nil, nil
 }

@@ -416,6 +416,10 @@ func (c *Client) doRequest(
 		queryParam.setup(&queryParams)
 	}
 
+	if method == http.MethodGet {
+		queryParams.Set("sysparm_exclude_reference_link", "true")
+	}
+
 	req.URL.RawQuery = queryParams.Encode()
 
 	req.Header.Set("Authorization", c.auth)

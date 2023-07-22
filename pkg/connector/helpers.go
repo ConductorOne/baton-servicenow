@@ -94,7 +94,7 @@ func mapUsers(resources []servicenow.UserToRole) []string {
 	users := make([]string, len(resources))
 
 	for i, r := range resources {
-		users[i] = r.User.Value
+		users[i] = r.User
 	}
 
 	return users
@@ -104,7 +104,7 @@ func mapGroups(resources []servicenow.GroupToRole) []string {
 	groups := make([]string, len(resources))
 
 	for i, r := range resources {
-		groups[i] = r.Group.Value
+		groups[i] = r.Group
 	}
 
 	return groups
@@ -114,7 +114,7 @@ func mapGroupMembers(resources []servicenow.GroupMember) []string {
 	members := make([]string, len(resources))
 
 	for i, r := range resources {
-		members[i] = r.User.Value
+		members[i] = r.User
 	}
 
 	return members
