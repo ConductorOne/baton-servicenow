@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -287,50 +286,6 @@ func (c *Client) RevokeRoleFromGroup(ctx context.Context, id string) error {
 	)
 }
 
-// User Role Inheritance API containing roles attached to a user
-// TODO: decide to remove this or not
-func (c *Client) GetUserRoles(ctx context.Context, userId string) (*UserRoles, int, error) {
-	var userRolesResponse UserRolesResponse
-
-	total, err := c.get(
-		ctx,
-		fmt.Sprintf(UserRoleInheritanceBaseUrl, c.deployment),
-		&userRolesResponse,
-		[]QueryParam{
-			&FilterVars{
-				UserId: userId,
-			},
-		}...,
-	)
-
-	if err != nil {
-		return nil, total, err
-	}
-
-	userRoles := UserRoles{
-		FromRole:  []string{},
-		FromGroup: []string{},
-		UserName:  userRolesResponse.Result.UserName,
-	}
-
-	// verbose flag in later for this
-	for _, role := range userRolesResponse.Result.FromRole {
-		after, _ := strings.CutPrefix(role, "/")
-		if strings.Count(after, "/") == 0 {
-			userRoles.FromRole = append(userRoles.FromRole, role)
-		}
-	}
-
-	for _, role := range userRolesResponse.Result.FromGroup {
-		after, _ := strings.CutPrefix(role, "/")
-		if strings.Count(after, "/") == 0 {
-			userRoles.FromGroup = append(userRoles.FromGroup, role)
-		}
-	}
-
-	return &userRoles, total, nil
-}
-
 func (c *Client) get(
 	ctx context.Context,
 	urlAddress string,
@@ -347,7 +302,6 @@ func (c *Client) get(
 	)
 }
 
-// TODO: implement `X-no-response-body` header to avoid parsing the response body
 func (c *Client) post(
 	ctx context.Context,
 	urlAddress string,
@@ -367,7 +321,6 @@ func (c *Client) post(
 	return err
 }
 
-// TODO: implement `X-no-response-body` header to avoid parsing the response body
 func (c *Client) delete(
 	ctx context.Context,
 	urlAddress string,
@@ -386,7 +339,6 @@ func (c *Client) delete(
 	return err
 }
 
-// TODO: implement annotations for X-Total-Count header
 func (c *Client) doRequest(
 	ctx context.Context,
 	urlAddress string,
