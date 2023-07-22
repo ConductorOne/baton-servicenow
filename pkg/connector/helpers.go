@@ -119,13 +119,3 @@ func mapGroupMembers(resources []servicenow.GroupMember) []string {
 
 	return members
 }
-
-func prepareIds(ids []string) []string {
-	var preparedIds []string
-
-	for _, id := range ids {
-		preparedIds = append(preparedIds, fmt.Sprintf("sys_id=%s", id))
-	}
-
-	return preparedIds
-}

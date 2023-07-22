@@ -145,7 +145,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			return handleRoleGrantsPagination(rv, bag)
 		}
 
-		userIds := prepareIds(mapUsers(usersToRoles))
+		userIds := mapUsers(usersToRoles)
 		targetUsers, _, err := r.client.GetUsers(
 			ctx,
 			servicenow.PaginationVars{
@@ -202,7 +202,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			return handleRoleGrantsPagination(rv, bag)
 		}
 
-		groupIds := prepareIds(mapGroups(groupsToRoles))
+		groupIds := mapGroups(groupsToRoles)
 		targetGroups, _, err := r.client.GetGroups(
 			ctx,
 			servicenow.PaginationVars{

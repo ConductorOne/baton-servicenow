@@ -12,6 +12,16 @@ var (
 	GroupFields = []string{"sys_id", "description", "name"}
 )
 
+func queryMultipleIds(ids []string) string {
+	var preparedIds []string
+
+	for _, id := range ids {
+		preparedIds = append(preparedIds, fmt.Sprintf("sys_id=%s", id))
+	}
+
+	return strings.Join(preparedIds, "^OR")
+}
+
 type QueryParam interface {
 	setup(params *url.Values)
 }
@@ -51,16 +61,16 @@ func (fV *FilterVars) setup(params *url.Values) {
 	}
 }
 
-func prepareUserFilters() *FilterVars {
-	return &FilterVars{
-		Fields: UserFields,
-	}
-}
+func prepareUserFilters(ids []string) *FilterVars {
+	var query string
 
-func prepareUsersFilters(ids []string) *FilterVars {
+	if ids != nil {
+		query = queryMultipleIds(ids)
+	}
+
 	return &FilterVars{
 		Fields: UserFields,
-		Query:  strings.Join(ids, "^OR"),
+		Query:  query,
 	}
 }
 
@@ -71,16 +81,16 @@ func prepareRoleFilters() *FilterVars {
 	}
 }
 
-func prepareGroupFilters() *FilterVars {
-	return &FilterVars{
-		Fields: GroupFields,
-	}
-}
+func prepareGroupFilters(ids []string) *FilterVars {
+	var query string
 
-func prepareGroupsFilters(ids []string) *FilterVars {
+	if ids != nil {
+		query = queryMultipleIds(ids)
+	}
+
 	return &FilterVars{
 		Fields: GroupFields,
-		Query:  strings.Join(ids, "^OR"),
+		Query:  query,
 	}
 }
 

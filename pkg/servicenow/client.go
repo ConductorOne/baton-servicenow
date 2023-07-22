@@ -20,17 +20,20 @@ const (
 	TableAPIBaseURL  = BaseURL + "/now/table"
 	GlobalApiBaseURL = BaseURL + "/global"
 
-	UsersBaseUrl             = TableAPIBaseURL + "/sys_user"
-	UserBaseUrl              = UsersBaseUrl + "/%s"
-	GroupsBaseUrl            = TableAPIBaseURL + "/sys_user_group"
-	GroupBaseUrl             = GroupsBaseUrl + "/%s"
-	RolesBaseUrl             = TableAPIBaseURL + "/sys_user_role"
+	UsersBaseUrl = TableAPIBaseURL + "/sys_user"
+	UserBaseUrl  = UsersBaseUrl + "/%s"
+
+	GroupsBaseUrl = TableAPIBaseURL + "/sys_user_group"
+	GroupBaseUrl  = GroupsBaseUrl + "/%s"
+
 	GroupMembersBaseUrl      = TableAPIBaseURL + "/sys_user_grmember"
-	GroupMemberDetailBaseUrl = TableAPIBaseURL + "/sys_user_grmember/%s"
-	UserRolesBaseUrl         = TableAPIBaseURL + "/sys_user_has_role"
-	UserRoleDetailBaseUrl    = TableAPIBaseURL + "/sys_user_has_role/%s"
-	GroupRolesBaseUrl        = TableAPIBaseURL + "/sys_group_has_role"
-	GroupRoleDetailBaseUrl   = TableAPIBaseURL + "/sys_group_has_role/%s"
+	GroupMemberDetailBaseUrl = GroupMembersBaseUrl + "/%s"
+
+	RolesBaseUrl           = TableAPIBaseURL + "/sys_user_role"
+	UserRolesBaseUrl       = TableAPIBaseURL + "/sys_user_has_role"
+	UserRoleDetailBaseUrl  = UserRolesBaseUrl + "/%s"
+	GroupRolesBaseUrl      = TableAPIBaseURL + "/sys_group_has_role"
+	GroupRoleDetailBaseUrl = GroupRolesBaseUrl + "/%s"
 
 	UserRoleInheritanceBaseUrl = GlobalApiBaseURL + "/user_role_inheritance"
 )
@@ -71,21 +74,14 @@ func NewClient(httpClient *http.Client, auth string, deployment string) *Client 
 func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, userIds []string) ([]User, int, error) {
 	var usersResponse UsersResponse
 
-	queryParams := []QueryParam{
-		&paginationVars,
-	}
-
-	if userIds != nil {
-		queryParams = append(queryParams, prepareUsersFilters(userIds))
-	} else {
-		queryParams = append(queryParams, prepareUserFilters())
-	}
-
 	total, err := c.get(
 		ctx,
 		fmt.Sprintf(UsersBaseUrl, c.deployment),
 		&usersResponse,
-		queryParams...,
+		[]QueryParam{
+			&paginationVars,
+			prepareUserFilters(userIds),
+		}...,
 	)
 
 	if err != nil {
@@ -103,7 +99,7 @@ func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 		fmt.Sprintf(UserBaseUrl, c.deployment, userId),
 		&userResponse,
 		[]QueryParam{
-			prepareUserFilters(),
+			prepareUserFilters(nil),
 		}...,
 	)
 
@@ -118,21 +114,14 @@ func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars, groupIds []string) ([]Group, int, error) {
 	var groupsResponse GroupsResponse
 
-	queryParams := []QueryParam{
-		&paginationVars,
-	}
-
-	if groupIds != nil {
-		queryParams = append(queryParams, prepareGroupsFilters(groupIds))
-	} else {
-		queryParams = append(queryParams, prepareGroupFilters())
-	}
-
 	total, err := c.get(
 		ctx,
 		fmt.Sprintf(GroupsBaseUrl, c.deployment),
 		&groupsResponse,
-		queryParams...,
+		[]QueryParam{
+			&paginationVars,
+			prepareGroupFilters(groupIds),
+		}...,
 	)
 
 	if err != nil {
@@ -150,7 +139,7 @@ func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
 		fmt.Sprintf(GroupBaseUrl, c.deployment, groupId),
 		&groupResponse,
 		[]QueryParam{
-			prepareGroupFilters(),
+			prepareGroupFilters(nil),
 		}...,
 	)
 
@@ -432,6 +421,10 @@ func (c *Client) doRequest(
 	req.Header.Set("Authorization", c.auth)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+
+	if method == http.MethodPost {
+		req.Header.Set("X-no-response-body", "true")
+	}
 
 	rawResponse, err := c.httpClient.Do(req)
 	if err != nil {

@@ -140,7 +140,7 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 		return nil, "", nil, err
 	}
 
-	memberIds := prepareIds(mapGroupMembers(groupMembers))
+	memberIds := mapGroupMembers(groupMembers)
 	targetMembers, _, err := g.client.GetUsers(
 		ctx,
 		servicenow.PaginationVars{
