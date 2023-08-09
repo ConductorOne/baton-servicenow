@@ -3,7 +3,6 @@ package connector
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/ConductorOne/baton-servicenow/pkg/servicenow"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -76,18 +75,6 @@ func convertPageToken(token string) (int, error) {
 	}
 
 	return strconv.Atoi(token)
-}
-
-// Id of entitlement has following format <resource_type>:<resource_id>:<entitlement_id>
-// extract resource_id from it.
-func extractResourceId(fullId string) (string, error) {
-	idParts := strings.Split(fullId, ":")
-
-	if len(idParts) != 3 {
-		return "", fmt.Errorf("invalid resource id: %s", fullId)
-	}
-
-	return idParts[1], nil
 }
 
 func mapUsers(resources []servicenow.UserToRole) []string {

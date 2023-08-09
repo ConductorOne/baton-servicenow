@@ -253,11 +253,11 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 	return rv, nextPage, nil, nil
 }
 
-func (r *roleResourceType) GrantToUser(ctx context.Context, l *zap.Logger, principal string, entitlementId string) (annotations.Annotations, error) {
+func (r *roleResourceType) GrantToUser(ctx context.Context, l *zap.Logger, principal string, roleId string) (annotations.Annotations, error) {
 	userRoles, _, err := r.client.GetUserToRole(
 		ctx,
 		principal,
-		entitlementId,
+		roleId,
 		servicenow.PaginationVars{Limit: 1},
 	)
 	if err != nil {
@@ -269,7 +269,7 @@ func (r *roleResourceType) GrantToUser(ctx context.Context, l *zap.Logger, princ
 		l.Warn(
 			"servicenow-connector: user already has specified role",
 			zap.String("user", principal),
-			zap.String("role", entitlementId),
+			zap.String("role", roleId),
 		)
 
 		return nil, fmt.Errorf("servicenow-connector: user already has specified role")
@@ -280,22 +280,22 @@ func (r *roleResourceType) GrantToUser(ctx context.Context, l *zap.Logger, princ
 		ctx,
 		servicenow.UserToRolePayload{
 			User: principal,
-			Role: entitlementId,
+			Role: roleId,
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: failed to grant role %s to user %s: %w", entitlementId, principal, err)
+		return nil, fmt.Errorf("servicenow-connector: failed to grant role %s to user %s: %w", roleId, principal, err)
 	}
 
-	l.Debug("granted role to user", zap.String("role", entitlementId))
+	l.Debug("granted role to user", zap.String("role", roleId))
 	return nil, nil
 }
 
-func (r *roleResourceType) GrantToGroup(ctx context.Context, l *zap.Logger, principal string, entitlementId string) (annotations.Annotations, error) {
+func (r *roleResourceType) GrantToGroup(ctx context.Context, l *zap.Logger, principal string, roleId string) (annotations.Annotations, error) {
 	groupRoles, _, err := r.client.GetGroupToRole(
 		ctx,
 		principal,
-		entitlementId,
+		roleId,
 		servicenow.PaginationVars{Limit: 1},
 	)
 	if err != nil {
@@ -307,7 +307,7 @@ func (r *roleResourceType) GrantToGroup(ctx context.Context, l *zap.Logger, prin
 		l.Warn(
 			"servicenow-connector: group already has specified role",
 			zap.String("group", principal),
-			zap.String("role", entitlementId),
+			zap.String("role", roleId),
 		)
 
 		return nil, fmt.Errorf("servicenow-connector: group already has specified role")
@@ -318,14 +318,14 @@ func (r *roleResourceType) GrantToGroup(ctx context.Context, l *zap.Logger, prin
 		ctx,
 		servicenow.GroupToRolePayload{
 			Group: principal,
-			Role:  entitlementId,
+			Role:  roleId,
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: failed to grant role %s to group %s: %w", entitlementId, principal, err)
+		return nil, fmt.Errorf("servicenow-connector: failed to grant role %s to group %s: %w", roleId, principal, err)
 	}
 
-	l.Debug("granted role to group", zap.String("role", entitlementId))
+	l.Debug("granted role to group", zap.String("role", roleId))
 	return nil, nil
 }
 
@@ -345,28 +345,25 @@ func (r *roleResourceType) Grant(ctx context.Context, principal *v2.Resource, en
 		return nil, fmt.Errorf("servicenow-connector: only users or groups can be granted role membership")
 	}
 
-	entitlementId, err := extractResourceId(entitlement.Id)
-	if err != nil {
-		return nil, err
-	}
+	roleId := entitlement.Resource.Id.Resource
 
 	if principalIsUser {
-		return r.GrantToUser(ctx, l, principal.Id.Resource, entitlementId)
+		return r.GrantToUser(ctx, l, principal.Id.Resource, roleId)
 	}
 
 	if principalIsGroup {
-		return r.GrantToGroup(ctx, l, principal.Id.Resource, entitlementId)
+		return r.GrantToGroup(ctx, l, principal.Id.Resource, roleId)
 	}
 
 	return nil, nil
 }
 
-func (r *roleResourceType) RevokeFromUser(ctx context.Context, l *zap.Logger, principal *v2.Resource, entitlementId string) (annotations.Annotations, error) {
+func (r *roleResourceType) RevokeFromUser(ctx context.Context, l *zap.Logger, principal *v2.Resource, roleId string) (annotations.Annotations, error) {
 	// check if role is present
 	userRoles, _, err := r.client.GetUserToRole(
 		ctx,
 		principal.Id.Resource,
-		entitlementId,
+		roleId,
 		servicenow.PaginationVars{Limit: 1},
 	)
 	if err != nil {
@@ -377,7 +374,7 @@ func (r *roleResourceType) RevokeFromUser(ctx context.Context, l *zap.Logger, pr
 		l.Warn(
 			"servicenow-connector: cannot revoke not existing role from user",
 			zap.String("user", principal.Id.Resource),
-			zap.String("role", entitlementId),
+			zap.String("role", roleId),
 		)
 
 		return nil, fmt.Errorf("servicenow-connector: cannot revoke not existing role from user")
@@ -390,21 +387,21 @@ func (r *roleResourceType) RevokeFromUser(ctx context.Context, l *zap.Logger, pr
 			userRole.Id,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("servicenow-connector: failed to revoke role %s from user %s: %w", entitlementId, principal.Id.Resource, err)
+			return nil, fmt.Errorf("servicenow-connector: failed to revoke role %s from user %s: %w", roleId, principal.Id.Resource, err)
 		}
 
-		l.Debug("revoked role from user", zap.String("role", entitlementId))
+		l.Debug("revoked role from user", zap.String("role", roleId))
 	}
 
 	return nil, nil
 }
 
-func (r *roleResourceType) RevokeFromGroup(ctx context.Context, l *zap.Logger, principal *v2.Resource, entitlementId string) (annotations.Annotations, error) {
+func (r *roleResourceType) RevokeFromGroup(ctx context.Context, l *zap.Logger, principal *v2.Resource, roleId string) (annotations.Annotations, error) {
 	// check if role is present
 	groupRoles, _, err := r.client.GetGroupToRole(
 		ctx,
 		principal.Id.Resource,
-		entitlementId,
+		roleId,
 		servicenow.PaginationVars{Limit: 1},
 	)
 	if err != nil {
@@ -415,7 +412,7 @@ func (r *roleResourceType) RevokeFromGroup(ctx context.Context, l *zap.Logger, p
 		l.Warn(
 			"servicenow-connector: cannot revoke not existing role from group",
 			zap.String("group", principal.Id.Resource),
-			zap.String("role", entitlementId),
+			zap.String("role", roleId),
 		)
 
 		return nil, fmt.Errorf("servicenow-connector: cannot revoke not existing role from group")
@@ -428,10 +425,10 @@ func (r *roleResourceType) RevokeFromGroup(ctx context.Context, l *zap.Logger, p
 			groupRole.Id,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("servicenow-connector: failed to revoke role %s from group %s: %w", entitlementId, principal.Id.Resource, err)
+			return nil, fmt.Errorf("servicenow-connector: failed to revoke role %s from group %s: %w", roleId, principal.Id.Resource, err)
 		}
 
-		l.Debug("revoked role from group", zap.String("role", entitlementId))
+		l.Debug("revoked role from group", zap.String("role", roleId))
 	}
 
 	return nil, nil
@@ -455,19 +452,14 @@ func (r *roleResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annotat
 		return nil, fmt.Errorf("servicenow-connector: only users or groups can be revoked role membership")
 	}
 
-	// Id of entitlement has following format group:<group_id>:member
-	// extract group_id from it
-	entitlementId, err := extractResourceId(entitlement.Id)
-	if err != nil {
-		return nil, err
-	}
+	roleId := entitlement.Resource.Id.Resource
 
 	if principalIsUser {
-		return r.RevokeFromUser(ctx, l, principal, entitlementId)
+		return r.RevokeFromUser(ctx, l, principal, roleId)
 	}
 
 	if principalIsGroup {
-		return r.RevokeFromGroup(ctx, l, principal, entitlementId)
+		return r.RevokeFromGroup(ctx, l, principal, roleId)
 	}
 
 	return nil, nil

@@ -191,15 +191,11 @@ func (r *groupResourceType) Grant(ctx context.Context, principal *v2.Resource, e
 		return nil, nil
 	}
 
-	resourceId, err := extractResourceId(entitlement.Id)
-	if err != nil {
-		return nil, err
-	}
-
+	groupId := entitlement.Resource.Id.Resource
 	groupMembers, _, err := r.client.GetUserToGroup(
 		ctx,
 		principal.Id.Resource,
-		resourceId,
+		groupId,
 		servicenow.PaginationVars{Limit: 1},
 	)
 	if err != nil {
@@ -222,11 +218,11 @@ func (r *groupResourceType) Grant(ctx context.Context, principal *v2.Resource, e
 		ctx,
 		servicenow.GroupMemberPayload{
 			User:  principal.Id.Resource,
-			Group: resourceId,
+			Group: groupId,
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: failed to add user %s to group %s: %w", principal.Id.Resource, resourceId, err)
+		return nil, fmt.Errorf("servicenow-connector: failed to add user %s to group %s: %w", principal.Id.Resource, groupId, err)
 	}
 
 	return nil, nil
@@ -246,15 +242,11 @@ func (r *groupResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annota
 		)
 	}
 
-	entitlementId, err := extractResourceId(entitlement.Id)
-	if err != nil {
-		return nil, err
-	}
-
+	groupId := entitlement.Resource.Id.Resource
 	groupMembers, _, err := r.client.GetUserToGroup(
 		ctx,
 		principal.Id.Resource,
-		entitlementId,
+		groupId,
 		servicenow.PaginationVars{Limit: 1},
 	)
 	if err != nil {
