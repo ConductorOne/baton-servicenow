@@ -88,14 +88,10 @@ Flags:
       --client-secret string          The client secret used to authenticate with ConductorOne ($BATON_CLIENT_SECRET)
       --deployment string             ServiceNow deployment to connect to. ($BATON_DEPLOYMENT)
   -f, --file string                   The path to the c1z file to sync with ($BATON_FILE) (default "sync.c1z")
-      --grant-entitlement string      The entitlement to grant to the supplied principal ($BATON_GRANT_ENTITLEMENT)
-      --grant-principal string        The resource to grant the entitlement to ($BATON_GRANT_PRINCIPAL)
-      --grant-principal-type string   The resource type of the principal to grant the entitlement to ($BATON_GRANT_PRINCIPAL_TYPE)
   -h, --help                          help for baton-servicenow
       --log-format string             The output format for logs: json, console ($BATON_LOG_FORMAT) (default "json")
       --log-level string              The log level: debug, info, warn, error ($BATON_LOG_LEVEL) (default "info")
       --password string               Application password used to connect to the ServiceNow API. ($BATON_PASSWORD)
-      --revoke-grant string           The grant to revoke ($BATON_REVOKE_GRANT)
       --username string               Username of administrator used to connect to the ServiceNow API. ($BATON_USERNAME)
   -v, --version                       version for baton-servicenow
 
