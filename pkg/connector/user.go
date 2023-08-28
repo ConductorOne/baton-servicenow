@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ConductorOne/baton-servicenow/pkg/servicenow"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/conductorone/baton-servicenow/pkg/servicenow"
 )
 
 type userResourceType struct {
