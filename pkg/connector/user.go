@@ -33,7 +33,7 @@ func userResource(ctx context.Context, user *servicenow.User) (*v2.Resource, err
 	userTraitOptions := []rs.UserTraitOption{
 		rs.WithEmail(user.Email, true),
 		rs.WithUserProfile(profile),
-		rs.WithStatus(v2.UserTrait_Status_STATUS_UNSPECIFIED),
+		rs.WithStatus(v2.UserTrait_Status_STATUS_ENABLED),
 	}
 
 	resource, err := rs.NewUserResource(
