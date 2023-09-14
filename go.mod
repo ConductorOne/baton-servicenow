@@ -6,6 +6,7 @@ require (
 	github.com/conductorone/baton-sdk v0.1.4
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/spf13/cobra v1.7.0
+	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80
 	go.uber.org/zap v1.25.0
 	google.golang.org/grpc v1.57.0
 )
