@@ -57,7 +57,7 @@ func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		return nil, "", nil, err
 	}
 
-	roles, total, err := r.client.GetRoles(
+	roles, nextPageToken, err := r.client.GetRoles(
 		ctx,
 		servicenow.PaginationVars{
 			Limit:  ResourcesPageSize,
@@ -68,7 +68,7 @@ func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list roles: %w", err)
 	}
 
-	nextPage, err := handleNextPage(bag, offset+ResourcesPageSize+1)
+	nextPage, err := bag.NextToken(nextPageToken)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -83,10 +83,6 @@ func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		}
 
 		rv = append(rv, rr)
-	}
-
-	if (offset + len(roles)) == total {
-		return rv, "", nil, nil
 	}
 
 	return rv, nextPage, nil, nil
@@ -128,7 +124,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 		})
 
 	case resourceTypeUser.Id:
-		usersToRoles, total, err := r.client.GetUserToRole(
+		usersToRoles, nextPageToken, err := r.client.GetUserToRole(
 			ctx,
 			"", // all users
 			resource.Id.Resource,
@@ -141,51 +137,28 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list users under role %s: %w", resource.Id.Resource, err)
 		}
 
-		if len(usersToRoles) == 0 {
-			return handleRoleGrantsPagination(rv, bag)
-		}
-
-		userIds := mapUsers(usersToRoles)
-		targetUsers, _, err := r.client.GetUsers(
-			ctx,
-			servicenow.PaginationVars{
-				Limit: len(userIds),
-			},
-			userIds,
-		)
+		err = bag.Next(nextPageToken)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list users under role %s: %w", resource.Id.Resource, err)
+			return nil, "", nil, err
 		}
 
-		// for each user, create a grant
-		for _, user := range targetUsers {
-			userCopy := user
-			ur, err := userResource(ctx, &userCopy)
-			if err != nil {
-				return nil, "", nil, err
-			}
-
+		// for each roleBinding, create a grant
+		for _, roleBinding := range usersToRoles {
 			rv = append(
 				rv,
 				grant.NewGrant(
 					resource,
 					roleMembership,
-					ur.Id,
+					&v2.ResourceId{
+						ResourceType: resourceTypeUser.Id,
+						Resource:     roleBinding.User,
+					},
 				),
 			)
 		}
 
-		if (offset + len(usersToRoles)) == total {
-			return handleRoleGrantsPagination(rv, bag)
-		}
-
-		err = bag.Next(fmt.Sprintf("%d", offset+ResourcesPageSize))
-		if err != nil {
-			return nil, "", nil, err
-		}
-
 	case resourceTypeGroup.Id:
-		groupsToRoles, total, err := r.client.GetGroupToRole(
+		groupsToRoles, nextPageToken, err := r.client.GetGroupToRole(
 			ctx,
 			"", // all groups
 			resource.Id.Resource,
@@ -198,47 +171,24 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list groups under role %s: %w", resource.Id.Resource, err)
 		}
 
-		if len(groupsToRoles) == 0 {
-			return handleRoleGrantsPagination(rv, bag)
-		}
-
-		groupIds := mapGroups(groupsToRoles)
-		targetGroups, _, err := r.client.GetGroups(
-			ctx,
-			servicenow.PaginationVars{
-				Limit: len(groupIds),
-			},
-			groupIds,
-		)
+		err = bag.Next(nextPageToken)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list users under role %s: %w", resource.Id.Resource, err)
+			return nil, "", nil, err
 		}
 
-		// for each group, create a grant
-		for _, group := range targetGroups {
-			groupCopy := group
-			gr, err := groupResource(ctx, &groupCopy)
-			if err != nil {
-				return nil, "", nil, err
-			}
-
+		// for each roleBinding, create a grant
+		for _, roleBinding := range groupsToRoles {
 			rv = append(
 				rv,
 				grant.NewGrant(
 					resource,
 					roleMembership,
-					gr.Id,
+					&v2.ResourceId{
+						ResourceType: resourceTypeGroup.Id,
+						Resource:     roleBinding.Group,
+					},
 				),
 			)
-		}
-
-		if (offset + len(groupsToRoles)) == total {
-			return handleRoleGrantsPagination(rv, bag)
-		}
-
-		err = bag.Next(fmt.Sprintf("%d", offset+ResourcesPageSize))
-		if err != nil {
-			return nil, "", nil, err
 		}
 
 	default:

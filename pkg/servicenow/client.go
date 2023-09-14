@@ -8,8 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 
+	"github.com/tomnomnom/linkheader"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -70,10 +70,10 @@ func NewClient(httpClient *http.Client, auth string, deployment string) *Client 
 }
 
 // Table `sys_user` (Users).
-func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, userIds []string) ([]User, int, error) {
+func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, userIds []string) ([]User, string, error) {
 	var usersResponse UsersResponse
 
-	total, err := c.get(
+	nextPage, err := c.get(
 		ctx,
 		fmt.Sprintf(UsersBaseUrl, c.deployment),
 		&usersResponse,
@@ -84,10 +84,10 @@ func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, us
 	)
 
 	if err != nil {
-		return nil, total, err
+		return nil, "", err
 	}
 
-	return usersResponse.Result, total, nil
+	return usersResponse.Result, nextPage, nil
 }
 
 func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
@@ -110,10 +110,10 @@ func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 }
 
 // Table `sys_user_group` (Groups).
-func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars, groupIds []string) ([]Group, int, error) {
+func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars, groupIds []string) ([]Group, string, error) {
 	var groupsResponse GroupsResponse
 
-	total, err := c.get(
+	nextPageToken, err := c.get(
 		ctx,
 		fmt.Sprintf(GroupsBaseUrl, c.deployment),
 		&groupsResponse,
@@ -124,10 +124,10 @@ func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars, g
 	)
 
 	if err != nil {
-		return nil, total, err
+		return nil, "", err
 	}
 
-	return groupsResponse.Result, total, nil
+	return groupsResponse.Result, nextPageToken, nil
 }
 
 func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
@@ -150,10 +150,10 @@ func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
 }
 
 // Table `sys_user_grmember` (Group Members).
-func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId string, paginationVars PaginationVars) ([]GroupMember, int, error) {
+func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId string, paginationVars PaginationVars) ([]GroupMember, string, error) {
 	var groupMembersResponse GroupMembersResponse
 
-	total, err := c.get(
+	nextPageToken, err := c.get(
 		ctx,
 		fmt.Sprintf(GroupMembersBaseUrl, c.deployment),
 		&groupMembersResponse,
@@ -164,10 +164,10 @@ func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId stri
 	)
 
 	if err != nil {
-		return nil, total, err
+		return nil, "", err
 	}
 
-	return groupMembersResponse.Result, total, nil
+	return groupMembersResponse.Result, nextPageToken, nil
 }
 
 func (c *Client) AddUserToGroup(ctx context.Context, record GroupMemberPayload) error {
@@ -188,12 +188,12 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, id string) error {
 }
 
 // Table `sys_user_role` (Roles).
-func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([]Role, int, error) {
+func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([]Role, string, error) {
 	var rolesResponse RolesResponse
 
 	paginationVars.Limit++
 
-	total, err := c.get(
+	nextPageToken, err := c.get(
 		ctx,
 		fmt.Sprintf(RolesBaseUrl, c.deployment),
 		&rolesResponse,
@@ -204,17 +204,17 @@ func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([
 	)
 
 	if err != nil {
-		return nil, total, err
+		return nil, "", err
 	}
 
-	return rolesResponse.Result, total, nil
+	return rolesResponse.Result, nextPageToken, nil
 }
 
 // Table `sys_user_has_role` (User to Role).
-func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string, paginationVars PaginationVars) ([]UserToRole, int, error) {
+func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string, paginationVars PaginationVars) ([]UserToRole, string, error) {
 	var userToRoleResponse UserToRoleResponse
 
-	total, err := c.get(
+	nextPageToken, err := c.get(
 		ctx,
 		fmt.Sprintf(UserRolesBaseUrl, c.deployment),
 		&userToRoleResponse,
@@ -225,10 +225,10 @@ func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string
 	)
 
 	if err != nil {
-		return nil, total, err
+		return nil, "", err
 	}
 
-	return userToRoleResponse.Result, total, nil
+	return userToRoleResponse.Result, nextPageToken, nil
 }
 
 func (c *Client) GrantRoleToUser(ctx context.Context, record UserToRolePayload) error {
@@ -249,10 +249,10 @@ func (c *Client) RevokeRoleFromUser(ctx context.Context, id string) error {
 }
 
 // Table `sys_group_has_role` (Group to Role).
-func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId string, paginationVars PaginationVars) ([]GroupToRole, int, error) {
+func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId string, paginationVars PaginationVars) ([]GroupToRole, string, error) {
 	var groupToRoleResponse GroupToRoleResponse
 
-	total, err := c.get(
+	nextPageToken, err := c.get(
 		ctx,
 		fmt.Sprintf(GroupRolesBaseUrl, c.deployment),
 		&groupToRoleResponse,
@@ -263,10 +263,10 @@ func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId stri
 	)
 
 	if err != nil {
-		return nil, total, err
+		return nil, "", err
 	}
 
-	return groupToRoleResponse.Result, total, nil
+	return groupToRoleResponse.Result, nextPageToken, nil
 }
 
 func (c *Client) GrantRoleToGroup(ctx context.Context, record GroupToRolePayload) error {
@@ -286,12 +286,7 @@ func (c *Client) RevokeRoleFromGroup(ctx context.Context, id string) error {
 	)
 }
 
-func (c *Client) get(
-	ctx context.Context,
-	urlAddress string,
-	resourceResponse interface{},
-	paramOptions ...QueryParam,
-) (int, error) {
+func (c *Client) get(ctx context.Context, urlAddress string, resourceResponse interface{}, paramOptions ...QueryParam) (string, error) {
 	return c.doRequest(
 		ctx,
 		urlAddress,
@@ -339,20 +334,13 @@ func (c *Client) delete(
 	return err
 }
 
-func (c *Client) doRequest(
-	ctx context.Context,
-	urlAddress string,
-	method string,
-	data interface{},
-	resourceResponse interface{},
-	paramOptions ...QueryParam,
-) (int, error) {
+func (c *Client) doRequest(ctx context.Context, urlAddress string, method string, data interface{}, resourceResponse interface{}, paramOptions ...QueryParam) (string, error) {
 	var body io.Reader
 
 	if data != nil {
 		jsonBody, err := json.Marshal(data)
 		if err != nil {
-			return 0, err
+			return "", err
 		}
 
 		body = bytes.NewBuffer(jsonBody)
@@ -360,7 +348,7 @@ func (c *Client) doRequest(
 
 	req, err := http.NewRequestWithContext(ctx, method, urlAddress, body)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 
 	queryParams := url.Values{}
@@ -384,31 +372,33 @@ func (c *Client) doRequest(
 
 	rawResponse, err := c.httpClient.Do(req)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-
 	defer rawResponse.Body.Close()
 
 	if rawResponse.StatusCode >= 300 {
-		return 0, status.Error(codes.Code(rawResponse.StatusCode), "Request failed")
+		return "", status.Error(codes.Code(rawResponse.StatusCode), "Request failed")
 	}
 
 	if method != http.MethodDelete {
 		if err := json.NewDecoder(rawResponse.Body).Decode(&resourceResponse); err != nil {
-			return 0, err
+			return "", err
 		}
 	}
 
-	// extract header X-Total-Count and return it
-	xTotalCount := rawResponse.Header.Get("X-Total-Count")
-	if xTotalCount != "" {
-		total, err := strconv.Atoi(xTotalCount)
-		if err != nil {
-			return 0, err
-		}
+	var pageToken string
+	pagingLinks := linkheader.Parse(rawResponse.Header.Get("Link"))
+	for _, link := range pagingLinks {
+		if link.Rel == "next" {
+			nextPageUrl, err := url.Parse(link.URL)
+			if err != nil {
+				return "", err
+			}
 
-		return total, nil
+			pageToken = nextPageUrl.Query().Get("sysparm_offset")
+			break
+		}
 	}
 
-	return 0, nil
+	return pageToken, nil
 }

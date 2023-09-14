@@ -1,7 +1,6 @@
 package connector
 
 import (
-	"fmt"
 	"strconv"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -16,16 +15,6 @@ func annotationsForUserResourceType() annotations.Annotations {
 	annos := annotations.Annotations{}
 	annos.Update(&v2.SkipEntitlementsAndGrants{})
 	return annos
-}
-
-func handleNextPage(bag *pagination.Bag, page int) (string, error) {
-	nextPage := fmt.Sprintf("%d", page)
-	pageToken, err := bag.NextToken(nextPage)
-	if err != nil {
-		return "", err
-	}
-
-	return pageToken, nil
 }
 
 func parsePageToken(i string, resourceID *v2.ResourceId) (*pagination.Bag, int, error) {
@@ -50,24 +39,6 @@ func parsePageToken(i string, resourceID *v2.ResourceId) (*pagination.Bag, int, 
 	return b, page, nil
 }
 
-func handleRoleGrantsPagination(
-	grants []*v2.Grant,
-	bag *pagination.Bag,
-) ([]*v2.Grant, string, annotations.Annotations, error) {
-	bag.Pop()
-
-	if bag.Current() == nil {
-		return grants, "", nil, nil
-	}
-
-	nextPage, err := bag.Marshal()
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	return grants, nextPage, nil, nil
-}
-
 // convertPageToken converts a string token into an int.
 func convertPageToken(token string) (int, error) {
 	if token == "" {
@@ -75,26 +46,6 @@ func convertPageToken(token string) (int, error) {
 	}
 
 	return strconv.Atoi(token)
-}
-
-func mapUsers(resources []servicenow.UserToRole) []string {
-	users := make([]string, len(resources))
-
-	for i, r := range resources {
-		users[i] = r.User
-	}
-
-	return users
-}
-
-func mapGroups(resources []servicenow.GroupToRole) []string {
-	groups := make([]string, len(resources))
-
-	for i, r := range resources {
-		groups[i] = r.Group
-	}
-
-	return groups
 }
 
 func mapGroupMembers(resources []servicenow.GroupMember) []string {
