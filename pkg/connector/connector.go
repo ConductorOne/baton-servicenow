@@ -56,7 +56,7 @@ func (s *ServiceNow) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error
 	}, nil
 }
 
-// Validates that the user has read access to all relevant tables (more information in the readme).
+// Validates that we have credentials and an endpoint. Does not validate that the credentials have all of the correct permissions.
 func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, error) {
 	pagination := servicenow.PaginationVars{
 		Limit: 1,
@@ -65,31 +65,6 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 	_, _, err := s.client.GetUsers(ctx, pagination, nil)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list users: %w", err)
-	}
-
-	roles, _, err := s.client.GetRoles(ctx, pagination)
-	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: current user is not able to list roles: %w", err)
-	}
-
-	groups, _, err := s.client.GetGroups(ctx, pagination, nil)
-	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: current user is not able to list groups: %w", err)
-	}
-
-	_, _, err = s.client.GetUserToGroup(ctx, "", groups[0].Id, pagination)
-	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: current user is not able to list group members: %w", err)
-	}
-
-	_, _, err = s.client.GetUserToRole(ctx, "", roles[0].Id, pagination)
-	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: current user is not able to list users to roles: %w", err)
-	}
-
-	_, _, err = s.client.GetGroupToRole(ctx, "", groups[0].Id, pagination)
-	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: current user is not able to list groups to roles: %w", err)
 	}
 
 	return nil, nil

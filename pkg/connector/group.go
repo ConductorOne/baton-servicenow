@@ -58,7 +58,7 @@ func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagi
 		return nil, "", nil, err
 	}
 
-	groups, total, err := g.client.GetGroups(
+	groups, nextPageToken, err := g.client.GetGroups(
 		ctx,
 		servicenow.PaginationVars{
 			Limit:  ResourcesPageSize,
@@ -70,7 +70,7 @@ func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagi
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list groups: %w", err)
 	}
 
-	nextPage, err := handleNextPage(bag, offset+ResourcesPageSize)
+	nextPage, err := bag.NextToken(nextPageToken)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -85,10 +85,6 @@ func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagi
 		}
 
 		rv = append(rv, rr)
-	}
-
-	if (offset + len(groups)) == total {
-		return rv, "", nil, nil
 	}
 
 	return rv, nextPage, nil, nil
@@ -118,7 +114,7 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 		return nil, "", nil, err
 	}
 
-	groupMembers, total, err := g.client.GetUserToGroup(
+	groupMembers, nextPageToken, err := g.client.GetUserToGroup(
 		ctx,
 		"", // all users
 		resource.Id.Resource,
@@ -131,11 +127,7 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list groupMembers: %w", err)
 	}
 
-	if len(groupMembers) == 0 {
-		return nil, "", nil, nil
-	}
-
-	nextPage, err := handleNextPage(bag, offset+ResourcesPageSize)
+	nextPage, err := bag.NextToken(nextPageToken)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -169,10 +161,6 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 				ur.Id,
 			),
 		)
-	}
-
-	if (offset + len(groupMembers)) == total {
-		return rv, "", nil, nil
 	}
 
 	return rv, nextPage, nil, nil
