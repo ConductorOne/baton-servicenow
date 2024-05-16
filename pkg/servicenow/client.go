@@ -70,7 +70,7 @@ func NewClient(httpClient *http.Client, auth string, deployment string) *Client 
 }
 
 // Table `sys_user` (Users).
-func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, userIds []string) ([]User, string, error) {
+func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, userIDs []string) ([]User, string, error) {
 	var usersResponse UsersResponse
 
 	nextPage, err := c.get(
@@ -79,7 +79,7 @@ func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, us
 		&usersResponse,
 		[]QueryParam{
 			&paginationVars,
-			prepareUserFilters(userIds),
+			prepareUserFilters(userIDs),
 		}...,
 	)
 
@@ -110,7 +110,7 @@ func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 }
 
 // Table `sys_user_group` (Groups).
-func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars, groupIds []string) ([]Group, string, error) {
+func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars, groupIDs []string) ([]Group, string, error) {
 	var groupsResponse GroupsResponse
 
 	nextPageToken, err := c.get(
@@ -119,7 +119,7 @@ func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars, g
 		&groupsResponse,
 		[]QueryParam{
 			&paginationVars,
-			prepareGroupFilters(groupIds),
+			prepareGroupFilters(groupIDs),
 		}...,
 	)
 
