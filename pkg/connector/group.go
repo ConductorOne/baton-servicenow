@@ -132,13 +132,13 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 		return nil, "", nil, err
 	}
 
-	memberIds := mapGroupMembers(groupMembers)
+	memberIDs := mapGroupMembers(groupMembers)
 	targetMembers, _, err := g.client.GetUsers(
 		ctx,
 		servicenow.PaginationVars{
-			Limit: len(memberIds),
+			Limit: len(memberIDs),
 		},
-		memberIds,
+		memberIDs,
 	)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list members under group %s: %w", resource.Id.Resource, err)
