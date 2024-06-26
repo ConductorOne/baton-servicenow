@@ -1,5 +1,10 @@
 package servicenow
 
+import (
+	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	sdkTicket "github.com/conductorone/baton-sdk/pkg/types/ticket"
+)
+
 type BaseResource struct {
 	Id string `json:"sys_id"`
 }
@@ -65,4 +70,252 @@ type UserRoles struct {
 	UserName  string   `json:"user_name"`
 	FromRole  []string `json:"from_role"`
 	FromGroup []string `json:"from_group"`
+}
+
+// Service Catalog request models
+type ResourceRefLink struct {
+	Link  string `json:"link"`
+	Value string `json:"value"`
+}
+
+type Catalog struct {
+	BaseResource
+	Title         string `json:"title"`
+	HasCategories bool   `json:"has_categories,omitempty"`
+	HasItems      bool   `json:"has_items,omitempty"`
+	Description   string `json:"description,omitempty"`
+	DesktopImage  string `json:"desktop_image,omitempty"`
+}
+
+type Category struct {
+	BaseResource
+	Title           string        `json:"title"`
+	Description     string        `json:"description,omitempty"`
+	FullDescription string        `json:"full_description,omitempty"`
+	Icon            string        `json:"icon,omitempty"`
+	HeaderIcon      string        `json:"header_icon,omitempty"`
+	HomepageImage   string        `json:"homepage_image,omitempty"`
+	ItemCount       int           `json:"count,omitempty"`
+	Subcategories   []SubCategory `json:"subcategories,omitempty"`
+}
+
+type SubCategory struct {
+	SysID string `json:"sys_id"`
+	Title string `json:"title"`
+}
+
+type CatalogItem struct {
+	Catalogs                []Catalog             `json:"catalogs"`
+	Category                Category              `json:"category"`
+	ContentType             string                `json:"content_type"`
+	Description             string                `json:"description"`
+	Icon                    string                `json:"icon"`
+	KbArticle               string                `json:"kb_article"`
+	LocalCurrency           string                `json:"local_currency"`
+	LocalizedPrice          string                `json:"localized_price"`
+	LocalizedRecurringPrice string                `json:"localized_recurring_price"`
+	Name                    string                `json:"name"`
+	Order                   int                   `json:"order"`
+	Picture                 string                `json:"picture"`
+	Price                   string                `json:"price"`
+	PriceCurrency           string                `json:"price_currency"`
+	RecurringFrequency      string                `json:"recurring_frequency"`
+	RecurringPrice          string                `json:"recurring_price"`
+	RecurringPriceCurrency  string                `json:"recurring_price_currency"`
+	ShortDescription        string                `json:"short_description"`
+	ShowPrice               bool                  `json:"show_price"`
+	ShowQuantity            bool                  `json:"show_quantity"`
+	SysClassName            string                `json:"sys_class_name"`
+	SysID                   string                `json:"sys_id"`
+	Type                    string                `json:"type"`
+	URL                     string                `json:"url"`
+	Variables               []CatalogItemVariable `json:"variables,omitempty"`
+}
+
+type ServiceCatalogRequest struct {
+	BaseResource
+
+	Parent string `json:"parent"`
+
+	State               string           `json:"state"`
+	RequestState        string           `json:"request_state"`
+	Number              string           `json:"number"`
+	TaskEffectiveNumber string           `json:"task_effective_number"`
+	UponReject          string           `json:"upon_reject"`
+	OpenedBy            *ResourceRefLink `json:"opened_by,omitempty"`
+	RequestedFor        *ResourceRefLink `json:"requested_for,omitempty"`
+	SysCreatedOn        string           `json:"sys_created_on"`
+	SysUpdatedOn        string           `json:"sys_updated_on"`
+	OpenedAt            string           `json:"opened_at"`
+	ClosedAt            string           `json:"closed_at"`
+	ApprovalSet         string           `json:"approval_set"`
+	SysUpdatedBy        string           `json:"sys_updated_by"`
+	SysCreatedBy        string           `json:"sys_created_by"`
+	Priority            string           `json:"priority"`
+	Approval            string           `json:"approval"`
+
+	ShortDescription       string `json:"short_description"`
+	AssignmentGroup        string `json:"assignment_group"`
+	AdditionalAssigneeList string `json:"additional_assignee_list"`
+	Description            string `json:"description"`
+	CloseNotes             string `json:"close_notes"`
+	SysClassName           string `json:"sys_class_name"`
+	ClosedBy               string `json:"closed_by"`
+	FollowUp               string `json:"follow_up"`
+	Urgency                string `json:"urgency"`
+	RequestedDate          string `json:"requested_date"`
+	AssignedTo             string `json:"assigned_to"`
+	Comments               string `json:"comments"`
+	CommentsAndWorkNotes   string `json:"comments_and_work_notes"`
+	DueDate                string `json:"due_date"`
+	SysModCount            string `json:"sys_mod_count"`
+	SysTags                string `json:"sys_tags"`
+	UponApproval           string `json:"upon_approval"`
+}
+
+type RequestItem struct {
+	BaseResource
+
+	State       string `json:"state"`
+	Description string `json:"description"`
+	Number      string `json:"number"`
+	Stage       string `json:"stage"`
+
+	Request ResourceRefLink `json:"request"`
+	CatItem ResourceRefLink `json:"cat_item"`
+}
+
+type Choice struct {
+	Index                  int     `json:"index"`
+	Label                  string  `json:"label"`
+	Value                  string  `json:"value"`
+	RecurringPrice         float64 `json:"recurring_price"`
+	Price                  float64 `json:"price"`
+	PriceCurrency          string  `json:"price_currency"`
+	RecurringPriceCurrency string  `json:"recurring_price_currency"`
+}
+
+type CatalogItemVariable struct {
+	Active                  bool     `json:"active"`
+	Label                   string   `json:"label"`
+	DynamicValueField       string   `json:"dynamic_value_field"`
+	Type                    int      `json:"type"`
+	Mandatory               bool     `json:"mandatory"`
+	DisplayValue            string   `json:"displayvalue"`
+	FriendlyType            string   `json:"friendly_type"`
+	DisplayType             string   `json:"display_type"`
+	RenderLabel             bool     `json:"render_label"`
+	ReadOnly                bool     `json:"read_only"`
+	Name                    string   `json:"name"`
+	Attributes              string   `json:"attributes"`
+	ID                      string   `json:"id"`
+	Choices                 []Choice `json:"choices"`
+	Value                   string   `json:"value"`
+	DynamicValueDotWalkPath string   `json:"dynamic_value_dot_walk_path"`
+	HelpText                string   `json:"help_text"`
+	MaxLength               int      `json:"max_length"`
+	Order                   int      `json:"order"`
+}
+
+type AddItemToCartPayload struct {
+	Quantity     int                    `json:"sysparm_quantity"`
+	RequestedFor string                 `json:"sysparm_requested_for"`
+	Variables    map[string]interface{} `json:"variables"`
+}
+
+type CartItem struct {
+	CartItemID              string `json:"cart_item_id"`
+	CatalogItemID           string `json:"catalog_item_id"`
+	ItemName                string `json:"item_name"`
+	LocalizedRecurringPrice string `json:"localized_recurring_price"`
+	LocalizedPrice          string `json:"localized_price"`
+	Price                   string `json:"price"`
+	Quantity                string `json:"quantity"`
+	RecurringFrequency      string `json:"recurring_frequency"`
+	RecurringPrice          string `json:"recurring_price"`
+}
+
+type Cart struct {
+	CartID   string     `json:"cart_id"`
+	Items    []CartItem `json:"items"`
+	Subtotal string     `json:"subtotal"`
+}
+
+type RequestInfo struct {
+	RequestNumber string `json:"request_number"`
+	RequestID     string `json:"request_id"`
+}
+
+type VariableType int
+
+// TODO(lauren) not sure how to handle all of these
+// These correspond to variable type id
+const (
+	UNSPECIFIED = iota
+	YES_NO
+	MULTI_LINE_TEXT
+	MULTIPLE_CHOICE
+	NUMERIC_SCALE
+	SELECT_BOX
+	SINGLE_LINE_TEXT
+	CHECK_BOX
+	REFERENCE
+	DATE
+	DATE_TIME
+	LABEL
+	BREAK
+	UNKNOWN // Not sure what 13 is
+	MACRO
+	UI_PAGE
+	WIDE_SINGLE_LINE_TEXT
+	MACRO_WITH_LABEL
+	LOOKUP_SELECT_BOX
+	CONTAINER_START
+	CONTAINER_END
+	LIST_COLLECTOR
+	LOOKUP_MULTIPLE_CHOICE
+	HTML
+	SPLIT
+	MASKED
+)
+
+func ConvertVariableToSchemaCustomField(variable *CatalogItemVariable) (*v2.TicketCustomField, error) {
+	switch variable.Type {
+	case YES_NO, CHECK_BOX:
+		return sdkTicket.BoolFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+	case MULTI_LINE_TEXT, SINGLE_LINE_TEXT, LABEL, WIDE_SINGLE_LINE_TEXT: // Not sure if label should be here
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+	case MULTIPLE_CHOICE, LOOKUP_MULTIPLE_CHOICE:
+		var allowedChoices []*v2.TicketCustomFieldObjectValue
+		choices := variable.Choices
+		for _, c := range choices {
+			allowedChoices = append(allowedChoices, &v2.TicketCustomFieldObjectValue{
+				//TODO(lauren) is this ok for ID? Or use c.Label/c.index?
+				Id:          c.Value,
+				DisplayName: c.Value,
+			})
+		}
+		return sdkTicket.PickMultipleObjectValuesFieldSchema(variable.Name, variable.Name, variable.Mandatory, allowedChoices), nil
+	case DATE, DATE_TIME:
+		return sdkTicket.TimestampFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+	case SELECT_BOX, LOOKUP_SELECT_BOX:
+		var allowedChoices []*v2.TicketCustomFieldObjectValue
+		choices := variable.Choices
+		for _, c := range choices {
+			allowedChoices = append(allowedChoices, &v2.TicketCustomFieldObjectValue{
+				//TODO(lauren) is this ok for ID? Or use c.Label/c.index?
+				Id:          c.Value,
+				DisplayName: c.Value,
+			})
+		}
+		return sdkTicket.PickObjectValueFieldSchema(variable.Name, variable.Name, variable.Mandatory, allowedChoices), nil
+		//return sdkTicket.PickObjectValueFieldSchema(variable.ID, variable.Name, variable.Mandatory, allowedChoices), nil
+	default:
+		// Have seen REFERENCE (8), MACRO(14) variable types, needs more investigation
+		// TODO(lauren) handle this
+		/*if variable.Mandatory {
+			return nil, errors.New("Unsupported mandatory type")
+		}*/
+		return nil, nil
+	}
 }

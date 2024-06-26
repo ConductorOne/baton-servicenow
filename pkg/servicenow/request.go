@@ -160,3 +160,7 @@ func prepareGroupToRoleFilter(groupId string, roleId string) *FilterVars {
 		Query: query,
 	}
 }
+
+func prepareServiceCatalogFilters() *FilterVars {
+	return &FilterVars{}
+}
