@@ -35,6 +35,32 @@ const (
 	GroupRoleDetailBaseUrl = GroupRolesBaseUrl + "/%s"
 
 	UserRoleInheritanceBaseUrl = GlobalApiBaseURL + "/user_role_inheritance"
+
+	// Service Catalogs
+	// Catalog requested item
+	ServiceCatalogRequestedItemBaseUrl        = TableAPIBaseURL + "/sc_req_item"
+	ServiceCatalogRequestedItemDetailsBaseUrl = ServiceCatalogRequestedItemBaseUrl + "/%s"
+
+	// Catalog request
+	ServiceCatalogRequestBaseUrl        = TableAPIBaseURL + "/sc_request"
+	ServiceCatalogRequestDetailsBaseUrl = ServiceCatalogRequestBaseUrl + "/%s"
+
+	// Catalogs
+	ServiceCatalogBaseUrl         = BaseURL + "/sn_sc/servicecatalog"
+	ServiceCatalogListCatalogsUrl = ServiceCatalogBaseUrl + "/catalogs"
+	ServiceCatalogGetCatalogUrl   = ServiceCatalogListCatalogsUrl + "/%s"
+
+	// Catalog category
+	ServiceCatalogCategoryBaseUrl       = ServiceCatalogGetCatalogUrl + "/categories"
+	ServiceCatalogCategoryDetailBaseUrl = ServiceCatalogCategoryBaseUrl + "/%s"
+
+	// Catalog items
+	ServiceCatalogItemBaseUrl      = ServiceCatalogBaseUrl + "/items"
+	ServiceCatalogItemGetUrl       = ServiceCatalogItemBaseUrl + "/%s"
+	ServiceCatalogItemVariablesUrl = ServiceCatalogItemGetUrl + "/variables"
+
+	ServiceCatalogAddItemToCartUrl = ServiceCatalogItemGetUrl + "/add_to_cart"
+	ServiceCatalogCartSubmitOrder  = ServiceCatalogBaseUrl + "/cart/submit_order"
 )
 
 type ListResponse[T any] struct {
@@ -54,6 +80,15 @@ type GroupMembersResponse = ListResponse[GroupMember]
 type UserRolesResponse = SingleResponse[UserRoles]
 type UserToRoleResponse ListResponse[UserToRole]
 type GroupToRoleResponse ListResponse[GroupToRole]
+type CatalogsResponse = ListResponse[Catalog]
+type CategoriesResponse = ListResponse[Category]
+type CatalogItemsResponse = ListResponse[CatalogItem]
+type CatalogItemResponse = SingleResponse[CatalogItem]
+type CatalogItemVariablesResponse = ListResponse[CatalogItemVariable]
+type AddItemToCartResponse = SingleResponse[Cart]
+type SubmitCartOrderResponse = SingleResponse[RequestInfo]
+type RequestItemResponse = SingleResponse[RequestItem]
+type ServiceCatalogRequestResponse = SingleResponse[ServiceCatalogRequest]
 
 type Client struct {
 	httpClient *http.Client
@@ -354,10 +389,6 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 	queryParams := url.Values{}
 	for _, queryParam := range paramOptions {
 		queryParam.setup(&queryParams)
-	}
-
-	if method == http.MethodGet {
-		queryParams.Set("sysparm_exclude_reference_link", "true")
 	}
 
 	req.URL.RawQuery = queryParams.Encode()
