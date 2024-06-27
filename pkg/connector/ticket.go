@@ -15,22 +15,20 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// TODO(lauren) paginate
 func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token) ([]*v2.TicketSchema, string, annotations.Annotations, error) {
-	//bag, offset, err := parsePageToken
-
-	var ret []*v2.TicketSchema
-
-	catalogItems, _, err := s.client.GetCatalogItems(ctx,
-		servicenow.PaginationVars{
-			//Limit:  ResourcesPageSize,
-			//Offset: offset,
-		},
+	// TODO(lauren) should we use pt.size?
+	offset, err := convertPageToken(pt.Token)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	catalogItems, nextPageToken, err := s.client.GetCatalogItems(ctx,
+		&servicenow.PaginationVars{Offset: offset},
 	)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
+	var ret []*v2.TicketSchema
 	for _, catalogItem := range catalogItems {
 		catalogItemSchema, err := s.schemaForCatalogItem(ctx, &catalogItem)
 		if err != nil {
@@ -39,23 +37,19 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 		ret = append(ret, catalogItemSchema)
 	}
 
-	return ret, "", nil, nil
+	return ret, nextPageToken, nil, nil
 }
 
 func (s *ServiceNow) GetTicket(ctx context.Context, ticketId string) (*v2.Ticket, annotations.Annotations, error) {
-	serviceCatalogRequest, err := s.client.GetServiceCatalogRequest(ctx, ticketId)
+	serviceCatalogRequestedItem, err := s.client.GetServiceCatalogRequestItem(ctx, ticketId)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	ticket, annos, err := s.serviceCatalogRequestToTicket(ctx, serviceCatalogRequest)
+	ticket, annos, err := s.serviceCatalogRequestItemToTicket(ctx, serviceCatalogRequestedItem)
 	if err != nil {
 		return nil, nil, err
 	}
-
 	return ticket, annos, err
-	// TODO(lauren) do we want to get request item also? Not sure how to get the id
-	// ticket, err := s.client.GetRequestItem(ctx, ticketId)
 }
 
 func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema *v2.TicketSchema) (*v2.Ticket, annotations.Annotations, error) {
@@ -102,6 +96,7 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 
 	createServiceCatalogRequestPayload := &servicenow.AddItemToCartPayload{Quantity: 1}
 
+	// TODO(lauren) check values format
 	// TODO(lauren) move to create client method
 	for _, opt := range ticketOptions {
 		opt(createServiceCatalogRequestPayload)
@@ -112,7 +107,7 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 		return nil, nil, err
 	}
 
-	ticket, annos, err := s.serviceCatalogRequestToTicket(ctx, serviceCatalogRequest)
+	ticket, annos, err := s.serviceCatalogRequestItemToTicket(ctx, serviceCatalogRequest)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -139,6 +134,7 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 
 	var err error
 	// TODO(lauren) we don't have type
+	// TODO(lauren) make type a custom field
 	var ticketTypes []*v2.TicketType
 
 	customFields := make(map[string]*v2.TicketCustomField)
@@ -220,6 +216,50 @@ func (s *ServiceNow) serviceCatalogRequestToTicket(ctx context.Context, request 
 		},
 		Type:         nil,
 		Labels:       nil,
+		Url:          "",
+		CustomFields: nil,
+		CreatedAt:    timestamppb.New(createdAt),
+		UpdatedAt:    timestamppb.New(updatedAt),
+		CompletedAt:  completedAt,
+	}, nil, nil
+}
+
+// TODO(lauren) if we want display name for status/other fields we can use sysparm_display_value=all query param
+// or dot walking for specific fields (e.g sysparm_fields=cat_item.name)" \
+func (s *ServiceNow) serviceCatalogRequestItemToTicket(ctx context.Context, requestedItem *servicenow.RequestedItem) (*v2.Ticket, annotations.Annotations, error) {
+	// TODO(lauren) use OpenedAt instead?
+	createdAt, err := time.Parse(time.DateTime, requestedItem.SysCreatedOn)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	updatedAt, err := time.Parse(time.DateTime, requestedItem.SysUpdatedOn)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var completedAt *timestamppb.Timestamp
+	if requestedItem.ClosedAt != "" {
+		closedAt, err := time.Parse(time.DateTime, requestedItem.ClosedAt)
+		if err != nil {
+			return nil, nil, err
+		}
+		completedAt = timestamppb.New(closedAt)
+	}
+
+	// TODO(lauren) we have RequestedFor and OpenedBy
+	// Do we want to set these on Assignees/Reporter?
+	return &v2.Ticket{
+		Id:          requestedItem.Id,
+		DisplayName: requestedItem.Number, // catalog request does not have display name
+		Description: requestedItem.Description,
+		Assignees:   nil,
+		Reporter:    nil,
+		Status: &v2.TicketStatus{
+			Id: requestedItem.State,
+		},
+		Type:         nil,
+		Labels:       []string{requestedItem.SysTags},
 		Url:          "",
 		CustomFields: nil,
 		CreatedAt:    timestamppb.New(createdAt),

@@ -87,7 +87,8 @@ type CatalogItemResponse = SingleResponse[CatalogItem]
 type CatalogItemVariablesResponse = ListResponse[CatalogItemVariable]
 type AddItemToCartResponse = SingleResponse[Cart]
 type SubmitCartOrderResponse = SingleResponse[RequestInfo]
-type RequestItemResponse = SingleResponse[RequestItem]
+type RequestItemResponse = SingleResponse[RequestedItem]
+type RequestItemsResponse = ListResponse[RequestedItem]
 type ServiceCatalogRequestResponse = SingleResponse[ServiceCatalogRequest]
 
 type Client struct {

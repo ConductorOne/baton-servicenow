@@ -161,6 +161,18 @@ func prepareGroupToRoleFilter(groupId string, roleId string) *FilterVars {
 	}
 }
 
-func prepareServiceCatalogFilters() *FilterVars {
-	return &FilterVars{}
+func prepareServiceCatalogFilters(opts ...FilterOption) *FilterVars {
+	filter := &FilterVars{}
+	for _, o := range opts {
+		o(filter)
+	}
+	return filter
+}
+
+type FilterOption func(filter *FilterVars)
+
+func WithQuery(query string) FilterOption {
+	return func(filter *FilterVars) {
+		filter.Query = query
+	}
 }
