@@ -73,6 +73,18 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 			}
 			catalogItemID = catalogItem.GetId()
 		default:
+			ticketField := ticketFields[id]
+
+			// We need to handle this type differently so we only get the string value we set for "id"
+			// The servicenow variable "choice" seem to only be strings (single select, multiselect)
+			// Should we just use GetPickStringValue(s)?
+			pick := ticketField.GetPickObjectValue()
+			if pick != nil {
+				val := pick.GetValue().GetId()
+				ticketOptions = append(ticketOptions, servicenow.WithCustomField(cf.GetId(), val))
+				continue
+			}
+
 			val, err := sdkTicket.GetCustomFieldValue(ticketFields[id])
 			if err != nil {
 				return nil, nil, err
@@ -96,7 +108,6 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 
 	createServiceCatalogRequestPayload := &servicenow.AddItemToCartPayload{Quantity: 1}
 
-	// TODO(lauren) check values format
 	// TODO(lauren) move to create client method
 	for _, opt := range ticketOptions {
 		opt(createServiceCatalogRequestPayload)
