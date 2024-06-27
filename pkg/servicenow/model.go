@@ -72,6 +72,7 @@ type UserRoles struct {
 	FromGroup []string `json:"from_group"`
 }
 
+// TODO(lauren) remove unecessary fields
 // Service Catalog request models
 type ResourceRefLink struct {
 	Link  string `json:"link"`
@@ -173,16 +174,46 @@ type ServiceCatalogRequest struct {
 	UponApproval           string `json:"upon_approval"`
 }
 
-type RequestItem struct {
+type RequestedItem struct {
 	BaseResource
 
-	State       string `json:"state"`
-	Description string `json:"description"`
-	Number      string `json:"number"`
-	Stage       string `json:"stage"`
+	State               string `json:"state"`
+	Description         string `json:"description"`
+	Number              string `json:"number"`
+	TaskEffectiveNumber string `json:"task_effective_number"`
+	Stage               string `json:"stage"`
 
-	Request ResourceRefLink `json:"request"`
-	CatItem ResourceRefLink `json:"cat_item"`
+	Request  ResourceRefLink `json:"request"`
+	CatItem  ResourceRefLink `json:"cat_item"`
+	Catalogs []Catalog       `json:"catalogs"`
+	Category Category        `json:"category"`
+	SysTags  string          `json:"sys_tags"`
+
+	Parent           string          `json:"parent"`
+	WatchList        string          `json:"watch_list"`
+	ScCatalog        string          `json:"sc_catalog"`
+	UponReject       string          `json:"upon_reject"`
+	RequestedFor     ResourceRefLink `json:"requested_for"`
+	SysUpdatedOn     string          `json:"sys_updated_on"`
+	SysUpdatedBy     string          `json:"sys_updated_by"`
+	ClosedAt         string          `json:"closed_at"`
+	ClosedBy         string          `json:"closed_by"`
+	OpenedBy         ResourceRefLink `json:"opened_by"`
+	SysCreatedOn     string          `json:"sys_created_on"`
+	SysDomain        ResourceRefLink `json:"sys_domain"`
+	SysCreatedBy     string          `json:"sys_created_by"`
+	Impact           string          `json:"impact"`
+	Active           string          `json:"active"`
+	Priority         string          `json:"priority"`
+	OpenedAt         string          `json:"opened_at"`
+	ShortDescription string          `json:"short_description"`
+	SysClassName     string          `json:"sys_class_name"`
+	Urgency          string          `json:"urgency"`
+	Approval         string          `json:"approval"`
+	DueDate          string          `json:"due_date"`
+	SysModCount      string          `json:"sys_mod_count"`
+	UponApproval     string          `json:"upon_approval"`
+	AssignedTo       string          `json:"assigned_to"`
 }
 
 type Choice struct {
@@ -241,6 +272,7 @@ type Cart struct {
 	Subtotal string     `json:"subtotal"`
 }
 
+// TODOO(lauren)omitemty
 type RequestInfo struct {
 	RequestNumber string `json:"request_number"`
 	RequestID     string `json:"request_id"`
