@@ -85,7 +85,6 @@ type Catalog struct {
 	HasCategories bool   `json:"has_categories,omitempty"`
 	HasItems      bool   `json:"has_items,omitempty"`
 	Description   string `json:"description,omitempty"`
-	DesktopImage  string `json:"desktop_image,omitempty"`
 }
 
 type Category struct {
@@ -93,9 +92,6 @@ type Category struct {
 	Title           string        `json:"title"`
 	Description     string        `json:"description,omitempty"`
 	FullDescription string        `json:"full_description,omitempty"`
-	Icon            string        `json:"icon,omitempty"`
-	HeaderIcon      string        `json:"header_icon,omitempty"`
-	HomepageImage   string        `json:"homepage_image,omitempty"`
 	ItemCount       int           `json:"count,omitempty"`
 	Subcategories   []SubCategory `json:"subcategories,omitempty"`
 }
@@ -106,31 +102,18 @@ type SubCategory struct {
 }
 
 type CatalogItem struct {
-	Catalogs                []Catalog             `json:"catalogs"`
-	Category                Category              `json:"category"`
-	ContentType             string                `json:"content_type"`
-	Description             string                `json:"description"`
-	Icon                    string                `json:"icon"`
-	KbArticle               string                `json:"kb_article"`
-	LocalCurrency           string                `json:"local_currency"`
-	LocalizedPrice          string                `json:"localized_price"`
-	LocalizedRecurringPrice string                `json:"localized_recurring_price"`
-	Name                    string                `json:"name"`
-	Order                   int                   `json:"order"`
-	Picture                 string                `json:"picture"`
-	Price                   string                `json:"price"`
-	PriceCurrency           string                `json:"price_currency"`
-	RecurringFrequency      string                `json:"recurring_frequency"`
-	RecurringPrice          string                `json:"recurring_price"`
-	RecurringPriceCurrency  string                `json:"recurring_price_currency"`
-	ShortDescription        string                `json:"short_description"`
-	ShowPrice               bool                  `json:"show_price"`
-	ShowQuantity            bool                  `json:"show_quantity"`
-	SysClassName            string                `json:"sys_class_name"`
-	SysID                   string                `json:"sys_id"`
-	Type                    string                `json:"type"`
-	URL                     string                `json:"url"`
-	Variables               []CatalogItemVariable `json:"variables,omitempty"`
+	Catalogs         []Catalog             `json:"catalogs"`
+	Category         Category              `json:"category"`
+	ContentType      string                `json:"content_type"`
+	Description      string                `json:"description"`
+	Name             string                `json:"name"`
+	Order            int                   `json:"order"`
+	ShortDescription string                `json:"short_description"`
+	SysClassName     string                `json:"sys_class_name"`
+	SysID            string                `json:"sys_id"`
+	Type             string                `json:"type"`
+	URL              string                `json:"url"`
+	Variables        []CatalogItemVariable `json:"variables,omitempty"`
 }
 
 type ServiceCatalogRequest struct {
@@ -160,16 +143,12 @@ type ServiceCatalogRequest struct {
 	AdditionalAssigneeList string `json:"additional_assignee_list"`
 	Description            string `json:"description"`
 	CloseNotes             string `json:"close_notes"`
-	SysClassName           string `json:"sys_class_name"`
 	ClosedBy               string `json:"closed_by"`
-	FollowUp               string `json:"follow_up"`
-	Urgency                string `json:"urgency"`
 	RequestedDate          string `json:"requested_date"`
 	AssignedTo             string `json:"assigned_to"`
 	Comments               string `json:"comments"`
 	CommentsAndWorkNotes   string `json:"comments_and_work_notes"`
 	DueDate                string `json:"due_date"`
-	SysModCount            string `json:"sys_mod_count"`
 	SysTags                string `json:"sys_tags"`
 	UponApproval           string `json:"upon_approval"`
 }
@@ -190,7 +169,6 @@ type RequestedItem struct {
 	SysTags  string          `json:"sys_tags"`
 
 	Parent           string          `json:"parent"`
-	WatchList        string          `json:"watch_list"`
 	ScCatalog        string          `json:"sc_catalog"`
 	UponReject       string          `json:"upon_reject"`
 	RequestedFor     ResourceRefLink `json:"requested_for"`
@@ -200,30 +178,21 @@ type RequestedItem struct {
 	ClosedBy         string          `json:"closed_by"`
 	OpenedBy         ResourceRefLink `json:"opened_by"`
 	SysCreatedOn     string          `json:"sys_created_on"`
-	SysDomain        ResourceRefLink `json:"sys_domain"`
 	SysCreatedBy     string          `json:"sys_created_by"`
-	Impact           string          `json:"impact"`
 	Active           string          `json:"active"`
 	Priority         string          `json:"priority"`
 	OpenedAt         string          `json:"opened_at"`
 	ShortDescription string          `json:"short_description"`
-	SysClassName     string          `json:"sys_class_name"`
-	Urgency          string          `json:"urgency"`
 	Approval         string          `json:"approval"`
 	DueDate          string          `json:"due_date"`
-	SysModCount      string          `json:"sys_mod_count"`
 	UponApproval     string          `json:"upon_approval"`
 	AssignedTo       string          `json:"assigned_to"`
 }
 
 type Choice struct {
-	Index                  int     `json:"index"`
-	Label                  string  `json:"label"`
-	Value                  string  `json:"value"`
-	RecurringPrice         float64 `json:"recurring_price"`
-	Price                  float64 `json:"price"`
-	PriceCurrency          string  `json:"price_currency"`
-	RecurringPriceCurrency string  `json:"recurring_price_currency"`
+	Index int    `json:"index"`
+	Label string `json:"label"`
+	Value string `json:"value"`
 }
 
 type CatalogItemVariable struct {
@@ -255,21 +224,14 @@ type AddItemToCartPayload struct {
 }
 
 type CartItem struct {
-	CartItemID              string `json:"cart_item_id"`
-	CatalogItemID           string `json:"catalog_item_id"`
-	ItemName                string `json:"item_name"`
-	LocalizedRecurringPrice string `json:"localized_recurring_price"`
-	LocalizedPrice          string `json:"localized_price"`
-	Price                   string `json:"price"`
-	Quantity                string `json:"quantity"`
-	RecurringFrequency      string `json:"recurring_frequency"`
-	RecurringPrice          string `json:"recurring_price"`
+	CartItemID    string `json:"cart_item_id"`
+	CatalogItemID string `json:"catalog_item_id"`
+	ItemName      string `json:"item_name"`
 }
 
 type Cart struct {
-	CartID   string     `json:"cart_id"`
-	Items    []CartItem `json:"items"`
-	Subtotal string     `json:"subtotal"`
+	CartID string     `json:"cart_id"`
+	Items  []CartItem `json:"items"`
 }
 
 // TODOO(lauren)omitemty
