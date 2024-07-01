@@ -102,17 +102,14 @@ type SubCategory struct {
 }
 
 type CatalogItem struct {
+	BaseResource
 	Catalogs         []Catalog             `json:"catalogs"`
-	Category         Category              `json:"category"`
-	ContentType      string                `json:"content_type"`
+	Category         Category              `json:"category,omitempty"`
 	Description      string                `json:"description"`
 	Name             string                `json:"name"`
-	Order            int                   `json:"order"`
 	ShortDescription string                `json:"short_description"`
 	SysClassName     string                `json:"sys_class_name"`
-	SysID            string                `json:"sys_id"`
 	Type             string                `json:"type"`
-	URL              string                `json:"url"`
 	Variables        []CatalogItemVariable `json:"variables,omitempty"`
 }
 
@@ -135,22 +132,16 @@ type ServiceCatalogRequest struct {
 	ApprovalSet         string           `json:"approval_set"`
 	SysUpdatedBy        string           `json:"sys_updated_by"`
 	SysCreatedBy        string           `json:"sys_created_by"`
-	Priority            string           `json:"priority"`
 	Approval            string           `json:"approval"`
 
-	ShortDescription       string `json:"short_description"`
-	AssignmentGroup        string `json:"assignment_group"`
-	AdditionalAssigneeList string `json:"additional_assignee_list"`
-	Description            string `json:"description"`
-	CloseNotes             string `json:"close_notes"`
-	ClosedBy               string `json:"closed_by"`
-	RequestedDate          string `json:"requested_date"`
-	AssignedTo             string `json:"assigned_to"`
-	Comments               string `json:"comments"`
-	CommentsAndWorkNotes   string `json:"comments_and_work_notes"`
-	DueDate                string `json:"due_date"`
-	SysTags                string `json:"sys_tags"`
-	UponApproval           string `json:"upon_approval"`
+	ShortDescription     string `json:"short_description"`
+	Description          string `json:"description"`
+	CloseNotes           string `json:"close_notes"`
+	ClosedBy             string `json:"closed_by"`
+	AssignedTo           string `json:"assigned_to"`
+	Comments             string `json:"comments"`
+	CommentsAndWorkNotes string `json:"comments_and_work_notes"`
+	UponApproval         string `json:"upon_approval"`
 }
 
 type RequestedItem struct {
@@ -160,17 +151,13 @@ type RequestedItem struct {
 	Description         string `json:"description"`
 	Number              string `json:"number"`
 	TaskEffectiveNumber string `json:"task_effective_number"`
-	Stage               string `json:"stage"`
 
 	Request  ResourceRefLink `json:"request"`
 	CatItem  ResourceRefLink `json:"cat_item"`
-	Catalogs []Catalog       `json:"catalogs"`
-	Category Category        `json:"category"`
-	SysTags  string          `json:"sys_tags"`
+	Catalogs []Catalog       `json:"catalogs,omitempty"`
+	Category Category        `json:"category,omitempty"`
 
-	Parent           string          `json:"parent"`
-	ScCatalog        string          `json:"sc_catalog"`
-	UponReject       string          `json:"upon_reject"`
+	ScCatalog        string          `json:"sc_catalog,omitempty"`
 	RequestedFor     ResourceRefLink `json:"requested_for"`
 	SysUpdatedOn     string          `json:"sys_updated_on"`
 	SysUpdatedBy     string          `json:"sys_updated_by"`
@@ -183,7 +170,6 @@ type RequestedItem struct {
 	OpenedAt         string          `json:"opened_at"`
 	ShortDescription string          `json:"short_description"`
 	Approval         string          `json:"approval"`
-	UponApproval     string          `json:"upon_approval"`
 	AssignedTo       string          `json:"assigned_to"`
 }
 
@@ -213,6 +199,8 @@ type CatalogItemVariable struct {
 	HelpText                string   `json:"help_text"`
 	MaxLength               int      `json:"max_length"`
 	Order                   int      `json:"order"`
+	Reference               string   `json:"reference"`
+	RefQualifier            string   `json:"ref_qualifier"`
 }
 
 type AddItemToCartPayload struct {
@@ -267,7 +255,7 @@ const (
 	YES_NO
 	MULTI_LINE_TEXT
 	MULTIPLE_CHOICE
-	NUMERIC_SCALE
+	NUMERIC_SCALE // TODO(lauren) add baton custom field type for number
 	SELECT_BOX
 	SINGLE_LINE_TEXT
 	CHECK_BOX
@@ -276,7 +264,7 @@ const (
 	DATE_TIME
 	LABEL
 	BREAK
-	UNKNOWN // Not sure what 13 is
+	_
 	MACRO
 	UI_PAGE
 	WIDE_SINGLE_LINE_TEXT
@@ -289,13 +277,21 @@ const (
 	HTML
 	SPLIT
 	MASKED
+	EMAIL
+	URL
+	IP_ADDRESS
+	DURATION
+	_
+	REQUESTED_FOR
+	RICH_TEXT_LABEL
+	ATTACHMENT
 )
 
 func ConvertVariableToSchemaCustomField(variable *CatalogItemVariable) (*v2.TicketCustomField, error) {
 	switch variable.Type {
 	case YES_NO, CHECK_BOX:
 		return sdkTicket.BoolFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
-	case MULTI_LINE_TEXT, SINGLE_LINE_TEXT, LABEL, WIDE_SINGLE_LINE_TEXT: // Not sure if label should be here
+	case MULTI_LINE_TEXT, SINGLE_LINE_TEXT, WIDE_SINGLE_LINE_TEXT:
 		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
 	case MULTIPLE_CHOICE, LOOKUP_MULTIPLE_CHOICE:
 		var allowedChoices []*v2.TicketCustomFieldObjectValue
