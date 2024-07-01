@@ -180,11 +180,9 @@ type RequestedItem struct {
 	SysCreatedOn     string          `json:"sys_created_on"`
 	SysCreatedBy     string          `json:"sys_created_by"`
 	Active           string          `json:"active"`
-	Priority         string          `json:"priority"`
 	OpenedAt         string          `json:"opened_at"`
 	ShortDescription string          `json:"short_description"`
 	Approval         string          `json:"approval"`
-	DueDate          string          `json:"due_date"`
 	UponApproval     string          `json:"upon_approval"`
 	AssignedTo       string          `json:"assigned_to"`
 }
@@ -234,10 +232,30 @@ type Cart struct {
 	Items  []CartItem `json:"items"`
 }
 
-// TODOO(lauren)omitemty
 type RequestInfo struct {
 	RequestNumber string `json:"request_number"`
 	RequestID     string `json:"request_id"`
+}
+
+type Label struct {
+	Id         string `json:"sys_id,omitempty"`
+	Name       string `json:"name"`
+	ViewableBy string `json:"viewable_by"`
+}
+
+type RequestItemState struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+type LabelEntryPayload struct {
+	Table    string `json:"table"`
+	Label    string `json:"label"`
+	TableKey string `json:"table_key"`
+}
+
+type LabelEntryName struct {
+	LabelName string `json:"label.name"`
 }
 
 type VariableType int

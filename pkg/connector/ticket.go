@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"errors"
+	"net/url"
 	"time"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -16,17 +17,26 @@ import (
 )
 
 func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token) ([]*v2.TicketSchema, string, annotations.Annotations, error) {
-	// TODO(lauren) should we use pt.size?
 	offset, err := convertPageToken(pt.Token)
 	if err != nil {
 		return nil, "", nil, err
 	}
+
 	catalogItems, nextPageToken, err := s.client.GetCatalogItems(ctx,
-		&servicenow.PaginationVars{Offset: offset},
+		&servicenow.PaginationVars{
+			Limit:  pt.Size,
+			Offset: offset,
+		},
 	)
 	if err != nil {
 		return nil, "", nil, err
 	}
+
+	requestedItemStates, err := s.client.GetServiceCatalogRequestedItemStates(ctx)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	ticketStatuses := requestedItemStatesToTicketStatus(requestedItemStates)
 
 	var ret []*v2.TicketSchema
 	for _, catalogItem := range catalogItems {
@@ -34,6 +44,7 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 		if err != nil {
 			return nil, "", nil, err
 		}
+		catalogItemSchema.Statuses = ticketStatuses
 		ret = append(ret, catalogItemSchema)
 	}
 
@@ -106,19 +117,22 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 		return nil, nil, errors.New("error: unable to create ticket, ticket is invalid")
 	}
 
+	// TODO(lauren) Add RequestedFor to ticket request (baton-sdk change)
 	createServiceCatalogRequestPayload := &servicenow.AddItemToCartPayload{Quantity: 1}
-
-	// TODO(lauren) move to create client method
 	for _, opt := range ticketOptions {
 		opt(createServiceCatalogRequestPayload)
 	}
 
-	serviceCatalogRequest, err := s.client.CreateServiceCatalogRequest(ctx, catalogItemID, createServiceCatalogRequestPayload)
+	serviceCatalogRequestedItem, err := s.client.CreateServiceCatalogRequest(ctx, catalogItemID, createServiceCatalogRequestPayload)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = s.client.AddLabelsToRequest(ctx, serviceCatalogRequestedItem.Id, ticket.Labels)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	ticket, annos, err := s.serviceCatalogRequestItemToTicket(ctx, serviceCatalogRequest)
+	ticket, annos, err := s.serviceCatalogRequestItemToTicket(ctx, serviceCatalogRequestedItem)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -133,10 +147,16 @@ func (s *ServiceNow) GetTicketSchema(ctx context.Context, schemaID string) (*v2.
 	if err != nil {
 		return nil, nil, err
 	}
+	requestedItemStates, err := s.client.GetServiceCatalogRequestedItemStates(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	ticketStatuses := requestedItemStatesToTicketStatus(requestedItemStates)
 	schema, err := s.schemaForCatalogItem(ctx, catalogItem)
 	if err != nil {
 		return nil, nil, err
 	}
+	schema.Statuses = ticketStatuses
 	return schema, nil, nil
 }
 
@@ -144,7 +164,7 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 	l := ctxzap.Extract(ctx)
 
 	var err error
-	// TODO(lauren) we don't have type
+
 	// TODO(lauren) make type a custom field
 	var ticketTypes []*v2.TicketType
 
@@ -192,51 +212,6 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 	return ret, nil
 }
 
-func (s *ServiceNow) serviceCatalogRequestToTicket(ctx context.Context, request *servicenow.ServiceCatalogRequest) (*v2.Ticket, annotations.Annotations, error) {
-	// TODO(lauren) use OpenedAt instead?
-	createdAt, err := time.Parse(time.DateTime, request.SysCreatedOn)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	updatedAt, err := time.Parse(time.DateTime, request.SysUpdatedOn)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var completedAt *timestamppb.Timestamp
-	if request.ClosedAt != "" {
-		closedAt, err := time.Parse(time.DateTime, request.ClosedAt)
-		if err != nil {
-			return nil, nil, err
-		}
-		completedAt = timestamppb.New(closedAt)
-	}
-
-	// TODO(lauren) we have RequestedFor and OpenedBy
-	// Do we want to set these on Assignees/Reporter?
-	return &v2.Ticket{
-		Id:          request.Id,
-		DisplayName: request.Number, // catalog request does not have display name
-		Description: request.Description,
-		Assignees:   nil,
-		Reporter:    nil,
-		Status: &v2.TicketStatus{
-			Id:          request.State,
-			DisplayName: request.RequestState,
-		},
-		Type:         nil,
-		Labels:       nil,
-		Url:          "",
-		CustomFields: nil,
-		CreatedAt:    timestamppb.New(createdAt),
-		UpdatedAt:    timestamppb.New(updatedAt),
-		CompletedAt:  completedAt,
-	}, nil, nil
-}
-
-// TODO(lauren) if we want display name for status/other fields we can use sysparm_display_value=all query param
-// or dot walking for specific fields (e.g sysparm_fields=cat_item.name)" \
 func (s *ServiceNow) serviceCatalogRequestItemToTicket(ctx context.Context, requestedItem *servicenow.RequestedItem) (*v2.Ticket, annotations.Annotations, error) {
 	// TODO(lauren) use OpenedAt instead?
 	createdAt, err := time.Parse(time.DateTime, requestedItem.SysCreatedOn)
@@ -258,8 +233,15 @@ func (s *ServiceNow) serviceCatalogRequestItemToTicket(ctx context.Context, requ
 		completedAt = timestamppb.New(closedAt)
 	}
 
+	labels, err := s.client.GetLabelsForRequestedItem(ctx, requestedItem.Id)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// TODO(lauren) we have RequestedFor and OpenedBy
 	// Do we want to set these on Assignees/Reporter?
+
+	// TODO(lauren) if we want to set approvers for assignees must query sysapproval_approver table
 	return &v2.Ticket{
 		Id:          requestedItem.Id,
 		DisplayName: requestedItem.Number, // catalog request does not have display name
@@ -269,12 +251,33 @@ func (s *ServiceNow) serviceCatalogRequestItemToTicket(ctx context.Context, requ
 		Status: &v2.TicketStatus{
 			Id: requestedItem.State,
 		},
-		Type:         nil,
-		Labels:       []string{requestedItem.SysTags},
-		Url:          "",
+		Labels:       labels,
+		Url:          s.generateRequestedItemURL(requestedItem),
 		CustomFields: nil,
 		CreatedAt:    timestamppb.New(createdAt),
 		UpdatedAt:    timestamppb.New(updatedAt),
 		CompletedAt:  completedAt,
 	}, nil, nil
+}
+
+func (s *ServiceNow) generateRequestedItemURL(requestedItem *servicenow.RequestedItem) string {
+	params := url.Values{"sys_id": []string{requestedItem.Id}}
+	requestUrl := url.URL{
+		Scheme:   "https",
+		Host:     s.client.GetBaseURL(),
+		Path:     "sc_req_item.do",
+		RawQuery: params.Encode(),
+	}
+	return requestUrl.String()
+}
+
+func requestedItemStatesToTicketStatus(states []servicenow.RequestItemState) []*v2.TicketStatus {
+	ticketStatuses := make([]*v2.TicketStatus, 0, len(states))
+	for _, state := range states {
+		ticketStatuses = append(ticketStatuses, &v2.TicketStatus{
+			Id:          state.Value,
+			DisplayName: state.Label,
+		})
+	}
+	return ticketStatuses
 }
