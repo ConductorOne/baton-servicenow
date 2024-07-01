@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
-	"go.uber.org/zap"
 )
+
+var LabelNotFoundErr = errors.New("label not found")
 
 type FieldOption func(catalogItemRequestPayload *AddItemToCartPayload)
 
@@ -26,9 +25,7 @@ func (c *Client) GetServiceCatalogRequest(ctx context.Context, requestId string)
 		ctx,
 		fmt.Sprintf(ServiceCatalogRequestDetailsBaseUrl, c.deployment, requestId),
 		&serviceCatalogRequestResponse,
-		[]QueryParam{
-			prepareServiceCatalogFilters(),
-		}...,
+		WithIncludeExternalRefLink(),
 	)
 	if err != nil {
 		return nil, err
@@ -42,9 +39,7 @@ func (c *Client) GetServiceCatalogRequestItem(ctx context.Context, requestItemId
 		ctx,
 		fmt.Sprintf(ServiceCatalogRequestedItemDetailsBaseUrl, c.deployment, requestItemId),
 		&requestItemResponse,
-		[]QueryParam{
-			prepareServiceCatalogFilters(),
-		}...,
+		WithIncludeExternalRefLink(),
 	)
 	if err != nil {
 		return nil, err
@@ -54,8 +49,10 @@ func (c *Client) GetServiceCatalogRequestItem(ctx context.Context, requestItemId
 
 func (c *Client) GetServiceCatalogRequestedItemForRequest(ctx context.Context, serviceCatalogRequestId string) (*RequestedItem, error) {
 	requestItemsResponse, _, err := c.GetServiceCatalogRequestItems(ctx,
-		PaginationVars{Limit: 1},
-		prepareServiceCatalogFilters(WithQuery(fmt.Sprintf("request=%s", serviceCatalogRequestId))))
+		WithPageLimit(1),
+		WithQuery(fmt.Sprintf("request=%s", serviceCatalogRequestId)),
+		WithIncludeExternalRefLink(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -65,16 +62,13 @@ func (c *Client) GetServiceCatalogRequestedItemForRequest(ctx context.Context, s
 	return &requestItemsResponse[0], nil
 }
 
-func (c *Client) GetServiceCatalogRequestItems(ctx context.Context, paginationVars PaginationVars, filter *FilterVars) ([]RequestedItem, string, error) {
+func (c *Client) GetServiceCatalogRequestItems(ctx context.Context, reqOptions ...ReqOpt) ([]RequestedItem, string, error) {
 	var requestItemsResponse RequestItemsResponse
 	nextPageToken, err := c.get(
 		ctx,
 		fmt.Sprintf(ServiceCatalogRequestedItemBaseUrl, c.deployment),
 		&requestItemsResponse,
-		[]QueryParam{
-			&paginationVars,
-			filter,
-		}...,
+		reqOptions...,
 	)
 	if err != nil {
 		return nil, "", err
@@ -88,10 +82,7 @@ func (c *Client) GetCatalogItems(ctx context.Context, paginationVars *Pagination
 		ctx,
 		fmt.Sprintf(ServiceCatalogItemBaseUrl, c.deployment),
 		&catalogItemsResponse,
-		[]QueryParam{
-			paginationVars,
-			prepareServiceCatalogFilters(),
-		}...,
+		WithPageLimit(paginationVars.Limit),
 	)
 	if err != nil {
 		return nil, "", err
@@ -105,9 +96,6 @@ func (c *Client) GetCatalogItem(ctx context.Context, catalogItemId string) (*Cat
 		ctx,
 		fmt.Sprintf(ServiceCatalogItemGetUrl, c.deployment, catalogItemId),
 		&catalogItemResponse,
-		[]QueryParam{
-			prepareServiceCatalogFilters(),
-		}...,
 	)
 	if err != nil {
 		return nil, err
@@ -121,9 +109,6 @@ func (c *Client) GetCatalogItemVariables(ctx context.Context, catalogItemId stri
 		ctx,
 		fmt.Sprintf(ServiceCatalogItemVariablesUrl, c.deployment, catalogItemId),
 		&catalogItemVariablesResponse,
-		[]QueryParam{
-			prepareServiceCatalogFilters(),
-		}...,
 	)
 	if err != nil {
 		return nil, err
@@ -135,7 +120,6 @@ func (c *Client) GetCatalogItemVariables(ctx context.Context, catalogItemId stri
 // 1. Add catalog item to cart (with all required variables)
 // 2. Submit cart order
 func (c *Client) CreateServiceCatalogRequest(ctx context.Context, catalogItemId string, payload *AddItemToCartPayload) (*RequestedItem, error) {
-	l := ctxzap.Extract(ctx)
 	_, err := c.AddItemToCart(ctx, catalogItemId, payload)
 	if err != nil {
 		return nil, err
@@ -144,18 +128,10 @@ func (c *Client) CreateServiceCatalogRequest(ctx context.Context, catalogItemId 
 	if err != nil {
 		return nil, err
 	}
-	catalogRequest, err := c.GetServiceCatalogRequest(ctx, requestInfo.RequestID)
-	if err != nil {
-		return nil, err
-	}
-
-	l.Info("created catalog request", zap.Any("catalogRequest", catalogRequest))
-
 	requestItem, err := c.GetServiceCatalogRequestedItemForRequest(ctx, requestInfo.RequestID)
 	if err != nil {
 		return nil, err
 	}
-
 	return requestItem, nil
 }
 
@@ -187,6 +163,124 @@ func (c *Client) SubmitCartOrder(ctx context.Context) (*RequestInfo, error) {
 	return &submitCartOrderResponse.Result, nil
 }
 
+func (c *Client) AddLabelsToRequest(ctx context.Context, requestedItemId string, labels []string) error {
+	for _, label := range labels {
+		_, err := c.AddLabelToRequest(ctx, requestedItemId, label)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Client) AddLabelToRequest(ctx context.Context, requestedItemId string, label string) (*BaseResource, error) {
+	labelResp, err := c.CreateLabel(ctx, label)
+	if err != nil {
+		return nil, err
+	}
+	return c.addLabelToRequestedItem(ctx, requestedItemId, labelResp.Id)
+}
+
+func (c *Client) addLabelToRequestedItem(ctx context.Context, requestedItemId string, labelId string) (*BaseResource, error) {
+	var labelEntryResponse IDResponse
+	err := c.post(
+		ctx,
+		fmt.Sprintf(LabelEntryBaseUrl, c.deployment),
+		&labelEntryResponse,
+		&LabelEntryPayload{
+			Table:    "sc_req_item",
+			TableKey: requestedItemId,
+			Label:    labelId,
+		},
+		WithIncludeResponseBody(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &labelEntryResponse.Result, nil
+}
+
+// Create label will return an error if it already exists
+// First fetch the label to check if it already exists
+func (c *Client) CreateLabel(ctx context.Context, label string) (*Label, error) {
+	labelResp, err := c.GetLabel(ctx, label)
+	if err == nil {
+		return labelResp, nil
+	}
+	if err == LabelNotFoundErr {
+		return c.createLabel(ctx, label)
+	}
+	return nil, err
+}
+
+func (c *Client) GetLabel(ctx context.Context, label string) (*Label, error) {
+	var labelsResponse LabelsResponse
+	_, err := c.get(
+		ctx,
+		fmt.Sprintf(LabelBaseUrl, c.deployment),
+		&labelsResponse,
+		WithQuery(fmt.Sprintf("name=%s", label)),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if len(labelsResponse.Result) == 0 {
+		return nil, LabelNotFoundErr
+	}
+	return &labelsResponse.Result[0], nil
+}
+
+func (c *Client) createLabel(ctx context.Context, label string) (*Label, error) {
+	var labelResponse LabelResponse
+	err := c.post(
+		ctx,
+		fmt.Sprintf(LabelBaseUrl, c.deployment),
+		&labelResponse,
+		&Label{
+			ViewableBy: "everyone",
+			Name:       label,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &labelResponse.Result, nil
+}
+
+func (c *Client) GetLabelsForRequestedItem(ctx context.Context, requestedItemId string) ([]string, error) {
+	var labelResponse LabelEntriesLabelNameResponse
+	_, err := c.get(
+		ctx,
+		fmt.Sprintf(LabelEntryBaseUrl, c.deployment),
+		&labelResponse,
+		WithQuery(fmt.Sprintf("table=sc_req_item^table_key=%s", requestedItemId)),
+		WithFields("label.name"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	labelStrings := make([]string, 0, len(labelResponse.Result))
+	for _, label := range labelResponse.Result {
+		labelStrings = append(labelStrings, label.LabelName)
+	}
+	return labelStrings, nil
+}
+
+func (c *Client) GetServiceCatalogRequestedItemStates(ctx context.Context) ([]RequestItemState, error) {
+	var catalogsResponse RequestedItemStateResponse
+	_, err := c.get(
+		ctx,
+		fmt.Sprintf(ChoiceBaseUrl, c.deployment),
+		&catalogsResponse,
+		WithQuery("name=task^element=state^language=en^inactive=false"),
+		WithFields("label,value"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return catalogsResponse.Result, nil
+}
+
 // Unused
 func (c *Client) GetCatalogs(ctx context.Context, paginationVars PaginationVars) ([]Catalog, string, error) {
 	var catalogsResponse CatalogsResponse
@@ -194,10 +288,8 @@ func (c *Client) GetCatalogs(ctx context.Context, paginationVars PaginationVars)
 		ctx,
 		fmt.Sprintf(ServiceCatalogListCatalogsUrl, c.deployment),
 		&catalogsResponse,
-		[]QueryParam{
-			&paginationVars,
-			prepareServiceCatalogFilters(),
-		}...,
+		WithPageLimit(paginationVars.Limit),
+		WithOffset(paginationVars.Offset),
 	)
 	if err != nil {
 		return nil, "", err

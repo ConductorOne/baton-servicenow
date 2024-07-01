@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
+	"text/template"
 
 	"github.com/tomnomnom/linkheader"
 	"google.golang.org/grpc/codes"
@@ -61,6 +63,14 @@ const (
 
 	ServiceCatalogAddItemToCartUrl = ServiceCatalogItemGetUrl + "/add_to_cart"
 	ServiceCatalogCartSubmitOrder  = ServiceCatalogBaseUrl + "/cart/submit_order"
+
+	LabelBaseUrl      = TableAPIBaseURL + "/label"
+	LabelEntryBaseUrl = TableAPIBaseURL + "/label_entry"
+
+	// To get possible states for service catalog requested item
+	ChoiceBaseUrl = TableAPIBaseURL + "/sys_choice"
+
+	InstanceURLTemplate = `{{.Deployment}}.service-now.com`
 )
 
 type ListResponse[T any] struct {
@@ -71,6 +81,7 @@ type SingleResponse[T any] struct {
 	Result T `json:"result"`
 }
 
+type IDResponse = SingleResponse[BaseResource]
 type UserResponse = SingleResponse[User]
 type UsersResponse = ListResponse[User]
 type RolesResponse = ListResponse[Role]
@@ -90,33 +101,47 @@ type SubmitCartOrderResponse = SingleResponse[RequestInfo]
 type RequestItemResponse = SingleResponse[RequestedItem]
 type RequestItemsResponse = ListResponse[RequestedItem]
 type ServiceCatalogRequestResponse = SingleResponse[ServiceCatalogRequest]
+type LabelResponse = SingleResponse[Label]
+type LabelsResponse = ListResponse[Label]
+type LabelEntriesLabelNameResponse = ListResponse[LabelEntryName]
+type RequestedItemStateResponse = ListResponse[RequestItemState]
 
 type Client struct {
 	httpClient *http.Client
 	auth       string
 	deployment string
+	baseURL    string
 }
 
-func NewClient(httpClient *http.Client, auth string, deployment string) *Client {
+func NewClient(httpClient *http.Client, auth string, deployment string) (*Client, error) {
+	baseURL, err := GenerateURL(InstanceURLTemplate, map[string]string{"Deployment": deployment})
+	if err != nil {
+		return nil, err
+	}
 	return &Client{
 		httpClient: httpClient,
 		auth:       auth,
 		deployment: deployment,
-	}
+		baseURL:    baseURL,
+	}, nil
+}
+
+func (c *Client) GetBaseURL() string {
+	return c.baseURL
 }
 
 // Table `sys_user` (Users).
 func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, userIDs []string) ([]User, string, error) {
 	var usersResponse UsersResponse
 
+	reqOpts := filterToReqOptions(prepareUserFilters(userIDs))
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
+
 	nextPage, err := c.get(
 		ctx,
 		fmt.Sprintf(UsersBaseUrl, c.deployment),
 		&usersResponse,
-		[]QueryParam{
-			&paginationVars,
-			prepareUserFilters(userIDs),
-		}...,
+		reqOpts...,
 	)
 
 	if err != nil {
@@ -133,9 +158,7 @@ func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 		ctx,
 		fmt.Sprintf(UserBaseUrl, c.deployment, userId),
 		&userResponse,
-		[]QueryParam{
-			prepareUserFilters(nil),
-		}...,
+		WithFields(UserFields...),
 	)
 
 	if err != nil {
@@ -149,14 +172,13 @@ func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars, groupIDs []string) ([]Group, string, error) {
 	var groupsResponse GroupsResponse
 
+	reqOpts := filterToReqOptions(prepareGroupFilters(groupIDs))
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 	nextPageToken, err := c.get(
 		ctx,
 		fmt.Sprintf(GroupsBaseUrl, c.deployment),
 		&groupsResponse,
-		[]QueryParam{
-			&paginationVars,
-			prepareGroupFilters(groupIDs),
-		}...,
+		reqOpts...,
 	)
 
 	if err != nil {
@@ -173,9 +195,7 @@ func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
 		ctx,
 		fmt.Sprintf(GroupBaseUrl, c.deployment, groupId),
 		&groupResponse,
-		[]QueryParam{
-			prepareGroupFilters(nil),
-		}...,
+		WithFields(GroupFields...),
 	)
 
 	if err != nil {
@@ -189,14 +209,14 @@ func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
 func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId string, paginationVars PaginationVars) ([]GroupMember, string, error) {
 	var groupMembersResponse GroupMembersResponse
 
+	reqOpts := filterToReqOptions(prepareUserToGroupFilter(userId, groupId))
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
+
 	nextPageToken, err := c.get(
 		ctx,
 		fmt.Sprintf(GroupMembersBaseUrl, c.deployment),
 		&groupMembersResponse,
-		[]QueryParam{
-			&paginationVars,
-			prepareUserToGroupFilter(userId, groupId),
-		}...,
+		reqOpts...,
 	)
 
 	if err != nil {
@@ -228,15 +248,14 @@ func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([
 	var rolesResponse RolesResponse
 
 	paginationVars.Limit++
+	reqOpts := filterToReqOptions(prepareRoleFilters())
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 
 	nextPageToken, err := c.get(
 		ctx,
 		fmt.Sprintf(RolesBaseUrl, c.deployment),
 		&rolesResponse,
-		[]QueryParam{
-			&paginationVars,
-			prepareRoleFilters(),
-		}...,
+		reqOpts...,
 	)
 
 	if err != nil {
@@ -250,14 +269,14 @@ func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([
 func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string, paginationVars PaginationVars) ([]UserToRole, string, error) {
 	var userToRoleResponse UserToRoleResponse
 
+	reqOpts := filterToReqOptions(prepareUserToRoleFilter(userId, roleId))
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
+
 	nextPageToken, err := c.get(
 		ctx,
 		fmt.Sprintf(UserRolesBaseUrl, c.deployment),
 		&userToRoleResponse,
-		[]QueryParam{
-			&paginationVars,
-			prepareUserToRoleFilter(userId, roleId),
-		}...,
+		reqOpts...,
 	)
 
 	if err != nil {
@@ -288,14 +307,13 @@ func (c *Client) RevokeRoleFromUser(ctx context.Context, id string) error {
 func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId string, paginationVars PaginationVars) ([]GroupToRole, string, error) {
 	var groupToRoleResponse GroupToRoleResponse
 
+	reqOpts := filterToReqOptions(prepareGroupToRoleFilter(groupId, roleId))
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 	nextPageToken, err := c.get(
 		ctx,
 		fmt.Sprintf(GroupRolesBaseUrl, c.deployment),
 		&groupToRoleResponse,
-		[]QueryParam{
-			&paginationVars,
-			prepareGroupToRoleFilter(groupId, roleId),
-		}...,
+		reqOpts...,
 	)
 
 	if err != nil {
@@ -322,14 +340,14 @@ func (c *Client) RevokeRoleFromGroup(ctx context.Context, id string) error {
 	)
 }
 
-func (c *Client) get(ctx context.Context, urlAddress string, resourceResponse interface{}, paramOptions ...QueryParam) (string, error) {
+func (c *Client) get(ctx context.Context, urlAddress string, resourceResponse interface{}, reqOptions ...ReqOpt) (string, error) {
 	return c.doRequest(
 		ctx,
 		urlAddress,
 		http.MethodGet,
 		nil,
 		&resourceResponse,
-		paramOptions...,
+		reqOptions...,
 	)
 }
 
@@ -338,7 +356,7 @@ func (c *Client) post(
 	urlAddress string,
 	resourceResponse interface{},
 	data interface{},
-	paramOptions ...QueryParam,
+	requestOptions ...ReqOpt,
 ) error {
 	_, err := c.doRequest(
 		ctx,
@@ -346,7 +364,7 @@ func (c *Client) post(
 		http.MethodPost,
 		data,
 		&resourceResponse,
-		paramOptions...,
+		requestOptions...,
 	)
 
 	return err
@@ -356,7 +374,7 @@ func (c *Client) delete(
 	ctx context.Context,
 	urlAddress string,
 	resourceResponse interface{},
-	paramOptions ...QueryParam,
+	reqOptions ...ReqOpt,
 ) error {
 	_, err := c.doRequest(
 		ctx,
@@ -364,13 +382,13 @@ func (c *Client) delete(
 		http.MethodDelete,
 		nil,
 		&resourceResponse,
-		paramOptions...,
+		reqOptions...,
 	)
 
 	return err
 }
 
-func (c *Client) doRequest(ctx context.Context, urlAddress string, method string, data interface{}, resourceResponse interface{}, paramOptions ...QueryParam) (string, error) {
+func (c *Client) doRequest(ctx context.Context, urlAddress string, method string, data interface{}, resourceResponse interface{}, reqOptions ...ReqOpt) (string, error) {
 	var body io.Reader
 
 	if data != nil {
@@ -387,20 +405,21 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 		return "", err
 	}
 
-	queryParams := url.Values{}
-	for _, queryParam := range paramOptions {
-		queryParam.setup(&queryParams)
-	}
-
-	req.URL.RawQuery = queryParams.Encode()
+	// Set default value
+	WithQueryParam("sysparm_exclude_reference_link", "true")(req)
 
 	req.Header.Set("Authorization", c.auth)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-
 	if method == http.MethodPost {
 		req.Header.Set("X-no-response-body", "true")
 	}
+
+	for _, o := range reqOptions {
+		o(req)
+	}
+
+	req.URL.RawQuery = req.URL.Query().Encode()
 
 	rawResponse, err := c.httpClient.Do(req)
 	if err != nil {
@@ -433,4 +452,19 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 	}
 
 	return pageToken, nil
+}
+
+type URLParams map[string]string
+
+func GenerateURL(baseURL string, params URLParams) (string, error) {
+	tmpl, err := template.New("url").Parse(baseURL)
+	if err != nil {
+		return "", err
+	}
+	var urlBuilder strings.Builder
+	err = tmpl.Execute(&urlBuilder, params)
+	if err != nil {
+		return "", err
+	}
+	return urlBuilder.String(), nil
 }

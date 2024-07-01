@@ -2,7 +2,8 @@ package servicenow
 
 import (
 	"fmt"
-	"net/url"
+	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -22,8 +23,58 @@ func queryMultipleIDs(ids []string) string {
 	return strings.Join(preparedIDs, "^OR")
 }
 
-type QueryParam interface {
-	setup(params *url.Values)
+var emptyOpt = func(_ *http.Request) {}
+
+type ReqOpt func(req *http.Request)
+
+func WithIncludeResponseBody() ReqOpt {
+	return WithHeader("X-no-response-body", "false")
+}
+
+func WithHeader(key string, val string) ReqOpt {
+	return func(req *http.Request) {
+		req.Header.Set(key, val)
+	}
+}
+
+func WithPageLimit(pageLimit int) ReqOpt {
+	if pageLimit != 0 {
+		return WithQueryParam("sysparm_limit", strconv.Itoa(pageLimit))
+	}
+	return emptyOpt
+}
+
+func WithOffset(offset int) ReqOpt {
+	if offset != 0 {
+		return WithQueryParam("sysparm_offset", strconv.Itoa(offset))
+	}
+	return emptyOpt
+}
+
+func WithQueryParam(key string, value string) ReqOpt {
+	return func(req *http.Request) {
+		q := req.URL.Query()
+		q.Set(key, value)
+		req.URL.RawQuery = q.Encode()
+	}
+}
+
+func WithQuery(query string) ReqOpt {
+	if query != "" {
+		return WithQueryParam("sysparm_query", query)
+	}
+	return emptyOpt
+}
+
+func WithFields(fields ...string) ReqOpt {
+	if len(fields) != 0 {
+		return WithQueryParam("sysparm_fields", strings.Join(fields, ","))
+	}
+	return emptyOpt
+}
+
+func WithIncludeExternalRefLink() ReqOpt {
+	return WithQueryParam("sysparm_exclude_reference_link", "false")
 }
 
 type PaginationVars struct {
@@ -31,34 +82,10 @@ type PaginationVars struct {
 	Offset int
 }
 
-func (pV *PaginationVars) setup(params *url.Values) {
-	if pV.Limit != 0 {
-		params.Set("sysparm_limit", fmt.Sprintf("%d", pV.Limit))
-	}
-
-	if pV.Offset != 0 {
-		params.Set("sysparm_offset", fmt.Sprintf("%d", pV.Offset))
-	}
-}
-
 type FilterVars struct {
 	Fields []string
 	Query  string
 	UserId string
-}
-
-func (fV *FilterVars) setup(params *url.Values) {
-	if len(fV.Fields) != 0 {
-		params.Set("sysparm_fields", strings.Join(fV.Fields, ","))
-	}
-
-	if fV.Query != "" {
-		params.Set("sysparm_query", fV.Query)
-	}
-
-	if fV.UserId != "" {
-		params.Set("user_sysid", fV.UserId)
-	}
 }
 
 func prepareUserFilters(ids []string) *FilterVars {
@@ -161,18 +188,18 @@ func prepareGroupToRoleFilter(groupId string, roleId string) *FilterVars {
 	}
 }
 
-func prepareServiceCatalogFilters(opts ...FilterOption) *FilterVars {
-	filter := &FilterVars{}
-	for _, o := range opts {
-		o(filter)
+func filterToReqOptions(vars *FilterVars) []ReqOpt {
+	reqOpts := make([]ReqOpt, 0)
+	reqOpts = append(reqOpts, WithQuery(vars.Query))
+	if len(vars.Fields) != 0 {
+		reqOpts = append(reqOpts, WithFields(vars.Fields...))
 	}
-	return filter
+	return reqOpts
 }
 
-type FilterOption func(filter *FilterVars)
-
-func WithQuery(query string) FilterOption {
-	return func(filter *FilterVars) {
-		filter.Query = query
-	}
+func paginationVarsToReqOptions(vars *PaginationVars) []ReqOpt {
+	reqOpts := make([]ReqOpt, 0)
+	reqOpts = append(reqOpts, WithPageLimit(vars.Limit))
+	reqOpts = append(reqOpts, WithOffset(vars.Limit))
+	return reqOpts
 }
