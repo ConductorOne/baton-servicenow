@@ -162,7 +162,6 @@ func (s *ServiceNow) GetTicketSchema(ctx context.Context, schemaID string) (*v2.
 
 func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *servicenow.CatalogItem) (*v2.TicketSchema, error) {
 	l := ctxzap.Extract(ctx)
-
 	var err error
 
 	// TODO(lauren) make type a custom field
@@ -176,7 +175,7 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 		true,
 		[]*v2.TicketCustomFieldObjectValue{
 			{
-				Id:          catalogItem.SysID,
+				Id:          catalogItem.Id,
 				DisplayName: catalogItem.Name,
 			},
 		},
@@ -186,7 +185,7 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 	// Get the catalog variables if not present
 	variables := catalogItem.Variables
 	if len(variables) == 0 {
-		variables, err = s.client.GetCatalogItemVariables(ctx, catalogItem.SysID)
+		variables, err = s.client.GetCatalogItemVariables(ctx, catalogItem.Id)
 		if err != nil {
 			return nil, err
 		}
@@ -203,7 +202,7 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 	}
 
 	ret := &v2.TicketSchema{
-		Id:           catalogItem.SysID,
+		Id:           catalogItem.Id,
 		DisplayName:  catalogItem.Name,
 		Types:        ticketTypes,
 		CustomFields: customFields,
