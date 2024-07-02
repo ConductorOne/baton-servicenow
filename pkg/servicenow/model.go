@@ -1,6 +1,8 @@
 package servicenow
 
 import (
+	"errors"
+
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	sdkTicket "github.com/conductorone/baton-sdk/pkg/types/ticket"
 )
@@ -287,6 +289,7 @@ const (
 	ATTACHMENT
 )
 
+// TODO(lauren) add validation?
 func ConvertVariableToSchemaCustomField(variable *CatalogItemVariable) (*v2.TicketCustomField, error) {
 	switch variable.Type {
 	case YES_NO, CHECK_BOX:
@@ -317,13 +320,25 @@ func ConvertVariableToSchemaCustomField(variable *CatalogItemVariable) (*v2.Tick
 			})
 		}
 		return sdkTicket.PickObjectValueFieldSchema(variable.Name, variable.Name, variable.Mandatory, allowedChoices), nil
-		//return sdkTicket.PickObjectValueFieldSchema(variable.ID, variable.Name, variable.Mandatory, allowedChoices), nil
+	case HTML:
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+	case REFERENCE:
+		// This should be a sys_id
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+	case EMAIL:
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+	case URL:
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+	case IP_ADDRESS:
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+	case REQUESTED_FOR:
+		// This should be sys_id of user?
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
 	default:
-		// Have seen REFERENCE (8), MACRO(14) variable types, needs more investigation
-		// TODO(lauren) handle this
-		/*if variable.Mandatory {
-			return nil, errors.New("Unsupported mandatory type")
-		}*/
+		// MACRO(14) variable type needs more investigation
+		if variable.Mandatory {
+			return nil, errors.New("unsupported mandatory type")
+		}
 		return nil, nil
 	}
 }
