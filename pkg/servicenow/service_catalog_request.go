@@ -83,6 +83,7 @@ func (c *Client) GetCatalogItems(ctx context.Context, paginationVars *Pagination
 		fmt.Sprintf(ServiceCatalogItemBaseUrl, c.deployment),
 		&catalogItemsResponse,
 		WithPageLimit(paginationVars.Limit),
+		WithOffset(paginationVars.Offset),
 	)
 	if err != nil {
 		return nil, "", err
