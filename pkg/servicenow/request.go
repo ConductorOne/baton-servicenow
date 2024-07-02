@@ -200,6 +200,6 @@ func filterToReqOptions(vars *FilterVars) []ReqOpt {
 func paginationVarsToReqOptions(vars *PaginationVars) []ReqOpt {
 	reqOpts := make([]ReqOpt, 0)
 	reqOpts = append(reqOpts, WithPageLimit(vars.Limit))
-	reqOpts = append(reqOpts, WithOffset(vars.Limit))
+	reqOpts = append(reqOpts, WithOffset(vars.Offset))
 	return reqOpts
 }
