@@ -8,10 +8,10 @@ import (
 
 var LabelNotFoundErr = errors.New("label not found")
 
-type FieldOption func(catalogItemRequestPayload *AddItemToCartPayload)
+type FieldOption func(catalogItemRequestPayload *OrderItemPayload)
 
 func WithCustomField(id string, value interface{}) FieldOption {
-	return func(catalogItemRequestPayload *AddItemToCartPayload) {
+	return func(catalogItemRequestPayload *OrderItemPayload) {
 		if catalogItemRequestPayload.Variables == nil {
 			catalogItemRequestPayload.Variables = make(map[string]interface{})
 		}
@@ -120,12 +120,8 @@ func (c *Client) GetCatalogItemVariables(ctx context.Context, catalogItemId stri
 // Creating a service catalog request requires:
 // 1. Add catalog item to cart (with all required variables)
 // 2. Submit cart order
-func (c *Client) CreateServiceCatalogRequest(ctx context.Context, catalogItemId string, payload *AddItemToCartPayload) (*RequestedItem, error) {
-	_, err := c.AddItemToCart(ctx, catalogItemId, payload)
-	if err != nil {
-		return nil, err
-	}
-	requestInfo, err := c.SubmitCartOrder(ctx)
+func (c *Client) CreateServiceCatalogRequest(ctx context.Context, catalogItemId string, payload *OrderItemPayload) (*RequestedItem, error) {
+	requestInfo, err := c.OrderItemNow(ctx, catalogItemId, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -136,32 +132,19 @@ func (c *Client) CreateServiceCatalogRequest(ctx context.Context, catalogItemId 
 	return requestItem, nil
 }
 
-func (c *Client) AddItemToCart(ctx context.Context, catalogItemId string, payload *AddItemToCartPayload) (*Cart, error) {
-	var addItemToCartResponse AddItemToCartResponse
+func (c *Client) OrderItemNow(ctx context.Context, catalogItemId string, payload *OrderItemPayload) (*RequestInfo, error) {
+	var orderCatalogItemResponse OrderCatalogItemResponse
 	err := c.post(
 		ctx,
-		fmt.Sprintf(ServiceCatalogAddItemToCartUrl, c.deployment, catalogItemId),
-		&addItemToCartResponse,
+		fmt.Sprintf(ServiceCatalogOrderItemUrl, c.deployment, catalogItemId),
+		&orderCatalogItemResponse,
 		&payload,
+		WithIncludeResponseBody(),
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &addItemToCartResponse.Result, nil
-}
-
-func (c *Client) SubmitCartOrder(ctx context.Context) (*RequestInfo, error) {
-	var submitCartOrderResponse SubmitCartOrderResponse
-	err := c.post(
-		ctx,
-		fmt.Sprintf(ServiceCatalogCartSubmitOrder, c.deployment),
-		&submitCartOrderResponse,
-		nil,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return &submitCartOrderResponse.Result, nil
+	return &orderCatalogItemResponse.Result, nil
 }
 
 func (c *Client) AddLabelsToRequest(ctx context.Context, requestedItemId string, labels []string) error {

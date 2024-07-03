@@ -159,20 +159,20 @@ type RequestedItem struct {
 	Catalogs []Catalog       `json:"catalogs,omitempty"`
 	Category Category        `json:"category,omitempty"`
 
-	ScCatalog        string          `json:"sc_catalog,omitempty"`
-	RequestedFor     ResourceRefLink `json:"requested_for"`
-	SysUpdatedOn     string          `json:"sys_updated_on"`
-	SysUpdatedBy     string          `json:"sys_updated_by"`
-	ClosedAt         string          `json:"closed_at"`
-	ClosedBy         string          `json:"closed_by"`
-	OpenedBy         ResourceRefLink `json:"opened_by"`
-	SysCreatedOn     string          `json:"sys_created_on"`
-	SysCreatedBy     string          `json:"sys_created_by"`
-	Active           string          `json:"active"`
-	OpenedAt         string          `json:"opened_at"`
-	ShortDescription string          `json:"short_description"`
-	Approval         string          `json:"approval"`
-	AssignedTo       string          `json:"assigned_to"`
+	ScCatalog        string           `json:"sc_catalog,omitempty"`
+	RequestedFor     *ResourceRefLink `json:"requested_for,omitempty"`
+	SysUpdatedOn     string           `json:"sys_updated_on"`
+	SysUpdatedBy     string           `json:"sys_updated_by"`
+	ClosedAt         string           `json:"closed_at"`
+	ClosedBy         string           `json:"closed_by"`
+	OpenedBy         ResourceRefLink  `json:"opened_by"`
+	SysCreatedOn     string           `json:"sys_created_on"`
+	SysCreatedBy     string           `json:"sys_created_by"`
+	Active           string           `json:"active"`
+	OpenedAt         string           `json:"opened_at"`
+	ShortDescription string           `json:"short_description"`
+	Approval         string           `json:"approval"`
+	AssignedTo       string           `json:"assigned_to"`
 }
 
 type Choice struct {
@@ -205,21 +205,10 @@ type CatalogItemVariable struct {
 	RefQualifier            string   `json:"ref_qualifier"`
 }
 
-type AddItemToCartPayload struct {
+type OrderItemPayload struct {
 	Quantity     int                    `json:"sysparm_quantity"`
 	RequestedFor string                 `json:"sysparm_requested_for"`
 	Variables    map[string]interface{} `json:"variables"`
-}
-
-type CartItem struct {
-	CartItemID    string `json:"cart_item_id"`
-	CatalogItemID string `json:"catalog_item_id"`
-	ItemName      string `json:"item_name"`
-}
-
-type Cart struct {
-	CartID string     `json:"cart_id"`
-	Items  []CartItem `json:"items"`
 }
 
 type RequestInfo struct {

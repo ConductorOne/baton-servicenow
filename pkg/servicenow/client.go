@@ -61,8 +61,7 @@ const (
 	ServiceCatalogItemGetUrl       = ServiceCatalogItemBaseUrl + "/%s"
 	ServiceCatalogItemVariablesUrl = ServiceCatalogItemGetUrl + "/variables"
 
-	ServiceCatalogAddItemToCartUrl = ServiceCatalogItemGetUrl + "/add_to_cart"
-	ServiceCatalogCartSubmitOrder  = ServiceCatalogBaseUrl + "/cart/submit_order"
+	ServiceCatalogOrderItemUrl = ServiceCatalogItemGetUrl + "/order_now"
 
 	LabelBaseUrl      = TableAPIBaseURL + "/label"
 	LabelEntryBaseUrl = TableAPIBaseURL + "/label_entry"
@@ -96,8 +95,7 @@ type CategoriesResponse = ListResponse[Category]
 type CatalogItemsResponse = ListResponse[CatalogItem]
 type CatalogItemResponse = SingleResponse[CatalogItem]
 type CatalogItemVariablesResponse = ListResponse[CatalogItemVariable]
-type AddItemToCartResponse = SingleResponse[Cart]
-type SubmitCartOrderResponse = SingleResponse[RequestInfo]
+type OrderCatalogItemResponse = SingleResponse[RequestInfo]
 type RequestItemResponse = SingleResponse[RequestedItem]
 type RequestItemsResponse = ListResponse[RequestedItem]
 type ServiceCatalogRequestResponse = SingleResponse[ServiceCatalogRequest]
