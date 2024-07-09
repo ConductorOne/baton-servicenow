@@ -2,10 +2,11 @@ package servicenow
 
 import (
 	"context"
-	"errors"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	sdkTicket "github.com/conductorone/baton-sdk/pkg/types/ticket"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 )
 
 type BaseResource struct {
@@ -296,6 +297,8 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 	}
 
 	switch typ {
+	case UNSPECIFIED:
+		return nil, nil
 	case YES_NO, CHECK_BOX:
 		return sdkTicket.BoolFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
 	case MULTI_LINE_TEXT, SINGLE_LINE_TEXT, WIDE_SINGLE_LINE_TEXT:
@@ -343,7 +346,10 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 	default:
 		// TODO(lauren) should continue instead of erroring?
 		if variable.Mandatory {
-			return nil, errors.New("unsupported mandatory type")
+			l := ctxzap.Extract(ctx)
+			l.Error("unsupported mandatory type", zap.Any("var", variable))
+			return nil, nil
+			//return nil, errors.New("unsupported mandatory type")
 		}
 		return nil, nil
 	}
