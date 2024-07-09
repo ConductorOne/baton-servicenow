@@ -21,7 +21,6 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 	if err != nil {
 		return nil, "", nil, err
 	}
-
 	catalogItems, nextPageToken, err := s.client.GetCatalogItems(ctx,
 		&servicenow.PaginationVars{
 			Limit:  pt.Size,
@@ -88,13 +87,13 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 
 			// We need to handle this type differently so we only get the string value we set for "id"
 			// The servicenow variable "choice" seem to only be strings (single select, multiselect)
-			// Should we just use GetPickStringValue(s)?
 			pick := ticketField.GetPickObjectValue()
 			if pick != nil {
 				val := pick.GetValue().GetId()
 				ticketOptions = append(ticketOptions, servicenow.WithCustomField(cf.GetId(), val))
 				continue
 			}
+			// TODO(lauren) handle multi pick differently also
 
 			val, err := sdkTicket.GetCustomFieldValue(ticketFields[id])
 			if err != nil {
@@ -160,9 +159,6 @@ func (s *ServiceNow) GetTicketSchema(ctx context.Context, schemaID string) (*v2.
 }
 
 func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *servicenow.CatalogItem) (*v2.TicketSchema, error) {
-	l := ctxzap.Extract(ctx)
-	var err error
-
 	// TODO(lauren) make type a custom field
 	var ticketTypes []*v2.TicketType
 
@@ -180,8 +176,10 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 		},
 	)
 
+	// TODO(lauren) move this logic so we dont get for empty variables when listing schemas
 	// List catalog items doesn't include variables but get catalog item does
 	// Get the catalog variables if not present
+	var err error
 	variables := catalogItem.Variables
 	if len(variables) == 0 {
 		variables, err = s.client.GetCatalogItemVariables(ctx, catalogItem.Id)
@@ -191,12 +189,14 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 	}
 
 	for _, v := range variables {
-		cf, err := servicenow.ConvertVariableToSchemaCustomField(&v)
+		cf, err := servicenow.ConvertVariableToSchemaCustomField(ctx, &v)
 		if err != nil {
-			l.Error("error converting variable to custom field for schema", zap.Any("v", v))
 			return nil, err
 		}
-		// TODO(lauren) cf can be nil since we aren't handling all variable cases
+		// cf can be nil since we aren't handling all variable cases (if not required)
+		if cf == nil {
+			continue
+		}
 		customFields[v.Name] = cf
 	}
 
@@ -211,7 +211,6 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 }
 
 func (s *ServiceNow) serviceCatalogRequestItemToTicket(ctx context.Context, requestedItem *servicenow.RequestedItem) (*v2.Ticket, annotations.Annotations, error) {
-	// TODO(lauren) use OpenedAt instead?
 	createdAt, err := time.Parse(time.DateTime, requestedItem.SysCreatedOn)
 	if err != nil {
 		return nil, nil, err

@@ -15,6 +15,7 @@
       "id": "Dev"
     },
     "describe_briefly_the_purpose_of_this_account": "work",
-    "rich_text": "some text"
+    "rich_text": "some text",
+    "what_is_the_duration": "5 00:00:00"
   }
 }

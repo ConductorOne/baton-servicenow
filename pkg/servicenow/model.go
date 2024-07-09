@@ -1,6 +1,7 @@
 package servicenow
 
 import (
+	"context"
 	"errors"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -182,27 +183,26 @@ type Choice struct {
 }
 
 type CatalogItemVariable struct {
-	Active                  bool     `json:"active"`
-	Label                   string   `json:"label"`
-	DynamicValueField       string   `json:"dynamic_value_field"`
-	Type                    int      `json:"type"`
-	Mandatory               bool     `json:"mandatory"`
-	DisplayValue            string   `json:"displayvalue"`
-	FriendlyType            string   `json:"friendly_type"`
-	DisplayType             string   `json:"display_type"`
-	RenderLabel             bool     `json:"render_label"`
-	ReadOnly                bool     `json:"read_only"`
-	Name                    string   `json:"name"`
-	Attributes              string   `json:"attributes"`
-	ID                      string   `json:"id"`
-	Choices                 []Choice `json:"choices"`
-	Value                   string   `json:"value"`
-	DynamicValueDotWalkPath string   `json:"dynamic_value_dot_walk_path"`
-	HelpText                string   `json:"help_text"`
-	MaxLength               int      `json:"max_length"`
-	Order                   int      `json:"order"`
-	Reference               string   `json:"reference"`
-	RefQualifier            string   `json:"ref_qualifier"`
+	Active                  bool            `json:"active"`
+	Label                   string          `json:"label"`
+	DynamicValueField       string          `json:"dynamic_value_field"`
+	Type                    VariableTypeNew `json:"type"`
+	Mandatory               bool            `json:"mandatory"`
+	DisplayValue            string          `json:"displayvalue"`
+	FriendlyType            string          `json:"friendly_type"`
+	DisplayType             string          `json:"display_type"`
+	RenderLabel             bool            `json:"render_label"`
+	ReadOnly                bool            `json:"read_only"`
+	Name                    string          `json:"name"`
+	Attributes              string          `json:"attributes"`
+	ID                      string          `json:"id"`
+	Choices                 []Choice        `json:"choices"`
+	Value                   string          `json:"value"`
+	DynamicValueDotWalkPath string          `json:"dynamic_value_dot_walk_path"`
+	HelpText                string          `json:"help_text"`
+	Order                   int             `json:"order"`
+	Reference               string          `json:"reference"`
+	RefQualifier            string          `json:"ref_qualifier"`
 }
 
 type OrderItemPayload struct {
@@ -237,12 +237,14 @@ type LabelEntryName struct {
 	LabelName string `json:"label.name"`
 }
 
+type VariableTypeNew interface{}
+
 type VariableType int
 
 // TODO(lauren) not sure how to handle all of these
 // These correspond to variable type id
 const (
-	UNSPECIFIED = iota
+	UNSPECIFIED VariableType = iota
 	YES_NO
 	MULTI_LINE_TEXT
 	MULTIPLE_CHOICE
@@ -256,10 +258,10 @@ const (
 	LABEL
 	BREAK
 	_
-	MACRO
-	UI_PAGE
+	MACRO   // skip
+	UI_PAGE //skip
 	WIDE_SINGLE_LINE_TEXT
-	MACRO_WITH_LABEL
+	MACRO_WITH_LABEL //skip
 	LOOKUP_SELECT_BOX
 	CONTAINER_START
 	CONTAINER_END
@@ -279,8 +281,21 @@ const (
 )
 
 // TODO(lauren) add validation?
-func ConvertVariableToSchemaCustomField(variable *CatalogItemVariable) (*v2.TicketCustomField, error) {
-	switch variable.Type {
+func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogItemVariable) (*v2.TicketCustomField, error) {
+	if !variable.Active || variable.ReadOnly {
+		return nil, nil
+	}
+
+	// TODO(unmarshal func)
+	var typ VariableType
+	t, ok := variable.Type.(float64)
+	if !ok {
+		typ = UNSPECIFIED
+	} else {
+		typ = VariableType(int(t))
+	}
+
+	switch typ {
 	case YES_NO, CHECK_BOX:
 		return sdkTicket.BoolFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
 	case MULTI_LINE_TEXT, SINGLE_LINE_TEXT, WIDE_SINGLE_LINE_TEXT:
@@ -290,7 +305,6 @@ func ConvertVariableToSchemaCustomField(variable *CatalogItemVariable) (*v2.Tick
 		choices := variable.Choices
 		for _, c := range choices {
 			allowedChoices = append(allowedChoices, &v2.TicketCustomFieldObjectValue{
-				//TODO(lauren) is this ok for ID? Or use c.Label/c.index?
 				Id:          c.Value,
 				DisplayName: c.Value,
 			})
@@ -303,7 +317,6 @@ func ConvertVariableToSchemaCustomField(variable *CatalogItemVariable) (*v2.Tick
 		choices := variable.Choices
 		for _, c := range choices {
 			allowedChoices = append(allowedChoices, &v2.TicketCustomFieldObjectValue{
-				//TODO(lauren) is this ok for ID? Or use c.Label/c.index?
 				Id:          c.Value,
 				DisplayName: c.Value,
 			})
@@ -321,10 +334,14 @@ func ConvertVariableToSchemaCustomField(variable *CatalogItemVariable) (*v2.Tick
 	case IP_ADDRESS:
 		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
 	case REQUESTED_FOR:
-		// This should be sys_id of user?
+		// This should be sys_id of user
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+	case LIST_COLLECTOR: // TODO(lauren) I think this just takes sys_ids but in the UI its populated from other tables
+		return nil, nil
+	case DURATION: // TODO(lauren) make duration field?
 		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
 	default:
-		// MACRO(14) variable type needs more investigation
+		// TODO(lauren) should continue instead of erroring?
 		if variable.Mandatory {
 			return nil, errors.New("unsupported mandatory type")
 		}
