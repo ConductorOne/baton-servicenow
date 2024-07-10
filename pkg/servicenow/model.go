@@ -141,7 +141,6 @@ type ServiceCatalogRequest struct {
 	ShortDescription     string `json:"short_description"`
 	Description          string `json:"description"`
 	CloseNotes           string `json:"close_notes"`
-	ClosedBy             string `json:"closed_by"`
 	AssignedTo           string `json:"assigned_to"`
 	Comments             string `json:"comments"`
 	CommentsAndWorkNotes string `json:"comments_and_work_notes"`
@@ -166,7 +165,6 @@ type RequestedItem struct {
 	SysUpdatedOn     string           `json:"sys_updated_on"`
 	SysUpdatedBy     string           `json:"sys_updated_by"`
 	ClosedAt         string           `json:"closed_at"`
-	ClosedBy         string           `json:"closed_by"`
 	OpenedBy         ResourceRefLink  `json:"opened_by"`
 	SysCreatedOn     string           `json:"sys_created_on"`
 	SysCreatedBy     string           `json:"sys_created_by"`
