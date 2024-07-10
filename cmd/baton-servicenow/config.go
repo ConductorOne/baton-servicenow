@@ -4,38 +4,32 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/conductorone/baton-sdk/pkg/cli"
-	"github.com/spf13/cobra"
+	"github.com/conductorone/baton-sdk/pkg/field"
+	"github.com/spf13/viper"
 )
 
-// config defines the external configuration required for the connector to run.
-type config struct {
-	cli.BaseConfig `mapstructure:",squash"` // Puts the base config options in the same place as the connector options
+var (
+	usernameField   = field.StringField("username", field.WithDescription("Username of administrator used to connect to the ServiceNow API."))
+	passwordField   = field.StringField("password", field.WithDescription("Application password used to connect to the ServiceNow API."))
+	deploymentField = field.StringField("deployment", field.WithDescription("ServiceNow deployment to connect to."))
+)
 
-	Username string `mapstructure:"username"`
-	Password string `mapstructure:"password"`
-
-	Deployment string `mapstructure:"deployment"`
+// configurationFields defines the external configuration required for the connector to run.
+var configurationFields = []field.SchemaField{
+	usernameField,
+	passwordField,
+	deploymentField,
 }
 
 // validateConfig is run after the configuration is loaded, and should return an error if it isn't valid.
-func validateConfig(ctx context.Context, cfg *config) error {
-	basicNotSet := (cfg.Username == "" || cfg.Password == "")
-
-	if basicNotSet {
+func validateConfig(ctx context.Context, v *viper.Viper) error {
+	if v.GetString(usernameField.FieldName) == "" || v.GetString(passwordField.FieldName) == "" {
 		return fmt.Errorf("username and password must be provided")
 	}
 
-	if cfg.Deployment == "" {
+	if v.GetString(deploymentField.FieldName) == "" {
 		return fmt.Errorf("deployment must be provided")
 	}
 
 	return nil
-}
-
-// cmdFlags sets the cmdFlags required for the connector.
-func cmdFlags(cmd *cobra.Command) {
-	cmd.PersistentFlags().String("username", "", "Username of administrator used to connect to the ServiceNow API. ($BATON_USERNAME)")
-	cmd.PersistentFlags().String("password", "", "Application password used to connect to the ServiceNow API. ($BATON_PASSWORD)")
-	cmd.PersistentFlags().String("deployment", "", "ServiceNow deployment to connect to. ($BATON_DEPLOYMENT)")
 }
