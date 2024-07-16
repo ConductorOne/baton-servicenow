@@ -76,8 +76,8 @@ type UserRoles struct {
 	FromGroup []string `json:"from_group"`
 }
 
-// TODO(lauren) remove unecessary fields
-// Service Catalog request models
+// TODO(lauren) remove unecessary fields.
+// Service Catalog request models.
 type ResourceRefLink struct {
 	Link  string `json:"link"`
 	Value string `json:"value"`
@@ -241,42 +241,42 @@ type VariableTypeNew interface{}
 type VariableType int
 
 // TODO(lauren) not sure how to handle all of these
-// These correspond to variable type id
+// These correspond to variable type id.
 const (
-	UNSPECIFIED VariableType = iota
-	YES_NO
-	MULTI_LINE_TEXT
-	MULTIPLE_CHOICE
-	NUMERIC_SCALE // TODO(lauren) add baton custom field type for number
-	SELECT_BOX
-	SINGLE_LINE_TEXT
-	CHECK_BOX
-	REFERENCE
-	DATE
-	DATE_TIME
-	LABEL
-	BREAK
+	TypeUnspecified VariableType = iota
+	TypeYesNo
+	TypeMultiLineText
+	TypeMultipleChoice
+	TypeNumericScale // TODO(lauren) add baton custom field type for number
+	TypeSelectBox
+	TypeSingleLineText
+	TypeCheckBox
+	TypeReference
+	TypeDate
+	TypeDateTime
+	TypeLabel
+	TypeBreak
 	_
-	MACRO   // skip
-	UI_PAGE // skip
-	WIDE_SINGLE_LINE_TEXT
-	MACRO_WITH_LABEL // skip
-	LOOKUP_SELECT_BOX
-	CONTAINER_START
-	CONTAINER_END
-	LIST_COLLECTOR
-	LOOKUP_MULTIPLE_CHOICE
-	HTML
-	SPLIT
-	MASKED
-	EMAIL
-	URL
-	IP_ADDRESS
-	DURATION
+	TypeMacro  // skip
+	TypeUIPage // skip
+	TypeWideSingleLineText
+	TypeMacroWithLabel // skip
+	TypeLookupSelectBox
+	TypeContainerStart
+	TypeContainerEnd
+	TypeListCollector
+	TypeLookupMultipleChoice
+	TypeHTML
+	TypeSplit
+	TypeMasked
+	TypeEmail
+	TypeURL
+	TypeIPAddress
+	TypeDuration
 	_
-	REQUESTED_FOR
-	RICH_TEXT_LABEL
-	ATTACHMENT
+	TypeRequestedFor
+	TypeRichTextLabel
+	TypeAttachment
 )
 
 // TODO(lauren) add validation?
@@ -289,19 +289,19 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 	var typ VariableType
 	t, ok := variable.Type.(float64)
 	if !ok {
-		typ = UNSPECIFIED
+		typ = TypeUnspecified
 	} else {
 		typ = VariableType(int(t))
 	}
 
 	switch typ {
-	case UNSPECIFIED:
+	case TypeUnspecified:
 		return nil, nil
-	case YES_NO, CHECK_BOX:
+	case TypeYesNo, TypeCheckBox:
 		return sdkTicket.BoolFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
-	case MULTI_LINE_TEXT, SINGLE_LINE_TEXT, WIDE_SINGLE_LINE_TEXT:
+	case TypeMultiLineText, TypeSingleLineText, TypeWideSingleLineText:
 		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
-	case MULTIPLE_CHOICE, LOOKUP_MULTIPLE_CHOICE:
+	case TypeMultipleChoice, TypeLookupMultipleChoice:
 		var allowedChoices []*v2.TicketCustomFieldObjectValue
 		choices := variable.Choices
 		for _, c := range choices {
@@ -311,9 +311,9 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 			})
 		}
 		return sdkTicket.PickMultipleObjectValuesFieldSchema(variable.Name, variable.Name, variable.Mandatory, allowedChoices), nil
-	case DATE, DATE_TIME:
+	case TypeDate, TypeDateTime:
 		return sdkTicket.TimestampFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
-	case SELECT_BOX, LOOKUP_SELECT_BOX:
+	case TypeSelectBox, TypeLookupSelectBox:
 		var allowedChoices []*v2.TicketCustomFieldObjectValue
 		choices := variable.Choices
 		for _, c := range choices {
@@ -323,23 +323,23 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 			})
 		}
 		return sdkTicket.PickObjectValueFieldSchema(variable.Name, variable.Name, variable.Mandatory, allowedChoices), nil
-	case HTML:
+	case TypeHTML:
 		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
-	case REFERENCE:
+	case TypeReference:
 		// This should be a sys_id
 		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
-	case EMAIL:
+	case TypeEmail:
 		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
-	case URL:
+	case TypeURL:
 		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
-	case IP_ADDRESS:
+	case TypeIPAddress:
 		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
-	case REQUESTED_FOR:
+	case TypeRequestedFor:
 		// This should be sys_id of user
 		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
-	case LIST_COLLECTOR: // TODO(lauren) I think this just takes sys_ids but in the UI its populated from other tables
+	case TypeListCollector: // TODO(lauren) I think this just takes sys_ids but in the UI its populated from other tables
 		return nil, nil
-	case DURATION: // TODO(lauren) make duration field?
+	case TypeDuration: // TODO(lauren) make duration field?
 		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
 	default:
 		// TODO(lauren) should continue instead of erroring?

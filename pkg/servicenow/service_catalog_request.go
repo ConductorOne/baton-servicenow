@@ -118,8 +118,8 @@ func (c *Client) GetCatalogItemVariables(ctx context.Context, catalogItemId stri
 }
 
 // Creating a service catalog request requires:
-// 1. Add catalog item to cart (with all required variables)
-// 2. Submit cart order
+// 1. Add catalog item to cart (with all required variables).
+// 2. Submit cart order.
 func (c *Client) CreateServiceCatalogRequest(ctx context.Context, catalogItemId string, payload *OrderItemPayload) (*RequestedItem, error) {
 	requestInfo, err := c.OrderItemNow(ctx, catalogItemId, payload)
 	if err != nil {
@@ -184,14 +184,14 @@ func (c *Client) addLabelToRequestedItem(ctx context.Context, requestedItemId st
 	return &labelEntryResponse.Result, nil
 }
 
-// Create label will return an error if it already exists
-// First fetch the label to check if it already exists
+// Create label will return an error if it already exists.
+// First fetch the label to check if it already exists.
 func (c *Client) CreateLabel(ctx context.Context, label string) (*Label, error) {
 	labelResp, err := c.GetLabel(ctx, label)
 	if err == nil {
 		return labelResp, nil
 	}
-	if err == LabelNotFoundErr {
+	if errors.Is(err, LabelNotFoundErr) {
 		return c.createLabel(ctx, label)
 	}
 	return nil, err
@@ -265,7 +265,7 @@ func (c *Client) GetServiceCatalogRequestedItemStates(ctx context.Context) ([]Re
 	return catalogsResponse.Result, nil
 }
 
-// Unused
+// Unused.
 func (c *Client) GetCatalogs(ctx context.Context, paginationVars PaginationVars) ([]Catalog, string, error) {
 	var catalogsResponse CatalogsResponse
 	nextPageToken, err := c.get(

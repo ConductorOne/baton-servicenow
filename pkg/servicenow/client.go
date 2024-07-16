@@ -38,7 +38,7 @@ const (
 
 	UserRoleInheritanceBaseUrl = GlobalApiBaseURL + "/user_role_inheritance"
 
-	// Service Catalogs
+	// Service Catalogs.
 	ServiceCatalogRequestedItemBaseUrl        = TableAPIBaseURL + "/sc_req_item"
 	ServiceCatalogRequestedItemDetailsBaseUrl = ServiceCatalogRequestedItemBaseUrl + "/%s"
 

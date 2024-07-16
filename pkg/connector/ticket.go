@@ -39,6 +39,7 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 
 	var ret []*v2.TicketSchema
 	for _, catalogItem := range catalogItems {
+		catalogItem := catalogItem
 		catalogItemSchema, err := s.schemaForCatalogItem(ctx, &catalogItem)
 		if err != nil {
 			return nil, "", nil, err
@@ -189,6 +190,7 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 	}
 
 	for _, v := range variables {
+		v := v
 		cf, err := servicenow.ConvertVariableToSchemaCustomField(ctx, &v)
 		if err != nil {
 			return nil, err
