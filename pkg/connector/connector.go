@@ -73,12 +73,14 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 // New returns the ServiceNow connector.
 func New(ctx context.Context, auth string, deployment string) (*ServiceNow, error) {
 	httpClient, err := uhttp.NewClient(ctx, uhttp.WithLogger(true, ctxzap.Extract(ctx)))
-
 	if err != nil {
 		return nil, err
 	}
 
-	servicenowClient := servicenow.NewClient(httpClient, auth, deployment)
+	servicenowClient, err := servicenow.NewClient(httpClient, auth, deployment)
+	if err != nil {
+		return nil, err
+	}
 
 	return &ServiceNow{
 		client: servicenowClient,

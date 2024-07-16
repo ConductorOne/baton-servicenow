@@ -1,0 +1,21 @@
+{
+  "schema_id": "5a1efa5947520510f53d37d2846d439b",
+   "labels": [
+    "test", "baton", "api"
+  ],
+  "requested_for_id": "ff66c1254fb81200025ba3618110c76e",
+  "custom_fields": {
+    "catalog_item": {
+      "id": "5a1efa5947520510f53d37d2846d439b"
+    },
+    "division": {
+      "id": "IT"
+    },
+    "environment": {
+      "id": "Dev"
+    },
+    "describe_briefly_the_purpose_of_this_account": "work",
+    "rich_text": "some text",
+    "what_is_the_duration": "5 00:00:00"
+  }
+}
