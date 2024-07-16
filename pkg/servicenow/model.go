@@ -258,9 +258,9 @@ const (
 	BREAK
 	_
 	MACRO   // skip
-	UI_PAGE //skip
+	UI_PAGE // skip
 	WIDE_SINGLE_LINE_TEXT
-	MACRO_WITH_LABEL //skip
+	MACRO_WITH_LABEL // skip
 	LOOKUP_SELECT_BOX
 	CONTAINER_START
 	CONTAINER_END
@@ -347,7 +347,8 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 			l := ctxzap.Extract(ctx)
 			l.Error("unsupported mandatory type", zap.Any("var", variable))
 			return nil, nil
-			//return nil, errors.New("unsupported mandatory type")
+			// Just log for now
+			// return nil, errors.New("unsupported mandatory type")
 		}
 		return nil, nil
 	}

@@ -39,24 +39,19 @@ const (
 	UserRoleInheritanceBaseUrl = GlobalApiBaseURL + "/user_role_inheritance"
 
 	// Service Catalogs
-	// Catalog requested item
 	ServiceCatalogRequestedItemBaseUrl        = TableAPIBaseURL + "/sc_req_item"
 	ServiceCatalogRequestedItemDetailsBaseUrl = ServiceCatalogRequestedItemBaseUrl + "/%s"
 
-	// Catalog request
 	ServiceCatalogRequestBaseUrl        = TableAPIBaseURL + "/sc_request"
 	ServiceCatalogRequestDetailsBaseUrl = ServiceCatalogRequestBaseUrl + "/%s"
 
-	// Catalogs
 	ServiceCatalogBaseUrl         = BaseURL + "/sn_sc/servicecatalog"
 	ServiceCatalogListCatalogsUrl = ServiceCatalogBaseUrl + "/catalogs"
 	ServiceCatalogGetCatalogUrl   = ServiceCatalogListCatalogsUrl + "/%s"
 
-	// Catalog category
 	ServiceCatalogCategoryBaseUrl       = ServiceCatalogGetCatalogUrl + "/categories"
 	ServiceCatalogCategoryDetailBaseUrl = ServiceCatalogCategoryBaseUrl + "/%s"
 
-	// Catalog items
 	ServiceCatalogItemBaseUrl      = ServiceCatalogBaseUrl + "/items"
 	ServiceCatalogItemGetUrl       = ServiceCatalogItemBaseUrl + "/%s"
 	ServiceCatalogItemVariablesUrl = ServiceCatalogItemGetUrl + "/variables"
@@ -66,7 +61,7 @@ const (
 	LabelBaseUrl      = TableAPIBaseURL + "/label"
 	LabelEntryBaseUrl = TableAPIBaseURL + "/label_entry"
 
-	// To get possible states for service catalog requested item
+	// To get possible states for service catalog requested item.
 	ChoiceBaseUrl = TableAPIBaseURL + "/sys_choice"
 
 	InstanceURLTemplate = `{{.Deployment}}.service-now.com`
