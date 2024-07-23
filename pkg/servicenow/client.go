@@ -100,22 +100,24 @@ type LabelEntriesLabelNameResponse = ListResponse[LabelEntryName]
 type RequestedItemStateResponse = ListResponse[RequestItemState]
 
 type Client struct {
-	httpClient *http.Client
-	auth       string
-	deployment string
-	baseURL    string
+	httpClient          *http.Client
+	auth                string
+	deployment          string
+	baseURL             string
+	TicketSchemaFilters map[string]string
 }
 
-func NewClient(httpClient *http.Client, auth string, deployment string) (*Client, error) {
+func NewClient(httpClient *http.Client, auth string, deployment string, ticketSchemaFilters map[string]string) (*Client, error) {
 	baseURL, err := GenerateURL(InstanceURLTemplate, map[string]string{"Deployment": deployment})
 	if err != nil {
 		return nil, err
 	}
 	return &Client{
-		httpClient: httpClient,
-		auth:       auth,
-		deployment: deployment,
-		baseURL:    baseURL,
+		httpClient:          httpClient,
+		auth:                auth,
+		deployment:          deployment,
+		baseURL:             baseURL,
+		TicketSchemaFilters: ticketSchemaFilters,
 	}, nil
 }
 
