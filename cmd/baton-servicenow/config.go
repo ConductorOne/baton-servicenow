@@ -12,8 +12,8 @@ var (
 	usernameField   = field.StringField("username", field.WithRequired(true), field.WithDescription("Username of administrator used to connect to the ServiceNow API."))
 	passwordField   = field.StringField("password", field.WithRequired(true), field.WithDescription("Application password used to connect to the ServiceNow API."))
 	deploymentField = field.StringField("deployment", field.WithRequired(true), field.WithDescription("ServiceNow deployment to connect to."))
-	catalogField    = field.StringField("catalog-id", field.WithDescription("ServiceNow catalog id to fetch catalog items"))
-	categoryField   = field.StringField("category-id", field.WithDescription("ServiceNow category id catalog items"))
+	catalogField    = field.StringField("catalog-id", field.WithDescription("ServiceNow catalog id to filter catalog items to"))
+	categoryField   = field.StringField("category-id", field.WithDescription("ServiceNow category id to filter catalog items to"))
 )
 
 // configurationFields defines the external configuration required for the connector to run.
