@@ -25,8 +25,8 @@ var configurationFields = []field.SchemaField{
 	categoryField,
 }
 
-var configRelations = []field.SchemaFieldRelationshipI{
-	field.FieldsDependentOn([]field.SchemaField{field.ListTicketSchemasField}, []field.SchemaField{catalogField, categoryField}),
+var configRelations = []field.SchemaFieldRelationship{
+	field.FieldsDependentOn([]field.SchemaField{catalogField, categoryField}, []field.SchemaField{field.ListTicketSchemasField}),
 }
 
 // validateConfig is run after the configuration is loaded, and should return an error if it isn't valid.
