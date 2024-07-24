@@ -365,6 +365,44 @@ func (c *Client) post(
 	return err
 }
 
+func (c *Client) patch(
+	ctx context.Context,
+	urlAddress string,
+	resourceResponse interface{},
+	data interface{},
+	requestOptions ...ReqOpt,
+) error {
+	_, err := c.doRequest(
+		ctx,
+		urlAddress,
+		http.MethodPatch,
+		data,
+		&resourceResponse,
+		requestOptions...,
+	)
+
+	return err
+}
+
+func (c *Client) put(
+	ctx context.Context,
+	urlAddress string,
+	resourceResponse interface{},
+	data interface{},
+	requestOptions ...ReqOpt,
+) error {
+	_, err := c.doRequest(
+		ctx,
+		urlAddress,
+		http.MethodPut,
+		data,
+		&resourceResponse,
+		requestOptions...,
+	)
+
+	return err
+}
+
 func (c *Client) delete(
 	ctx context.Context,
 	urlAddress string,
@@ -406,7 +444,7 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 	req.Header.Set("Authorization", c.auth)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	if method == http.MethodPost {
+	if method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch {
 		req.Header.Set("X-no-response-body", "true")
 	}
 
