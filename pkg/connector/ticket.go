@@ -137,6 +137,9 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 			Description: ticket.Description,
 		},
 	)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	ticket, annos, err := s.serviceCatalogRequestItemToTicket(ctx, serviceCatalogRequestedItem)
 	if err != nil {
