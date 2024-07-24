@@ -78,12 +78,18 @@ func (c *Client) GetServiceCatalogRequestItems(ctx context.Context, reqOptions .
 
 func (c *Client) GetCatalogItems(ctx context.Context, paginationVars *PaginationVars) ([]CatalogItem, string, error) {
 	var catalogItemsResponse CatalogItemsResponse
+	reqOpts := []ReqOpt{
+		WithPageLimit(paginationVars.Limit),
+		WithOffset(paginationVars.Offset),
+	}
+	for k, v := range c.TicketSchemaFilters {
+		reqOpts = append(reqOpts, WithQueryParam(k, v))
+	}
 	nextPageToken, err := c.get(
 		ctx,
 		fmt.Sprintf(ServiceCatalogItemBaseUrl, c.deployment),
 		&catalogItemsResponse,
-		WithPageLimit(paginationVars.Limit),
-		WithOffset(paginationVars.Offset),
+		reqOpts...,
 	)
 	if err != nil {
 		return nil, "", err
