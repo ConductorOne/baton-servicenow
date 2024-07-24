@@ -3,6 +3,7 @@
    "labels": [
     "test", "baton", "api"
   ],
+  "description": "some description",
   "requested_for_id": "ff66c1254fb81200025ba3618110c76e",
   "custom_fields": {
     "catalog_item": {

@@ -62,6 +62,22 @@ func (c *Client) GetServiceCatalogRequestedItemForRequest(ctx context.Context, s
 	return &requestItemsResponse[0], nil
 }
 
+func (c *Client) UpdateServiceCatalogRequestItem(ctx context.Context, requestItemId string, payload *RequestedItemUpdatePayload) (*RequestedItem, error) {
+	var requestItemResponse RequestItemResponse
+	err := c.patch(
+		ctx,
+		fmt.Sprintf(ServiceCatalogRequestedItemDetailsBaseUrl, c.deployment, requestItemId),
+		&requestItemResponse,
+		&payload,
+		WithIncludeResponseBody(),
+		WithIncludeExternalRefLink(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &requestItemResponse.Result, nil
+}
+
 func (c *Client) GetServiceCatalogRequestItems(ctx context.Context, reqOptions ...ReqOpt) ([]RequestedItem, string, error) {
 	var requestItemsResponse RequestItemsResponse
 	nextPageToken, err := c.get(

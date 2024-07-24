@@ -175,6 +175,10 @@ type RequestedItem struct {
 	AssignedTo       string           `json:"assigned_to"`
 }
 
+type RequestedItemUpdatePayload struct {
+	Description string `json:"description"`
+}
+
 type Choice struct {
 	Index int    `json:"index"`
 	Label string `json:"label"`
