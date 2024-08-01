@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"time"
 
@@ -28,13 +29,14 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 		},
 	)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to get catalog items: %w", err)
 	}
 
 	requestedItemStates, err := s.client.GetServiceCatalogRequestedItemStates(ctx)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to get catalog requested item states: %w", err)
 	}
+
 	ticketStatuses := requestedItemStatesToTicketStatus(requestedItemStates)
 
 	var ret []*v2.TicketSchema
@@ -54,7 +56,7 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 func (s *ServiceNow) GetTicket(ctx context.Context, ticketId string) (*v2.Ticket, annotations.Annotations, error) {
 	serviceCatalogRequestedItem, err := s.client.GetServiceCatalogRequestItem(ctx, ticketId)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("servicenow-connector: failed to get catalog requested item %s: %w", ticketId, err)
 	}
 	ticket, annos, err := s.serviceCatalogRequestItemToTicket(ctx, serviceCatalogRequestedItem)
 	if err != nil {
@@ -124,11 +126,11 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 
 	serviceCatalogRequestedItem, err := s.client.CreateServiceCatalogRequest(ctx, catalogItemID, createServiceCatalogRequestPayload)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("servicenow-connector: failed to create service catalog request %s: %w", catalogItemID, err)
 	}
 	err = s.client.AddLabelsToRequest(ctx, serviceCatalogRequestedItem.Id, ticket.Labels)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("servicenow-connector: failed to add labels to request for catalog requested item %s: %w", serviceCatalogRequestedItem.Id, err)
 	}
 
 	serviceCatalogRequestedItem, err = s.client.UpdateServiceCatalogRequestItem(ctx,
@@ -138,7 +140,7 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 		},
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("servicenow-connector: failed to update catalog requested item %s: %w", serviceCatalogRequestedItem.Id, err)
 	}
 
 	ticket, annos, err := s.serviceCatalogRequestItemToTicket(ctx, serviceCatalogRequestedItem)
@@ -154,11 +156,11 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 func (s *ServiceNow) GetTicketSchema(ctx context.Context, schemaID string) (*v2.TicketSchema, annotations.Annotations, error) {
 	catalogItem, err := s.client.GetCatalogItem(ctx, schemaID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("servicenow-connector: failed to get catalog item %s: %w", schemaID, err)
 	}
 	requestedItemStates, err := s.client.GetServiceCatalogRequestedItemStates(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("servicenow-connector: failed to get catalog requested item states: %w", err)
 	}
 	ticketStatuses := requestedItemStatesToTicketStatus(requestedItemStates)
 	schema, err := s.schemaForCatalogItem(ctx, catalogItem)
@@ -195,7 +197,7 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 	if len(variables) == 0 {
 		variables, err = s.client.GetCatalogItemVariables(ctx, catalogItem.Id)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("servicenow-connector: failed to get catalog variables for catalog item %s: %w", catalogItem.Id, err)
 		}
 	}
 
@@ -203,7 +205,7 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 		v := v
 		cf, err := servicenow.ConvertVariableToSchemaCustomField(ctx, &v)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("servicenow-connector: failed to convert variable to custom field for catalog item %s: %w", catalogItem.Id, err)
 		}
 		// cf can be nil since we aren't handling all variable cases (if not required)
 		if cf == nil {
@@ -244,7 +246,7 @@ func (s *ServiceNow) serviceCatalogRequestItemToTicket(ctx context.Context, requ
 
 	labels, err := s.client.GetLabelsForRequestedItem(ctx, requestedItem.Id)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("servicenow-connector: failed to get labels for requested item %s: %w", requestedItem.Id, err)
 	}
 
 	// TODO(lauren) if we want to set approvers for assignees must query sysapproval_approver table
@@ -253,7 +255,7 @@ func (s *ServiceNow) serviceCatalogRequestItemToTicket(ctx context.Context, requ
 	if requestedItem.RequestedFor != nil && requestedItem.RequestedFor.Value != "" {
 		requestedFor, err := s.client.GetUser(ctx, requestedItem.RequestedFor.Value)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("servicenow-connector: failed to get requested for user %s: %w", requestedItem.RequestedFor.Value, err)
 		}
 		requestedForUserResource, err = userResource(ctx, requestedFor)
 		if err != nil {
