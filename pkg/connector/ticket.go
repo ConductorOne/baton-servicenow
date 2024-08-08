@@ -116,7 +116,7 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 		return nil, nil, err
 	}
 	if !valid {
-		return nil, nil, errors.New("error: unable to create ticket, ticket is invalid")
+		return nil, nil, errors.Join(errors.New("error: unable to create ticket, ticket is invalid"), sdkTicket.ErrTicketValidationError)
 	}
 
 	createServiceCatalogRequestPayload := &servicenow.OrderItemPayload{Quantity: 1, RequestedFor: ticket.GetRequestedFor().GetId().GetResource()}
