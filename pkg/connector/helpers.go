@@ -1,8 +1,6 @@
 package connector
 
 import (
-	"strconv"
-
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
@@ -41,11 +39,7 @@ func parsePageToken(i string, resourceID *v2.ResourceId) (*pagination.Bag, int, 
 
 // convertPageToken converts a string token into an int.
 func convertPageToken(token string) (int, error) {
-	if token == "" {
-		return 0, nil
-	}
-
-	return strconv.Atoi(token)
+	return servicenow.ConvertPageToken(token)
 }
 
 func mapGroupMembers(resources []servicenow.GroupMember) []string {
