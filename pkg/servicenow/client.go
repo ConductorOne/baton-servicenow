@@ -468,7 +468,7 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 			if err != nil {
 				return "", err
 			}
-			if token < totalCount && totalCount != 0 && token != 0 {
+			if token < totalCount {
 				pageToken = offset
 			}
 			break
