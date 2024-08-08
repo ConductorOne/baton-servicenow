@@ -8,8 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
-	"text/template"
 
 	"github.com/tomnomnom/linkheader"
 	"google.golang.org/grpc/codes"
@@ -451,6 +449,12 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 		}
 	}
 
+	totalCountHeader := rawResponse.Header.Get("X-Total-Count")
+	totalCount, err := ConvertPageToken(totalCountHeader)
+	if err != nil {
+		return "", err
+	}
+
 	var pageToken string
 	pagingLinks := linkheader.Parse(rawResponse.Header.Get("Link"))
 	for _, link := range pagingLinks {
@@ -459,26 +463,17 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 			if err != nil {
 				return "", err
 			}
-
-			pageToken = nextPageUrl.Query().Get("sysparm_offset")
+			offset := nextPageUrl.Query().Get("sysparm_offset")
+			token, err := ConvertPageToken(offset)
+			if err != nil {
+				return "", err
+			}
+			if token < totalCount {
+				pageToken = offset
+			}
 			break
 		}
 	}
 
 	return pageToken, nil
-}
-
-type URLParams map[string]string
-
-func GenerateURL(baseURL string, params URLParams) (string, error) {
-	tmpl, err := template.New("url").Parse(baseURL)
-	if err != nil {
-		return "", err
-	}
-	var urlBuilder strings.Builder
-	err = tmpl.Execute(&urlBuilder, params)
-	if err != nil {
-		return "", err
-	}
-	return urlBuilder.String(), nil
 }
