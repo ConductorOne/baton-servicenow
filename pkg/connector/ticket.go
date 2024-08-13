@@ -251,17 +251,6 @@ func (s *ServiceNow) serviceCatalogRequestItemToTicket(ctx context.Context, requ
 
 	// TODO(lauren) if we want to set approvers for assignees must query sysapproval_approver table
 	// TODO(lauren) dont need to get user if we dot walk
-	var requestedForUserResource *v2.Resource
-	if requestedItem.RequestedFor != nil && requestedItem.RequestedFor.Value != "" {
-		requestedFor, err := s.client.GetUser(ctx, requestedItem.RequestedFor.Value)
-		if err != nil {
-			return nil, nil, fmt.Errorf("servicenow-connector: failed to get requested for user %s: %w", requestedItem.RequestedFor.Value, err)
-		}
-		requestedForUserResource, err = userResource(ctx, requestedFor)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
 
 	return &v2.Ticket{
 		Id:          requestedItem.Id,
@@ -278,7 +267,6 @@ func (s *ServiceNow) serviceCatalogRequestItemToTicket(ctx context.Context, requ
 		CreatedAt:    timestamppb.New(createdAt),
 		UpdatedAt:    timestamppb.New(updatedAt),
 		CompletedAt:  completedAt,
-		RequestedFor: requestedForUserResource,
 	}, nil, nil
 }
 
