@@ -95,6 +95,7 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 			pick := ticketField.GetPickObjectValue()
 			if pick != nil {
 				val := pick.GetValue().GetId()
+
 				ticketOptions = append(ticketOptions, servicenow.WithCustomField(cf.GetId(), val))
 				continue
 			}
@@ -108,6 +109,10 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 				// If "requested_for" variable type is not set, we use the service now user id from the ticket requested for
 				// If this is also empty, we will use the default system admin
 				if val == nil {
+					requestedForID := ticket.RequestedFor.GetId().GetResource()
+					if requestedForID == "" {
+						requestedForID = servicenow.SystemAdminUserId
+					}
 					ticketFields[id] = sdkTicket.StringField(cf.GetId(), ticket.RequestedFor.GetId().GetResource())
 				}
 			}
