@@ -105,6 +105,9 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 			var err error
 			if GetVariableTypeAnnotation(cf.Annotations) == servicenow.TypeRequestedFor {
 				val, err = sdkTicket.GetCustomFieldValue(ticketFields[id])
+				if err != nil {
+					return nil, nil, fmt.Errorf("servicenow-connector: failed to get custom field value: %s", id)
+				}
 
 				// If "requested_for" variable type is not set, we use the service now user id from the ticket requested for
 				// If this is also empty, we will use the default system admin
