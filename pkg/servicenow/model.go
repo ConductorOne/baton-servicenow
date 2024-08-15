@@ -286,9 +286,9 @@ const (
 )
 
 // TODO(lauren) add validation?
-func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogItemVariable) (*v2.TicketCustomField, error) {
+func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogItemVariable) *v2.TicketCustomField {
 	if !variable.Active || variable.ReadOnly {
-		return nil, nil
+		return nil
 	}
 
 	// TODO(unmarshal func)
@@ -302,11 +302,11 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 
 	switch typ {
 	case TypeUnspecified:
-		return nil, nil
+		return nil
 	case TypeYesNo, TypeCheckBox:
-		return sdkTicket.BoolFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+		return sdkTicket.BoolFieldSchema(variable.Name, variable.Name, variable.Mandatory)
 	case TypeMultiLineText, TypeSingleLineText, TypeWideSingleLineText:
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
 	case TypeMultipleChoice, TypeLookupMultipleChoice:
 		var allowedChoices []*v2.TicketCustomFieldObjectValue
 		choices := variable.Choices
@@ -316,9 +316,9 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 				DisplayName: c.Value,
 			})
 		}
-		return sdkTicket.PickMultipleObjectValuesFieldSchema(variable.Name, variable.Name, variable.Mandatory, allowedChoices), nil
+		return sdkTicket.PickMultipleObjectValuesFieldSchema(variable.Name, variable.Name, variable.Mandatory, allowedChoices)
 	case TypeDate, TypeDateTime:
-		return sdkTicket.TimestampFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+		return sdkTicket.TimestampFieldSchema(variable.Name, variable.Name, variable.Mandatory)
 	case TypeSelectBox, TypeLookupSelectBox:
 		var allowedChoices []*v2.TicketCustomFieldObjectValue
 		choices := variable.Choices
@@ -328,36 +328,36 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 				DisplayName: c.Value,
 			})
 		}
-		return sdkTicket.PickObjectValueFieldSchema(variable.Name, variable.Name, variable.Mandatory, allowedChoices), nil
+		return sdkTicket.PickObjectValueFieldSchema(variable.Name, variable.Name, variable.Mandatory, allowedChoices)
 	case TypeHTML:
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
 	case TypeReference:
 		// This should be a sys_id
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
 	case TypeEmail:
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
 	case TypeURL:
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
 	case TypeIPAddress:
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
 	case TypeRequestedFor:
 		// This should be sys_id of user
 		rf := sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
 		rf.GetStringValue().DefaultValue = SystemAdminUserId
-		return rf, nil
+		return rf
 	case TypeListCollector: // TODO(lauren) I think this just takes sys_ids but in the UI its populated from other tables
-		return nil, nil
+		return nil
 	case TypeDuration: // TODO(lauren) make duration field?
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
 	default:
 		// TODO(lauren) should continue instead of erroring?
 		if variable.Mandatory {
 			l := ctxzap.Extract(ctx)
 			l.Error("unsupported mandatory type", zap.Any("var", variable))
-			return nil, nil
+			return nil
 			// Just log for now
 			// return nil, errors.New("unsupported mandatory type")
 		}
-		return nil, nil
+		return nil
 	}
 }

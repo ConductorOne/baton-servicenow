@@ -221,10 +221,8 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 	}
 
 	for _, v := range variables {
-		cf, err := servicenow.ConvertVariableToSchemaCustomField(ctx, &v)
-		if err != nil {
-			return nil, fmt.Errorf("servicenow-connector: failed to convert variable to custom field for catalog item %s: %w", catalogItem.Id, err)
-		}
+		cf := servicenow.ConvertVariableToSchemaCustomField(ctx, &v)
+
 		// cf can be nil since we aren't handling all variable cases (if not required)
 		if cf == nil {
 			continue
