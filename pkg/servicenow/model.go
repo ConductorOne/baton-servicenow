@@ -9,6 +9,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const SystemAdminUserId = "6816f79cc0a8016401c5a33be04be441"
+
 type BaseResource struct {
 	Id string `json:"sys_id"`
 }
@@ -340,7 +342,9 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
 	case TypeRequestedFor:
 		// This should be sys_id of user
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory), nil
+		rf := sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
+		rf.GetStringValue().DefaultValue = SystemAdminUserId
+		return rf, nil
 	case TypeListCollector: // TODO(lauren) I think this just takes sys_ids but in the UI its populated from other tables
 		return nil, nil
 	case TypeDuration: // TODO(lauren) make duration field?

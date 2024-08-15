@@ -98,7 +98,7 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 			}
 			// TODO(lauren) handle multi pick differently also
 
-			val, err := sdkTicket.GetCustomFieldValue(ticketFields[id])
+			val, err := sdkTicket.GetCustomFieldValueOrDefault(ticketFields[id])
 			if err != nil {
 				return nil, nil, err
 			}
