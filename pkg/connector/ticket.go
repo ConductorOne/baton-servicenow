@@ -11,6 +11,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	sdkTicket "github.com/conductorone/baton-sdk/pkg/types/ticket"
+	mv "github.com/conductorone/baton-servicenow/pb/c1/connector/v2"
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -202,7 +203,6 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 	}
 
 	for _, v := range variables {
-		v := v
 		cf, err := servicenow.ConvertVariableToSchemaCustomField(ctx, &v)
 		if err != nil {
 			return nil, fmt.Errorf("servicenow-connector: failed to convert variable to custom field for catalog item %s: %w", catalogItem.Id, err)
@@ -211,6 +211,19 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 		if cf == nil {
 			continue
 		}
+
+		// TODO(unmarshal func)
+		var typ servicenow.VariableType
+		t, ok := v.Type.(float64)
+		if !ok {
+			typ = servicenow.TypeUnspecified
+		} else {
+			typ = servicenow.VariableType(int(t))
+		}
+		typAnno := &mv.CatalogRequestedItemVariable{
+			VariableType: int64(typ),
+		}
+		cf.Annotations = annotations.New(typAnno)
 		customFields[v.Name] = cf
 	}
 
