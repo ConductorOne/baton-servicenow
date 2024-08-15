@@ -11,9 +11,11 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	sdkTicket "github.com/conductorone/baton-sdk/pkg/types/ticket"
+	mv "github.com/conductorone/baton-servicenow/pb/c1/connector/v2"
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -93,12 +95,32 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 			pick := ticketField.GetPickObjectValue()
 			if pick != nil {
 				val := pick.GetValue().GetId()
+
 				ticketOptions = append(ticketOptions, servicenow.WithCustomField(cf.GetId(), val))
 				continue
 			}
 			// TODO(lauren) handle multi pick differently also
 
-			val, err := sdkTicket.GetCustomFieldValueOrDefault(ticketFields[id])
+			var val interface{}
+			var err error
+			if GetVariableTypeAnnotation(cf.Annotations) == servicenow.TypeRequestedFor {
+				val, err = sdkTicket.GetCustomFieldValue(ticketFields[id])
+				if err != nil {
+					return nil, nil, fmt.Errorf("servicenow-connector: failed to get custom field value: %s", id)
+				}
+
+				// If "requested_for" variable type is not set, we use the service now user id from the ticket requested for
+				// If this is also empty, we will use the default system admin
+				if val == nil {
+					requestedForID := ticket.RequestedFor.GetId().GetResource()
+					if requestedForID == "" {
+						requestedForID = servicenow.SystemAdminUserId
+					}
+					ticketFields[id].GetStringValue().Value = requestedForID
+				}
+			}
+
+			val, err = sdkTicket.GetCustomFieldValueOrDefault(ticketFields[id])
 			if err != nil {
 				return nil, nil, err
 			}
@@ -202,16 +224,27 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 	}
 
 	for _, v := range variables {
-		v := v
-		cf, err := servicenow.ConvertVariableToSchemaCustomField(ctx, &v)
-		if err != nil {
-			return nil, fmt.Errorf("servicenow-connector: failed to convert variable to custom field for catalog item %s: %w", catalogItem.Id, err)
-		}
+		vCopy := v
+		cf := servicenow.ConvertVariableToSchemaCustomField(ctx, &vCopy)
+
 		// cf can be nil since we aren't handling all variable cases (if not required)
 		if cf == nil {
 			continue
 		}
-		customFields[v.Name] = cf
+
+		// TODO(unmarshal func)
+		var typ servicenow.VariableType
+		t, ok := vCopy.Type.(float64)
+		if !ok {
+			typ = servicenow.TypeUnspecified
+		} else {
+			typ = servicenow.VariableType(int(t))
+		}
+		typAnno := &mv.CatalogRequestedItemVariable{
+			VariableType: int64(typ),
+		}
+		cf.Annotations = annotations.New(typAnno)
+		customFields[vCopy.Name] = cf
 	}
 
 	ret := &v2.TicketSchema{
@@ -287,4 +320,18 @@ func requestedItemStatesToTicketStatus(states []servicenow.RequestItemState) []*
 		})
 	}
 	return ticketStatuses
+}
+
+func GetVariableTypeAnnotation(annotations []*anypb.Any) servicenow.VariableType {
+	vt := &mv.CatalogRequestedItemVariable{}
+	for _, v := range annotations {
+		if v.MessageIs(vt) {
+			err := v.UnmarshalTo(vt)
+			if err != nil {
+				return servicenow.TypeUnspecified
+			}
+			return servicenow.VariableType(int(vt.VariableType))
+		}
+	}
+	return servicenow.TypeUnspecified
 }

@@ -23,6 +23,14 @@ add-dep:
 	go mod tidy -v
 	go mod vendor
 
+.PHONY: protogen
+protogen:
+	buf generate
+
+.PHONY: protofmt
+protofmt:
+	buf format -w
+
 .PHONY: lint
 lint:
 	golangci-lint run
