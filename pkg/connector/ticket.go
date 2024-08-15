@@ -224,7 +224,8 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 	}
 
 	for _, v := range variables {
-		cf := servicenow.ConvertVariableToSchemaCustomField(ctx, &v)
+		vCopy := v
+		cf := servicenow.ConvertVariableToSchemaCustomField(ctx, &vCopy)
 
 		// cf can be nil since we aren't handling all variable cases (if not required)
 		if cf == nil {
@@ -233,7 +234,7 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 
 		// TODO(unmarshal func)
 		var typ servicenow.VariableType
-		t, ok := v.Type.(float64)
+		t, ok := vCopy.Type.(float64)
 		if !ok {
 			typ = servicenow.TypeUnspecified
 		} else {
@@ -243,7 +244,7 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 			VariableType: int64(typ),
 		}
 		cf.Annotations = annotations.New(typAnno)
-		customFields[v.Name] = cf
+		customFields[vCopy.Name] = cf
 	}
 
 	ret := &v2.TicketSchema{
