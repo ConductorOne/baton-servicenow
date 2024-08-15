@@ -15,6 +15,7 @@ import (
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -99,7 +100,19 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 			}
 			// TODO(lauren) handle multi pick differently also
 
-			val, err := sdkTicket.GetCustomFieldValueOrDefault(ticketFields[id])
+			var val interface{}
+			var err error
+			if GetVariableTypeAnnotation(cf.Annotations) == servicenow.TypeRequestedFor {
+				val, err = sdkTicket.GetCustomFieldValue(ticketFields[id])
+
+				// If "requested_for" variable type is not set, we use the service now user id from the ticket requested for
+				// If this is also empty, we will use the default system admin
+				if val == nil {
+					ticketFields[id] = sdkTicket.StringField(cf.GetId(), ticket.RequestedFor.GetId().GetResource())
+				}
+			}
+
+			val, err = sdkTicket.GetCustomFieldValueOrDefault(ticketFields[id])
 			if err != nil {
 				return nil, nil, err
 			}
@@ -300,4 +313,18 @@ func requestedItemStatesToTicketStatus(states []servicenow.RequestItemState) []*
 		})
 	}
 	return ticketStatuses
+}
+
+func GetVariableTypeAnnotation(annotations []*anypb.Any) servicenow.VariableType {
+	vt := &mv.CatalogRequestedItemVariable{}
+	for _, v := range annotations {
+		if v.MessageIs(vt) {
+			err := v.UnmarshalTo(vt)
+			if err != nil {
+				return servicenow.TypeUnspecified
+			}
+			return servicenow.VariableType(int(vt.VariableType))
+		}
+	}
+	return servicenow.TypeUnspecified
 }
