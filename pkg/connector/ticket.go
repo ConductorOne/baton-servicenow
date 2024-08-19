@@ -161,7 +161,7 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 		},
 	)
 	if updateErr != nil {
-		updateErr = fmt.Errorf("servicenow-connector: failed to update catalog requested item description: %w", err)
+		updateErr = fmt.Errorf("failed to update catalog requested item description: %w", updateErr)
 	}
 
 	ticket, annos, err := s.serviceCatalogRequestItemToTicket(ctx, serviceCatalogRequestedItem)
