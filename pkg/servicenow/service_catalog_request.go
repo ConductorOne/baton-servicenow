@@ -201,7 +201,7 @@ func (c *Client) addLabelToRequestedItem(ctx context.Context, requestedItemId st
 		WithIncludeResponseBody(),
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error adding label %s to requested item %s: %w", labelId, requestedItemId, err)
 	}
 	return &labelEntryResponse.Result, nil
 }
@@ -228,7 +228,7 @@ func (c *Client) GetLabel(ctx context.Context, label string) (*Label, error) {
 		WithQuery(fmt.Sprintf("name=%s", label)),
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error fetching label '%s': %w", label, err)
 	}
 	if len(labelsResponse.Result) == 0 {
 		return nil, LabelNotFoundErr
@@ -246,9 +246,10 @@ func (c *Client) createLabel(ctx context.Context, label string) (*Label, error) 
 			ViewableBy: "everyone",
 			Name:       label,
 		},
+		WithIncludeResponseBody(),
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error creating label '%s': %w", label, err)
 	}
 	return &labelResponse.Result, nil
 }

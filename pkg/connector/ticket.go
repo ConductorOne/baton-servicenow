@@ -14,6 +14,7 @@ import (
 	mv "github.com/conductorone/baton-servicenow/pb/c1/connector/v2"
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -62,8 +63,9 @@ func (s *ServiceNow) GetTicket(ctx context.Context, ticketId string) (*v2.Ticket
 	}
 	ticket, annos, err := s.serviceCatalogRequestItemToTicket(ctx, serviceCatalogRequestedItem)
 	if err != nil {
-		return nil, nil, err
+		return ticket, nil, fmt.Errorf("servicenow-connector: %w", err)
 	}
+
 	return ticket, annos, err
 }
 
@@ -150,19 +152,16 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 	if err != nil {
 		return nil, nil, fmt.Errorf("servicenow-connector: failed to create service catalog request %s: %w", catalogItemID, err)
 	}
-	err = s.client.AddLabelsToRequest(ctx, serviceCatalogRequestedItem.Id, ticket.Labels)
-	if err != nil {
-		return nil, nil, fmt.Errorf("servicenow-connector: failed to add labels to request for catalog requested item %s: %w", serviceCatalogRequestedItem.Id, err)
-	}
+	labelErr := s.client.AddLabelsToRequest(ctx, serviceCatalogRequestedItem.Id, ticket.Labels)
 
-	serviceCatalogRequestedItem, err = s.client.UpdateServiceCatalogRequestItem(ctx,
+	serviceCatalogRequestedItem, updateErr := s.client.UpdateServiceCatalogRequestItem(ctx,
 		serviceCatalogRequestedItem.Id,
 		&servicenow.RequestedItemUpdatePayload{
 			Description: ticket.Description,
 		},
 	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("servicenow-connector: failed to update catalog requested item %s: %w", serviceCatalogRequestedItem.Id, err)
+	if updateErr != nil {
+		updateErr = fmt.Errorf("failed to update catalog requested item description: %w", updateErr)
 	}
 
 	ticket, annos, err := s.serviceCatalogRequestItemToTicket(ctx, serviceCatalogRequestedItem)
@@ -170,7 +169,12 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 		return nil, nil, err
 	}
 
-	l.Info("created service catalog request", zap.Any("ticket", ticket))
+	err = multierr.Combine(labelErr, updateErr, err)
+	if err != nil {
+		err = fmt.Errorf("servicenow-connector: %w", err)
+	}
+
+	l.Info("created service catalog request", zap.Any("ticket", ticket), zap.Error(err))
 
 	return ticket, annos, err
 }
@@ -277,12 +281,7 @@ func (s *ServiceNow) serviceCatalogRequestItemToTicket(ctx context.Context, requ
 		completedAt = timestamppb.New(closedAt)
 	}
 
-	labels, err := s.client.GetLabelsForRequestedItem(ctx, requestedItem.Id)
-	if err != nil {
-		return nil, nil, fmt.Errorf("servicenow-connector: failed to get labels for requested item %s: %w", requestedItem.Id, err)
-	}
-
-	return &v2.Ticket{
+	t := &v2.Ticket{
 		Id:          requestedItem.Id,
 		DisplayName: requestedItem.Number, // catalog request does not have display name
 		Description: requestedItem.Description,
@@ -291,13 +290,20 @@ func (s *ServiceNow) serviceCatalogRequestItemToTicket(ctx context.Context, requ
 		Status: &v2.TicketStatus{
 			Id: requestedItem.State,
 		},
-		Labels:       labels,
 		Url:          s.generateRequestedItemURL(requestedItem),
 		CustomFields: nil,
 		CreatedAt:    timestamppb.New(createdAt),
 		UpdatedAt:    timestamppb.New(updatedAt),
 		CompletedAt:  completedAt,
-	}, nil, nil
+	}
+
+	labels, err := s.client.GetLabelsForRequestedItem(ctx, requestedItem.Id)
+	if err != nil {
+		return t, nil, fmt.Errorf("failed to get labels for requested item %s: %w", requestedItem.Id, err)
+	}
+
+	t.Labels = labels
+	return t, nil, nil
 }
 
 func (s *ServiceNow) generateRequestedItemURL(requestedItem *servicenow.RequestedItem) string {
