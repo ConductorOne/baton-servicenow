@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 
@@ -439,8 +441,12 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 	}
 	defer rawResponse.Body.Close()
 
+	if rawResponse.StatusCode < 0 || rawResponse.StatusCode > math.MaxUint32 {
+		return "", errors.New("status code is out of range for uint32")
+	}
+
 	if rawResponse.StatusCode >= 300 {
-		return "", status.Error(codes.Code(rawResponse.StatusCode), "Request failed")
+		return "", status.Error(codes.Code(uint32(rawResponse.StatusCode)), "Request failed")
 	}
 
 	if method != http.MethodDelete {
