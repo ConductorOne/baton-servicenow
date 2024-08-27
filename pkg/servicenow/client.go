@@ -443,7 +443,10 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 
 	if rawResponse.StatusCode < 0 || rawResponse.StatusCode > math.MaxUint32 {
 		return "", errors.New("status code is out of range for uint32")
-	} else if rawResponse.StatusCode >= 300 {
+	}
+
+	if rawResponse.StatusCode >= 300 {
+		// nolint:gosec
 		return "", status.Error(codes.Code(uint32(rawResponse.StatusCode)), "Request failed")
 	}
 
