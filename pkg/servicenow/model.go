@@ -291,6 +291,8 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 		return nil
 	}
 
+	l := ctxzap.Extract(ctx)
+
 	// TODO(unmarshal func)
 	var typ VariableType
 	t, ok := variable.Type.(float64)
@@ -304,9 +306,11 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 	case TypeUnspecified:
 		return nil
 	case TypeYesNo, TypeCheckBox:
-		return sdkTicket.BoolFieldSchema(variable.Name, variable.Name, variable.Mandatory)
-	case TypeMultiLineText, TypeSingleLineText, TypeWideSingleLineText:
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
+		return sdkTicket.BoolFieldSchema(variable.Name, variable.Label, variable.Mandatory)
+	case TypeMultiLineText, TypeSingleLineText, TypeWideSingleLineText, TypeHTML, TypeEmail, TypeURL, TypeIPAddress:
+		f := sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
+		f.GetStringValue().DefaultValue = variable.Value
+		return f
 	case TypeMultipleChoice, TypeLookupMultipleChoice:
 		var allowedChoices []*v2.TicketCustomFieldObjectValue
 		choices := variable.Choices
@@ -316,9 +320,9 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 				DisplayName: c.Value,
 			})
 		}
-		return sdkTicket.PickMultipleObjectValuesFieldSchema(variable.Name, variable.Name, variable.Mandatory, allowedChoices)
+		return sdkTicket.PickMultipleObjectValuesFieldSchema(variable.Name, variable.Label, variable.Mandatory, allowedChoices)
 	case TypeDate, TypeDateTime:
-		return sdkTicket.TimestampFieldSchema(variable.Name, variable.Name, variable.Mandatory)
+		return sdkTicket.TimestampFieldSchema(variable.Name, variable.Label, variable.Mandatory)
 	case TypeSelectBox, TypeLookupSelectBox:
 		var allowedChoices []*v2.TicketCustomFieldObjectValue
 		choices := variable.Choices
@@ -328,31 +332,24 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 				DisplayName: c.Value,
 			})
 		}
-		return sdkTicket.PickObjectValueFieldSchema(variable.Name, variable.Name, variable.Mandatory, allowedChoices)
-	case TypeHTML:
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
+		return sdkTicket.PickObjectValueFieldSchema(variable.Name, variable.Label, variable.Mandatory, allowedChoices)
 	case TypeReference:
 		// This should be a sys_id
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
-	case TypeEmail:
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
-	case TypeURL:
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
-	case TypeIPAddress:
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
+		f := sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
+		f.GetStringValue().DefaultValue = variable.Value
+		return f
 	case TypeRequestedFor:
 		// This should be sys_id of user
-		rf := sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
+		rf := sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
 		rf.GetStringValue().DefaultValue = SystemAdminUserId
 		return rf
 	case TypeListCollector: // TODO(lauren) I think this just takes sys_ids but in the UI its populated from other tables
 		return nil
 	case TypeDuration: // TODO(lauren) make duration field?
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Name, variable.Mandatory)
+		return sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
 	default:
 		// TODO(lauren) should continue instead of erroring?
 		if variable.Mandatory {
-			l := ctxzap.Extract(ctx)
 			l.Error("unsupported mandatory type", zap.Any("var", variable))
 			return nil
 			// Just log for now

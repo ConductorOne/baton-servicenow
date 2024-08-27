@@ -76,19 +76,15 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 
 	ticketFields := ticket.GetCustomFields()
 
-	var catalogItemID string
+	catalogItemID := schema.GetId()
 
 	for id, cf := range schema.GetCustomFields() {
 		switch id {
 		case "catalog_item":
-			catalogItem, err := sdkTicket.GetPickObjectValue(ticketFields[id])
-			if err != nil {
-				return nil, nil, err
-			}
-			if catalogItem.GetId() == "" {
-				return nil, nil, errors.New("error: unable to create ticket, catalog item is required")
-			}
-			catalogItemID = catalogItem.GetId()
+			// We don't need to use the catalog_item custom variable
+			// since this is the same as the schema ID
+			delete(schema.GetCustomFields(), id)
+			continue
 		default:
 			ticketField := ticketFields[id]
 
@@ -202,18 +198,6 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 	var ticketTypes []*v2.TicketType
 
 	customFields := make(map[string]*v2.TicketCustomField)
-
-	customFields["catalog_item"] = sdkTicket.PickObjectValueFieldSchema(
-		"catalog_item",
-		"Catalog Item",
-		true,
-		[]*v2.TicketCustomFieldObjectValue{
-			{
-				Id:          catalogItem.Id,
-				DisplayName: catalogItem.Name,
-			},
-		},
-	)
 
 	// TODO(lauren) move this logic so we dont get for empty variables when listing schemas
 	// List catalog items doesn't include variables but get catalog item does
