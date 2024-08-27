@@ -446,7 +446,7 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 	}
 
 	if rawResponse.StatusCode >= 300 {
-		// nolint:gosec
+		//nolint:gosec
 		return "", status.Error(codes.Code(uint32(rawResponse.StatusCode)), "Request failed")
 	}
 
