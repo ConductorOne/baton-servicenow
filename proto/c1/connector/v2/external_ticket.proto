@@ -6,4 +6,6 @@ option go_package = "github.com/conductorone/baton-servicenow/pb/c1/connector/v2
 
 message CatalogRequestedItemVariable {
   int64 variable_type = 1;
+  string reference = 2;
+  string ref_qualifier = 3;
 }

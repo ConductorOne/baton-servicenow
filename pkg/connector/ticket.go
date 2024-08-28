@@ -220,18 +220,6 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 			continue
 		}
 
-		// TODO(unmarshal func)
-		var typ servicenow.VariableType
-		t, ok := vCopy.Type.(float64)
-		if !ok {
-			typ = servicenow.TypeUnspecified
-		} else {
-			typ = servicenow.VariableType(int(t))
-		}
-		typAnno := &mv.CatalogRequestedItemVariable{
-			VariableType: int64(typ),
-		}
-		cf.Annotations = annotations.New(typAnno)
 		customFields[vCopy.Name] = cf
 	}
 

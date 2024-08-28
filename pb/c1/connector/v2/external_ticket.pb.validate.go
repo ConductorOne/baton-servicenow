@@ -59,6 +59,10 @@ func (m *CatalogRequestedItemVariable) validate(all bool) error {
 
 	// no validation rules for VariableType
 
+	// no validation rules for Reference
+
+	// no validation rules for RefQualifier
+
 	if len(errors) > 0 {
 		return CatalogRequestedItemVariableMultiError(errors)
 	}

@@ -4,7 +4,9 @@ import (
 	"context"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
 	sdkTicket "github.com/conductorone/baton-sdk/pkg/types/ticket"
+	mv "github.com/conductorone/baton-servicenow/pb/c1/connector/v2"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 )
@@ -302,15 +304,19 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 		typ = VariableType(int(t))
 	}
 
+	var cf *v2.TicketCustomField
+	typAnno := &mv.CatalogRequestedItemVariable{
+		VariableType: int64(typ),
+	}
+
 	switch typ {
 	case TypeUnspecified:
 		return nil
 	case TypeYesNo, TypeCheckBox:
-		return sdkTicket.BoolFieldSchema(variable.Name, variable.Label, variable.Mandatory)
+		cf = sdkTicket.BoolFieldSchema(variable.Name, variable.Label, variable.Mandatory)
 	case TypeMultiLineText, TypeSingleLineText, TypeWideSingleLineText, TypeHTML, TypeEmail, TypeURL, TypeIPAddress:
-		f := sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
-		f.GetStringValue().DefaultValue = variable.Value
-		return f
+		cf = sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
+		cf.GetStringValue().DefaultValue = variable.Value
 	case TypeMultipleChoice, TypeLookupMultipleChoice:
 		var allowedChoices []*v2.TicketCustomFieldObjectValue
 		choices := variable.Choices
@@ -320,9 +326,9 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 				DisplayName: c.Value,
 			})
 		}
-		return sdkTicket.PickMultipleObjectValuesFieldSchema(variable.Name, variable.Label, variable.Mandatory, allowedChoices)
+		cf = sdkTicket.PickMultipleObjectValuesFieldSchema(variable.Name, variable.Label, variable.Mandatory, allowedChoices)
 	case TypeDate, TypeDateTime:
-		return sdkTicket.TimestampFieldSchema(variable.Name, variable.Label, variable.Mandatory)
+		cf = sdkTicket.TimestampFieldSchema(variable.Name, variable.Label, variable.Mandatory)
 	case TypeSelectBox, TypeLookupSelectBox:
 		var allowedChoices []*v2.TicketCustomFieldObjectValue
 		choices := variable.Choices
@@ -332,21 +338,21 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 				DisplayName: c.Value,
 			})
 		}
-		return sdkTicket.PickObjectValueFieldSchema(variable.Name, variable.Label, variable.Mandatory, allowedChoices)
+		cf = sdkTicket.PickObjectValueFieldSchema(variable.Name, variable.Label, variable.Mandatory, allowedChoices)
 	case TypeReference:
 		// This should be a sys_id
-		f := sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
-		f.GetStringValue().DefaultValue = variable.Value
-		return f
+		cf = sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
+		cf.GetStringValue().DefaultValue = variable.Value
+		typAnno.RefQualifier = variable.RefQualifier
+		typAnno.Reference = variable.Reference
 	case TypeRequestedFor:
 		// This should be sys_id of user
-		rf := sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
-		rf.GetStringValue().DefaultValue = SystemAdminUserId
-		return rf
+		cf = sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
+		cf.GetStringValue().DefaultValue = SystemAdminUserId
 	case TypeListCollector: // TODO(lauren) I think this just takes sys_ids but in the UI its populated from other tables
 		return nil
 	case TypeDuration: // TODO(lauren) make duration field?
-		return sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
+		cf = sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
 	default:
 		// TODO(lauren) should continue instead of erroring?
 		if variable.Mandatory {
@@ -357,4 +363,6 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 		}
 		return nil
 	}
+	cf.Annotations = annotations.New(typAnno)
+	return cf
 }
