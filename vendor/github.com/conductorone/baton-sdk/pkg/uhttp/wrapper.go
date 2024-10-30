@@ -12,13 +12,16 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"time"
 
-	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/helpers"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	uRateLimit "go.uber.org/ratelimit"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/ratelimit"
 )
 
 const (
@@ -28,6 +31,8 @@ const (
 	applicationFormUrlencoded = "application/x-www-form-urlencoded"
 	applicationVndApiJSON     = "application/vnd.api+json"
 	acceptHeader              = "Accept"
+	cacheTTLMaximum           = 31536000 // 31536000 seconds = one year
+	cacheTTLDefault           = 3600     // 3600 seconds = one hour
 )
 
 type WrapperResponse struct {
@@ -35,6 +40,47 @@ type WrapperResponse struct {
 	Body       []byte
 	Status     string
 	StatusCode int
+}
+
+type rateLimiterOption struct {
+	rate int
+	per  time.Duration
+}
+
+func (o rateLimiterOption) Apply(c *BaseHttpClient) {
+	opts := []uRateLimit.Option{}
+	if o.per > 0 {
+		opts = append(opts, uRateLimit.Per(o.per))
+	}
+	c.rateLimiter = uRateLimit.New(o.rate, opts...)
+}
+
+// WithRateLimiter returns a WrapperOption that sets the rate limiter for the http client.
+// `rate` is the number of requests allowed per `per` duration.
+// `per` is the duration in which the rate limit is enforced.
+// Example: WithRateLimiter(10, time.Second) will allow 10 requests per second.
+func WithRateLimiter(rate int, per time.Duration) WrapperOption {
+	return rateLimiterOption{rate: rate, per: per}
+}
+
+type WrapperOption interface {
+	Apply(*BaseHttpClient)
+}
+
+// Keep a handle on all caches so we can clear them later.
+var caches []GoCache
+
+func ClearCaches(ctx context.Context) error {
+	l := ctxzap.Extract(ctx)
+	l.Debug("clearing caches")
+	var err error
+	for _, cache := range caches {
+		err = cache.Clear(ctx)
+		if err != nil {
+			err = errors.Join(err, err)
+		}
+	}
+	return err
 }
 
 type (
@@ -46,6 +92,7 @@ type (
 	BaseHttpClient struct {
 		HttpClient    *http.Client
 		baseHttpCache GoCache
+		rateLimiter   uRateLimit.Limiter
 	}
 
 	DoOption      func(resp *WrapperResponse) error
@@ -59,16 +106,32 @@ type (
 	}
 )
 
-func NewBaseHttpClient(httpClient *http.Client) *BaseHttpClient {
+func NewBaseHttpClient(httpClient *http.Client, opts ...WrapperOption) *BaseHttpClient {
 	ctx := context.TODO()
-	client, err := NewBaseHttpClientWithContext(ctx, httpClient)
+	client, err := NewBaseHttpClientWithContext(ctx, httpClient, opts...)
 	if err != nil {
 		return nil
 	}
 	return client
 }
 
-func NewBaseHttpClientWithContext(ctx context.Context, httpClient *http.Client) (*BaseHttpClient, error) {
+// getCacheTTL read the `BATON_HTTP_CACHE_TTL` environment variable and return
+// the value as a number of seconds between 0 and an arbitrary maximum. Note:
+// this means that passing a value of `-1` will set the TTL to zero rather than
+// infinity.
+func getCacheTTL() int32 {
+	cacheTTL, err := strconv.ParseInt(os.Getenv("BATON_HTTP_CACHE_TTL"), 10, 64)
+	if err != nil {
+		cacheTTL = cacheTTLDefault // seconds
+	}
+
+	cacheTTL = min(cacheTTLMaximum, max(0, cacheTTL))
+
+	//nolint:gosec // No risk of overflow because we have a low maximum.
+	return int32(cacheTTL)
+}
+
+func NewBaseHttpClientWithContext(ctx context.Context, httpClient *http.Client, opts ...WrapperOption) (*BaseHttpClient, error) {
 	l := ctxzap.Extract(ctx)
 	disableCache, err := strconv.ParseBool(os.Getenv("BATON_DISABLE_HTTP_CACHE"))
 	if err != nil {
@@ -78,15 +141,10 @@ func NewBaseHttpClientWithContext(ctx context.Context, httpClient *http.Client) 
 	if err != nil {
 		cacheMaxSize = 128 // MB
 	}
-	cacheTTL, err := strconv.ParseInt(os.Getenv("BATON_HTTP_CACHE_TTL"), 10, 64)
-	if err != nil {
-		cacheTTL = 3600 // seconds
-	}
-
 	var (
 		config = CacheConfig{
 			LogDebug:     l.Level().Enabled(zap.DebugLevel),
-			CacheTTL:     int32(cacheTTL),   // seconds
+			CacheTTL:     getCacheTTL(),     // seconds
 			CacheMaxSize: int(cacheMaxSize), // MB
 			DisableCache: disableCache,
 		}
@@ -103,11 +161,18 @@ func NewBaseHttpClientWithContext(ctx context.Context, httpClient *http.Client) 
 		l.Error("error creating http cache", zap.Error(err))
 		return nil, err
 	}
+	caches = append(caches, cache)
 
-	return &BaseHttpClient{
+	baseClient := &BaseHttpClient{
 		HttpClient:    httpClient,
 		baseHttpCache: cache,
-	}, nil
+	}
+
+	for _, opt := range opts {
+		opt.Apply(baseClient)
+	}
+
+	return baseClient, nil
 }
 
 // WithJSONResponse is a wrapper that marshals the returned response body into
@@ -115,7 +180,7 @@ func NewBaseHttpClientWithContext(ctx context.Context, httpClient *http.Client) 
 // status code 204 No Content), then pass a `nil` to `response`.
 func WithJSONResponse(response interface{}) DoOption {
 	return func(resp *WrapperResponse) error {
-		if !helpers.IsJSONContentType(resp.Header.Get(ContentType)) {
+		if !IsJSONContentType(resp.Header.Get(ContentType)) {
 			return fmt.Errorf("unexpected content type for json response: %s", resp.Header.Get(ContentType))
 		}
 		if response == nil && len(resp.Body) == 0 {
@@ -123,10 +188,17 @@ func WithJSONResponse(response interface{}) DoOption {
 		}
 		err := json.Unmarshal(resp.Body, response)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal json response: %w. body %v", err, resp.Body)
+			return fmt.Errorf("failed to unmarshal json response: %w. body %v", err, logBody(resp.Body, 4096))
 		}
 		return nil
 	}
+}
+
+func logBody(body []byte, size int) string {
+	if len(body) > size {
+		return string(body[:size]) + " ..."
+	}
+	return string(body)
 }
 
 type ErrorResponse interface {
@@ -139,7 +211,7 @@ func WithErrorResponse(resource ErrorResponse) DoOption {
 			return nil
 		}
 
-		if !helpers.IsJSONContentType(resp.Header.Get(ContentType)) {
+		if !IsJSONContentType(resp.Header.Get(ContentType)) {
 			return fmt.Errorf("%v", string(resp.Body))
 		}
 
@@ -157,7 +229,7 @@ func WithErrorResponse(resource ErrorResponse) DoOption {
 
 func WithRatelimitData(resource *v2.RateLimitDescription) DoOption {
 	return func(resp *WrapperResponse) error {
-		rl, err := helpers.ExtractRateLimitData(resp.StatusCode, &resp.Header)
+		rl, err := ratelimit.ExtractRateLimitData(resp.StatusCode, &resp.Header)
 		if err != nil {
 			return err
 		}
@@ -173,7 +245,7 @@ func WithRatelimitData(resource *v2.RateLimitDescription) DoOption {
 
 func WithXMLResponse(response interface{}) DoOption {
 	return func(resp *WrapperResponse) error {
-		if !helpers.IsXMLContentType(resp.Header.Get(ContentType)) {
+		if !IsXMLContentType(resp.Header.Get(ContentType)) {
 			return fmt.Errorf("unexpected content type for xml response: %s", resp.Header.Get(ContentType))
 		}
 		if response == nil && len(resp.Body) == 0 {
@@ -189,15 +261,32 @@ func WithXMLResponse(response interface{}) DoOption {
 
 func WithResponse(response interface{}) DoOption {
 	return func(resp *WrapperResponse) error {
-		if helpers.IsJSONContentType(resp.Header.Get(ContentType)) {
+		if IsJSONContentType(resp.Header.Get(ContentType)) {
 			return WithJSONResponse(response)(resp)
 		}
-		if helpers.IsXMLContentType(resp.Header.Get(ContentType)) {
+		if IsXMLContentType(resp.Header.Get(ContentType)) {
 			return WithXMLResponse(response)(resp)
 		}
 
 		return status.Error(codes.Unknown, "unsupported content type")
 	}
+}
+
+func WrapErrorsWithRateLimitInfo(preferredCode codes.Code, resp *http.Response, errs ...error) error {
+	st := status.New(preferredCode, resp.Status)
+
+	description, err := ratelimit.ExtractRateLimitData(resp.StatusCode, &resp.Header)
+	// Ignore any error extracting rate limit data
+	if err == nil {
+		st, _ = st.WithDetails(description)
+	}
+
+	if len(errs) == 0 {
+		return st.Err()
+	}
+
+	allErrs := append([]error{st.Err()}, errs...)
+	return errors.Join(allErrs...)
 }
 
 func (c *BaseHttpClient) Do(req *http.Request, options ...DoOption) (*http.Response, error) {
@@ -207,6 +296,12 @@ func (c *BaseHttpClient) Do(req *http.Request, options ...DoOption) (*http.Respo
 		resp     *http.Response
 	)
 	l := ctxzap.Extract(req.Context())
+
+	// If a rate limiter is defined, take a token before making the request.
+	if c.rateLimiter != nil {
+		c.rateLimiter.Take()
+	}
+
 	if req.Method == http.MethodGet {
 		cacheKey, err = CreateCacheKey(req)
 		if err != nil {
@@ -243,7 +338,10 @@ func (c *BaseHttpClient) Do(req *http.Request, options ...DoOption) (*http.Respo
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		if len(body) > 0 {
+			resp.Body = io.NopCloser(bytes.NewBuffer(body))
+		}
+		return resp, err
 	}
 
 	// Replace resp.Body with a no-op closer so nobody has to worry about closing the reader.
@@ -255,41 +353,46 @@ func (c *BaseHttpClient) Do(req *http.Request, options ...DoOption) (*http.Respo
 		StatusCode: resp.StatusCode,
 		Body:       body,
 	}
+
+	var optErrs []error
 	for _, option := range options {
-		err = option(&wresp)
-		if err != nil {
-			return resp, err
+		optErr := option(&wresp)
+		if optErr != nil {
+			optErrs = append(optErrs, optErr)
 		}
 	}
 
 	switch resp.StatusCode {
 	case http.StatusRequestTimeout:
-		return resp, status.Error(codes.DeadlineExceeded, resp.Status)
-	case http.StatusTooManyRequests:
-		return resp, status.Error(codes.Unavailable, resp.Status)
+		return resp, WrapErrorsWithRateLimitInfo(codes.DeadlineExceeded, resp, optErrs...)
+	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
+		return resp, WrapErrorsWithRateLimitInfo(codes.Unavailable, resp, optErrs...)
 	case http.StatusNotFound:
-		return resp, status.Error(codes.NotFound, resp.Status)
+		return resp, WrapErrorsWithRateLimitInfo(codes.NotFound, resp, optErrs...)
 	case http.StatusUnauthorized:
-		return resp, status.Error(codes.Unauthenticated, resp.Status)
+		return resp, WrapErrorsWithRateLimitInfo(codes.Unauthenticated, resp, optErrs...)
 	case http.StatusForbidden:
-		return resp, status.Error(codes.PermissionDenied, resp.Status)
+		return resp, WrapErrorsWithRateLimitInfo(codes.PermissionDenied, resp, optErrs...)
 	case http.StatusNotImplemented:
-		return resp, status.Error(codes.Unimplemented, resp.Status)
+		return resp, WrapErrorsWithRateLimitInfo(codes.Unimplemented, resp, optErrs...)
+	}
+
+	if resp.StatusCode >= 500 && resp.StatusCode <= 599 {
+		return resp, WrapErrorsWithRateLimitInfo(codes.Unavailable, resp, optErrs...)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return resp, status.Error(codes.Unknown, fmt.Sprintf("unexpected status code: %d", resp.StatusCode))
+		return resp, WrapErrorsWithRateLimitInfo(codes.Unknown, resp, append(optErrs, fmt.Errorf("unexpected status code: %d", resp.StatusCode))...)
 	}
 
 	if req.Method == http.MethodGet && resp.StatusCode == http.StatusOK {
-		err := c.baseHttpCache.Set(cacheKey, resp)
-		if err != nil {
-			l.Debug("error setting cache", zap.String("cacheKey", cacheKey), zap.String("url", req.URL.String()), zap.Error(err))
-			return resp, err
+		cacheErr := c.baseHttpCache.Set(cacheKey, resp)
+		if cacheErr != nil {
+			l.Warn("error setting cache", zap.String("cacheKey", cacheKey), zap.String("url", req.URL.String()), zap.Error(cacheErr))
 		}
 	}
 
-	return resp, err
+	return resp, errors.Join(optErrs...)
 }
 
 func WithHeader(key, value string) RequestOption {
