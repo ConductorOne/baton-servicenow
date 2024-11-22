@@ -36,7 +36,7 @@ builds:
     hooks:
       post:
         - gon .gon-arm64.json
-        - mv dist/baton-servicenow-darwin-arm64.signed.zip dist/macos-arm64_darwin_arm64/baton-servicenow
+        - mv dist/baton-servicenow-darwin-arm64.signed.zip dist/macos-arm64_darwin_arm64_v8.0/baton-servicenow
 archives:
   - id: linux-archive
     builds:
