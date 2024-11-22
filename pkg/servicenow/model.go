@@ -164,19 +164,16 @@ type RequestedItem struct {
 	Catalogs []Catalog       `json:"catalogs,omitempty"`
 	Category Category        `json:"category,omitempty"`
 
-	ScCatalog        string           `json:"sc_catalog,omitempty"`
-	RequestedFor     *ResourceRefLink `json:"requested_for,omitempty"`
-	SysUpdatedOn     string           `json:"sys_updated_on"`
-	SysUpdatedBy     string           `json:"sys_updated_by"`
-	ClosedAt         string           `json:"closed_at"`
-	OpenedBy         ResourceRefLink  `json:"opened_by"`
-	SysCreatedOn     string           `json:"sys_created_on"`
-	SysCreatedBy     string           `json:"sys_created_by"`
-	Active           string           `json:"active"`
-	OpenedAt         string           `json:"opened_at"`
-	ShortDescription string           `json:"short_description"`
-	Approval         string           `json:"approval"`
-	AssignedTo       string           `json:"assigned_to"`
+	ScCatalog        string `json:"sc_catalog,omitempty"`
+	SysUpdatedOn     string `json:"sys_updated_on"`
+	SysUpdatedBy     string `json:"sys_updated_by"`
+	ClosedAt         string `json:"closed_at"`
+	SysCreatedOn     string `json:"sys_created_on"`
+	SysCreatedBy     string `json:"sys_created_by"`
+	Active           string `json:"active"`
+	OpenedAt         string `json:"opened_at"`
+	ShortDescription string `json:"short_description"`
+	Approval         string `json:"approval"`
 }
 
 type RequestedItemUpdatePayload struct {
