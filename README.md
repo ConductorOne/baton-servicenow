@@ -80,19 +80,25 @@ Usage:
   baton-servicenow [command]
 
 Available Commands:
+  capabilities       Get connector capabilities
   completion         Generate the autocompletion script for the specified shell
   help               Help about any command
 
 Flags:
+      --catalog-id string      ServiceNow catalog id to filter catalog items to ($BATON_CATALOG_ID)
+      --category-id string     ServiceNow category id to filter catalog items to ($BATON_CATEGORY_ID)
       --client-id string       The client ID used to authenticate with ConductorOne ($BATON_CLIENT_ID)
       --client-secret string   The client secret used to authenticate with ConductorOne ($BATON_CLIENT_SECRET)
-      --deployment string      ServiceNow deployment to connect to. ($BATON_DEPLOYMENT)
+      --deployment string      required: ServiceNow deployment to connect to. ($BATON_DEPLOYMENT)
   -f, --file string            The path to the c1z file to sync with ($BATON_FILE) (default "sync.c1z")
   -h, --help                   help for baton-servicenow
       --log-format string      The output format for logs: json, console ($BATON_LOG_FORMAT) (default "json")
       --log-level string       The log level: debug, info, warn, error ($BATON_LOG_LEVEL) (default "info")
-      --password string        Application password used to connect to the ServiceNow API. ($BATON_PASSWORD)
-      --username string        Username of administrator used to connect to the ServiceNow API. ($BATON_USERNAME)
+      --password string        required: Application password used to connect to the ServiceNow API. ($BATON_PASSWORD)
+  -p, --provisioning           This must be set in order for provisioning actions to be enabled ($BATON_PROVISIONING)
+      --skip-full-sync         This must be set to skip a full sync ($BATON_SKIP_FULL_SYNC)
+      --ticketing              This must be set to enable ticketing support ($BATON_TICKETING)
+      --username string        required: Username of administrator used to connect to the ServiceNow API. ($BATON_USERNAME)
   -v, --version                version for baton-servicenow
 
 Use "baton-servicenow [command] --help" for more information about a command.
