@@ -30,7 +30,7 @@ var configRelations = []field.SchemaFieldRelationship{
 }
 
 // validateConfig is run after the configuration is loaded, and should return an error if it isn't valid.
-func validateConfig(ctx context.Context, v *viper.Viper) error {
+func validateConfig(_ context.Context, v *viper.Viper) error {
 	if v.GetString(usernameField.FieldName) == "" || v.GetString(passwordField.FieldName) == "" {
 		return fmt.Errorf("username and password must be provided")
 	}
