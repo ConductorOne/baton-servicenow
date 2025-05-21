@@ -6,6 +6,7 @@ import (
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
+	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
@@ -21,7 +22,7 @@ func (u *userResourceType) ResourceType(_ context.Context) *v2.ResourceType {
 }
 
 // Create a new connector resource for an ServiceNow User.
-func userResource(ctx context.Context, user *servicenow.User) (*v2.Resource, error) {
+func userResource(_ context.Context, user *servicenow.User) (*v2.Resource, error) {
 	profile := map[string]interface{}{
 		"login":      user.UserName,
 		"user_id":    user.Id,
@@ -101,4 +102,68 @@ func userBuilder(client *servicenow.Client) *userResourceType {
 		resourceType: resourceTypeUser,
 		client:       client,
 	}
+}
+
+// CreateAccountCapabilityDetails returns the account provisioning capabilities of this connector.
+// In this case, only account creation without password is supported.
+func (u *userResourceType) CreateAccountCapabilityDetails(
+	_ context.Context,
+) (*v2.CredentialDetailsAccountProvisioning, annotations.Annotations, error) {
+	return &v2.CredentialDetailsAccountProvisioning{
+		SupportedCredentialOptions: []v2.CapabilityDetailCredentialOption{
+			v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_NO_PASSWORD,
+		},
+		PreferredCredentialOption: v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_NO_PASSWORD,
+	}, nil, nil
+}
+
+func (u *userResourceType) CreateAccount(
+	ctx context.Context,
+	accountInfo *v2.AccountInfo,
+	_ *v2.CredentialOptions,
+) (connectorbuilder.CreateAccountResponse, []*v2.PlaintextData,
+	annotations.Annotations,
+	error) {
+	profile := accountInfo.GetProfile().AsMap()
+	if profile == nil {
+		return nil, nil, nil, fmt.Errorf("missing profile in CreateAccountRequest")
+	}
+
+	userName, ok := profile["username"].(string)
+	if !ok || userName == "" {
+		return nil, nil, nil, fmt.Errorf("missing or invalid 'userName' in profile")
+	}
+
+	email, ok := profile["email"].(string)
+	if !ok || email == "" {
+		return nil, nil, nil, fmt.Errorf("missing or invalid 'email' in profile")
+	}
+	firstName, ok := profile["first_name"].(string)
+	if !ok || firstName == "" {
+		return nil, nil, nil, fmt.Errorf("missing or invalid 'first_name' in profile")
+	}
+	lastName, ok := profile["last_name"].(string)
+	if !ok || lastName == "" {
+		return nil, nil, nil, fmt.Errorf("missing or invalid 'last_name' in profile")
+	}
+
+	user := map[string]string{
+		"user_name":  userName,
+		"first_name": firstName,
+		"last_name":  lastName,
+		"email":      email,
+		"active":     "true",
+	}
+
+	createdUser, err := u.client.CreateUserAccount(ctx, user)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create user in ServiceNow: %w", err)
+	}
+
+	resource, err := userResource(ctx, createdUser)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create Baton resource: %w", err)
+	}
+
+	return &v2.CreateAccountResponse_SuccessResult{Resource: resource}, nil, nil, nil
 }

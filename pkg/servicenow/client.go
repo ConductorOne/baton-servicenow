@@ -107,6 +107,11 @@ type Client struct {
 	TicketSchemaFilters map[string]string
 }
 
+// Official documentation.
+// https://developer.servicenow.com/dev.do#!/reference/api/rome/rest/c_TableAPI .
+// https://www.servicenow.com/docs/bundle/yokohama-api-reference/page/integrate/inbound-rest/concept/c_TableAPI.html .
+// https://developer.servicenow.com/dev.do#!/reference/api/yokohama/rest/c_TableAPI?navFilter=table .
+
 func NewClient(httpClient *http.Client, auth string, deployment string, ticketSchemaFilters map[string]string) (*Client, error) {
 	baseURL, err := GenerateURL(InstanceURLTemplate, map[string]string{"Deployment": deployment})
 	if err != nil {
@@ -227,6 +232,7 @@ func (c *Client) AddUserToGroup(ctx context.Context, record GroupMemberPayload) 
 		fmt.Sprintf(GroupMembersBaseUrl, c.deployment),
 		nil,
 		&record,
+		WithIncludeResponseBody(),
 	)
 }
 
@@ -287,6 +293,7 @@ func (c *Client) GrantRoleToUser(ctx context.Context, record UserToRolePayload) 
 		fmt.Sprintf(UserRolesBaseUrl, c.deployment),
 		nil,
 		&record,
+		WithIncludeResponseBody(),
 	)
 }
 
@@ -324,6 +331,7 @@ func (c *Client) GrantRoleToGroup(ctx context.Context, record GroupToRolePayload
 		fmt.Sprintf(GroupRolesBaseUrl, c.deployment),
 		nil,
 		&record,
+		WithIncludeResponseBody(),
 	)
 }
 
@@ -482,4 +490,22 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 	}
 
 	return pageToken, nil
+}
+
+func (c *Client) CreateUserAccount(ctx context.Context, user any) (*User, error) {
+	var response UserResponse
+
+	err := c.post(
+		ctx,
+		fmt.Sprintf(UsersBaseUrl, c.deployment),
+		&response,
+		user,
+		WithIncludeResponseBody(),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create user in ServiceNow: %w", err)
+	}
+
+	return &response.Result, nil
 }
