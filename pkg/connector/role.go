@@ -27,7 +27,7 @@ func (r *roleResourceType) ResourceType(_ context.Context) *v2.ResourceType {
 }
 
 // Create a new connector resource for an ServiceNow Role.
-func roleResource(_ context.Context, role *servicenow.Role) (*v2.Resource, error) {
+func roleResource(role *servicenow.Role) (*v2.Resource, error) {
 	profile := map[string]interface{}{
 		"role_name": role.Name,
 		"role_id":   role.Id,
@@ -76,7 +76,7 @@ func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 	var rv []*v2.Resource
 	for _, role := range roles {
 		roleCopy := role
-		rr, err := roleResource(ctx, &roleCopy)
+		rr, err := roleResource(&roleCopy)
 
 		if err != nil {
 			return nil, "", nil, err

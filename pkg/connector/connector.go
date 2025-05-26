@@ -51,8 +51,8 @@ func (s *ServiceNow) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 
 func (s *ServiceNow) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error) {
 	return &v2.ConnectorMetadata{
-		DisplayName: "Greenhouse Connector",
-		Description: "Connector to sync users to Greenhouse",
+		DisplayName: "ServiceNow",
+		Description: "Connector to sync users to ServiceNow",
 		AccountCreationSchema: &v2.ConnectorAccountCreationSchema{
 			FieldMap: map[string]*v2.ConnectorAccountCreationSchema_Field{
 				"username": {

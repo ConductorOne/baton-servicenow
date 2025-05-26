@@ -22,7 +22,7 @@ func (u *userResourceType) ResourceType(_ context.Context) *v2.ResourceType {
 }
 
 // Create a new connector resource for an ServiceNow User.
-func userResource(_ context.Context, user *servicenow.User) (*v2.Resource, error) {
+func userResource(user *servicenow.User) (*v2.Resource, error) {
 	profile := map[string]interface{}{
 		"login":      user.UserName,
 		"user_id":    user.Id,
@@ -77,7 +77,7 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 	var rv []*v2.Resource
 	for _, user := range users {
 		userCopy := user
-		ur, err := userResource(ctx, &userCopy)
+		ur, err := userResource(&userCopy)
 
 		if err != nil {
 			return nil, "", nil, err
@@ -160,7 +160,7 @@ func (u *userResourceType) CreateAccount(
 		return nil, nil, nil, fmt.Errorf("failed to create user in ServiceNow: %w", err)
 	}
 
-	resource, err := userResource(ctx, createdUser)
+	resource, err := userResource(createdUser)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to create Baton resource: %w", err)
 	}
