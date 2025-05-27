@@ -27,7 +27,7 @@ func (g *groupResourceType) ResourceType(_ context.Context) *v2.ResourceType {
 const groupMembership = "member"
 
 // Create a new connector resource for an ServiceNow Group.
-func groupResource(ctx context.Context, group *servicenow.Group) (*v2.Resource, error) {
+func groupResource(group *servicenow.Group) (*v2.Resource, error) {
 	profile := map[string]interface{}{
 		"group_name":        group.Name,
 		"group_id":          group.Id,
@@ -78,7 +78,7 @@ func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagi
 	var rv []*v2.Resource
 	for _, group := range groups {
 		groupCopy := group
-		rr, err := groupResource(ctx, &groupCopy)
+		rr, err := groupResource(&groupCopy)
 
 		if err != nil {
 			return nil, "", nil, err
@@ -147,7 +147,7 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 	var rv []*v2.Grant
 	for _, member := range targetMembers {
 		memberCopy := member
-		ur, err := userResource(ctx, &memberCopy)
+		ur, err := userResource(&memberCopy)
 		if err != nil {
 			return nil, "", nil, err
 		}
@@ -198,7 +198,7 @@ func (r *groupResourceType) Grant(ctx context.Context, principal *v2.Resource, e
 			zap.String("user", principal.Id.Resource),
 		)
 
-		return nil, fmt.Errorf("servicenow-connector: cannot add user who already is a member of the group")
+		return annotations.New(&v2.GrantAlreadyExists{}), nil
 	}
 
 	// grant group membership to the user
@@ -249,7 +249,7 @@ func (r *groupResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annota
 			zap.String("user", principal.Id.Resource),
 		)
 
-		return nil, fmt.Errorf("servicenow-connector: cannot remove user from group they are not a member of")
+		return annotations.New(&v2.GrantAlreadyRevoked{}), nil
 	}
 
 	// revoke all group memberships from the user

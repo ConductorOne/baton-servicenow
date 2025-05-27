@@ -27,7 +27,7 @@ func (r *roleResourceType) ResourceType(_ context.Context) *v2.ResourceType {
 }
 
 // Create a new connector resource for an ServiceNow Role.
-func roleResource(ctx context.Context, role *servicenow.Role) (*v2.Resource, error) {
+func roleResource(role *servicenow.Role) (*v2.Resource, error) {
 	profile := map[string]interface{}{
 		"role_name": role.Name,
 		"role_id":   role.Id,
@@ -76,7 +76,7 @@ func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 	var rv []*v2.Resource
 	for _, role := range roles {
 		roleCopy := role
-		rr, err := roleResource(ctx, &roleCopy)
+		rr, err := roleResource(&roleCopy)
 
 		if err != nil {
 			return nil, "", nil, err
@@ -187,6 +187,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 						ResourceType: resourceTypeGroup.Id,
 						Resource:     roleBinding.Group,
 					},
+					r.helperGrantForGroup(roleBinding)...,
 				),
 			)
 		}
@@ -201,6 +202,18 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 	}
 
 	return rv, nextPage, nil, nil
+}
+
+// This is a helper function to add heritance.
+func (r *roleResourceType) helperGrantForGroup(role servicenow.GroupToRole) []grant.GrantOption {
+	var grantOptions []grant.GrantOption
+
+	grantOptions = append(grantOptions, grant.WithAnnotation(&v2.GrantExpandable{
+		EntitlementIds: []string{fmt.Sprintf("group:%s:member", role.Group)},
+		Shallow:        true,
+	}))
+
+	return grantOptions
 }
 
 func (r *roleResourceType) GrantToUser(ctx context.Context, l *zap.Logger, principal string, roleId string) (annotations.Annotations, error) {
@@ -222,7 +235,7 @@ func (r *roleResourceType) GrantToUser(ctx context.Context, l *zap.Logger, princ
 			zap.String("role", roleId),
 		)
 
-		return nil, fmt.Errorf("servicenow-connector: user already has specified role")
+		return annotations.New(&v2.GrantAlreadyExists{}), nil
 	}
 
 	// grant the role to the user
@@ -327,7 +340,7 @@ func (r *roleResourceType) RevokeFromUser(ctx context.Context, l *zap.Logger, pr
 			zap.String("role", roleId),
 		)
 
-		return nil, fmt.Errorf("servicenow-connector: cannot revoke not existing role from user")
+		return annotations.New(&v2.GrantAlreadyRevoked{}), nil
 	}
 
 	// revoke all roles (inherited or not) from the user
