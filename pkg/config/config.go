@@ -22,7 +22,7 @@ var (
 		field.WithDisplayName("Catalog ID"),
 		field.WithDescription("ServiceNow catalog id to filter catalog items to"))
 	categoryField = field.StringField("category-id",
-		field.WithDisplayName("Category"),
+		field.WithDisplayName("Category ID"),
 		field.WithDescription("ServiceNow category id to filter catalog items to"))
 	externalTicketField = field.TicketingField.ExportAs(field.ExportTargetGUI)
 )
