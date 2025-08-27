@@ -45,20 +45,36 @@ var ErrSigTerm = errors.New("context cancelled by process shutdown")
 
 // Run starts a connector and creates a new C1Z file.
 func (c *connectorRunner) Run(ctx context.Context) error {
+	l := ctxzap.Extract(ctx)
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(ErrSigTerm)
 
 	if c.tasks.ShouldDebug() && c.debugFile == nil {
 		var err error
-		c.debugFile, err = os.Create(filepath.Join(c.tasks.GetTempDir(), "debug.log"))
+		tempDir := c.tasks.GetTempDir()
+		if tempDir == "" {
+			wd, err := os.Getwd()
+			if err != nil {
+				l.Warn("unable to get the current working directory", zap.Error(err))
+			}
+
+			if wd != "" {
+				l.Warn("no temporal folder found on this system according to our task manager,"+
+					" we may create files in the current working directory by mistake as a result",
+					zap.String("current working directory", wd))
+			} else {
+				l.Warn("no temporal folder found on this system according to our task manager")
+			}
+		}
+		debugFile := filepath.Join(tempDir, "debug.log")
+		c.debugFile, err = os.Create(debugFile)
 		if err != nil {
-			return err
+			l.Warn("cannot create file", zap.String("full file path", debugFile), zap.Error(err))
 		}
 	}
 
 	// modify the context to insert a logger directed to a file
 	if c.debugFile != nil {
-		l := ctxzap.Extract(ctx)
 		writeSyncer := zapcore.AddSync(c.debugFile)
 		encoder := zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig())
 		core := zapcore.NewCore(encoder, writeSyncer, zapcore.DebugLevel)
@@ -102,6 +118,7 @@ func (c *connectorRunner) handleContextCancel(ctx context.Context) error {
 	l.Debug("runner: unexpected context cancellation", zap.Error(err))
 	return err
 }
+
 func (c *connectorRunner) processTask(ctx context.Context, task *v1.Task) error {
 	cc, err := c.cw.C(ctx)
 	if err != nil {
@@ -142,11 +159,7 @@ func (c *connectorRunner) run(ctx context.Context) error {
 			// Acquire a worker slot before we call Next() so we don't claim a task before we can actually process it.
 			err = sem.Acquire(ctx, 1)
 			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					// Any error returned from Acquire() is due to the context being cancelled.
-					// Except for some tests where error is context deadline exceeded
-					sem.Release(1)
-				}
+				l.Error("runner: error acquiring semaphore to claim worker", zap.Error(err))
 				return c.handleContextCancel(ctx)
 			}
 			l.Debug("runner: worker claimed, checking for next task")
@@ -270,6 +283,11 @@ type createAccountConfig struct {
 	profile *structpb.Struct
 }
 
+type invokeActionConfig struct {
+	action string
+	args   *structpb.Struct
+}
+
 type deleteResourceConfig struct {
 	resourceId   string
 	resourceType string
@@ -281,6 +299,8 @@ type rotateCredentialsConfig struct {
 }
 
 type eventStreamConfig struct {
+	feedId  string
+	startAt time.Time
 }
 
 type syncDifferConfig struct {
@@ -304,11 +324,13 @@ type runnerConfig struct {
 	clientSecret                        string
 	provisioningEnabled                 bool
 	ticketingEnabled                    bool
+	actionsEnabled                      bool
 	grantConfig                         *grantConfig
 	revokeConfig                        *revokeConfig
 	eventFeedConfig                     *eventStreamConfig
 	tempDir                             string
 	createAccountConfig                 *createAccountConfig
+	invokeActionConfig                  *invokeActionConfig
 	deleteResourceConfig                *deleteResourceConfig
 	rotateCredentialsConfig             *rotateCredentialsConfig
 	createTicketConfig                  *createTicketConfig
@@ -321,6 +343,7 @@ type runnerConfig struct {
 	targetedSyncResourceIDs             []string
 	externalResourceC1Z                 string
 	externalResourceEntitlementIdFilter string
+	skipEntitlementsAndGrants           bool
 }
 
 // WithRateLimiterConfig sets the RateLimiterConfig for a runner.
@@ -410,6 +433,7 @@ func WithOnDemandGrant(c1zPath string, entitlementID string, principalID string,
 		return nil
 	}
 }
+
 func WithClientCredentials(clientID string, clientSecret string) Option {
 	return func(ctx context.Context, cfg *runnerConfig) error {
 		cfg.clientID = clientID
@@ -438,6 +462,18 @@ func WithOnDemandCreateAccount(c1zPath string, login string, email string, profi
 			login:   login,
 			email:   email,
 			profile: profile,
+		}
+		return nil
+	}
+}
+
+func WithOnDemandInvokeAction(c1zPath string, action string, args *structpb.Struct) Option {
+	return func(ctx context.Context, cfg *runnerConfig) error {
+		cfg.onDemand = true
+		cfg.c1zPath = c1zPath
+		cfg.invokeActionConfig = &invokeActionConfig{
+			action: action,
+			args:   args,
 		}
 		return nil
 	}
@@ -474,10 +510,14 @@ func WithOnDemandSync(c1zPath string) Option {
 		return nil
 	}
 }
-func WithOnDemandEventStream() Option {
+
+func WithOnDemandEventStream(feedId string, startAt time.Time) Option {
 	return func(ctx context.Context, cfg *runnerConfig) error {
 		cfg.onDemand = true
-		cfg.eventFeedConfig = &eventStreamConfig{}
+		cfg.eventFeedConfig = &eventStreamConfig{
+			feedId:  feedId,
+			startAt: startAt,
+		}
 		return nil
 	}
 }
@@ -485,6 +525,13 @@ func WithOnDemandEventStream() Option {
 func WithProvisioningEnabled() Option {
 	return func(ctx context.Context, cfg *runnerConfig) error {
 		cfg.provisioningEnabled = true
+		return nil
+	}
+}
+
+func WithActionsEnabled() Option {
+	return func(ctx context.Context, cfg *runnerConfig) error {
+		cfg.actionsEnabled = true
 		return nil
 	}
 }
@@ -595,6 +642,13 @@ func WithSyncCompactor(outputPath string, filePaths []string, syncIDs []string) 
 	}
 }
 
+func WithSkipEntitlementsAndGrants(skip bool) Option {
+	return func(ctx context.Context, cfg *runnerConfig) error {
+		cfg.skipEntitlementsAndGrants = skip
+		return nil
+	}
+}
+
 // NewConnectorRunner creates a new connector runner.
 func NewConnectorRunner(ctx context.Context, c types.ConnectorServer, opts ...Option) (*connectorRunner, error) {
 	runner := &connectorRunner{}
@@ -659,6 +713,9 @@ func NewConnectorRunner(ctx context.Context, c types.ConnectorServer, opts ...Op
 		case cfg.createAccountConfig != nil:
 			tm = local.NewCreateAccountManager(ctx, cfg.c1zPath, cfg.createAccountConfig.login, cfg.createAccountConfig.email, cfg.createAccountConfig.profile)
 
+		case cfg.invokeActionConfig != nil:
+			tm = local.NewActionInvoker(ctx, cfg.c1zPath, cfg.invokeActionConfig.action, cfg.invokeActionConfig.args)
+
 		case cfg.deleteResourceConfig != nil:
 			tm = local.NewResourceDeleter(ctx, cfg.c1zPath, cfg.deleteResourceConfig.resourceId, cfg.deleteResourceConfig.resourceType)
 
@@ -666,7 +723,7 @@ func NewConnectorRunner(ctx context.Context, c types.ConnectorServer, opts ...Op
 			tm = local.NewCredentialRotator(ctx, cfg.c1zPath, cfg.rotateCredentialsConfig.resourceId, cfg.rotateCredentialsConfig.resourceType)
 
 		case cfg.eventFeedConfig != nil:
-			tm = local.NewEventFeed(ctx)
+			tm = local.NewEventFeed(ctx, cfg.eventFeedConfig.feedId, cfg.eventFeedConfig.startAt)
 		case cfg.createTicketConfig != nil:
 			tm = local.NewTicket(ctx, cfg.createTicketConfig.templatePath)
 		case cfg.listTicketSchemasConfig != nil:
@@ -696,6 +753,7 @@ func NewConnectorRunner(ctx context.Context, c types.ConnectorServer, opts ...Op
 				local.WithExternalResourceC1Z(cfg.externalResourceC1Z),
 				local.WithExternalResourceEntitlementIdFilter(cfg.externalResourceEntitlementIdFilter),
 				local.WithTargetedSyncResourceIDs(cfg.targetedSyncResourceIDs),
+				local.WithSkipEntitlementsAndGrants(cfg.skipEntitlementsAndGrants),
 			)
 			if err != nil {
 				return nil, err

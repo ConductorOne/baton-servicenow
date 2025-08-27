@@ -1,0 +1,3 @@
+FROM public.ecr.aws/lambda/provided:al2023
+ENTRYPOINT ["/baton-servicenow", "lambda"]
+COPY baton-servicenow /
