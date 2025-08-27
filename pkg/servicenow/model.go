@@ -346,8 +346,8 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 		// This should be sys_id of user
 		cf = sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
 		cf.GetStringValue().DefaultValue = SystemAdminUserId
-	case TypeListCollector: // TODO(lauren) I think this just takes sys_ids but in the UI its populated from other tables
-		return nil
+	case TypeListCollector:
+		cf = sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
 	case TypeDuration: // TODO(lauren) make duration field?
 		cf = sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
 	default:
