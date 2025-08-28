@@ -67,7 +67,7 @@ const (
 
 	InstanceURLTemplate = `{{.Deployment}}.service-now.com`
 
-	// Variable sets & variables (Table API)
+	// Variable sets & variables (Table API).
 	VariableSetM2MBaseUrl = TableAPIBaseURL + "/io_set_item"
 	ItemOptionNewBaseUrl  = TableAPIBaseURL + "/item_option_new" // variables (questions)
 	QuestionChoiceBaseUrl = TableAPIBaseURL + "/question_choice" // option lists
