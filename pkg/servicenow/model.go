@@ -256,7 +256,7 @@ type VariableSet struct {
 	Description string `json:"description"`
 }
 
-// Raw variable record from item_option_new
+// Raw variable record from item_option_new.
 type ItemOptionNew struct {
 	SysID        string `json:"sys_id"`
 	Name         string `json:"name"`
@@ -272,7 +272,7 @@ type ItemOptionNew struct {
 	RefQualifier string `json:"reference_qual"` // often empty unless set
 }
 
-// Choice rows for select/multi-select
+// Choice rows for select/multi-select.
 type QuestionChoice struct {
 	SysID    string `json:"sys_id"`
 	Label    string `json:"label"`
@@ -400,7 +400,7 @@ func boolStr(s string) bool {
 	return s == "true" || s == "True" || s == "TRUE" || s == "1"
 }
 
-// Map item_option_new + its choices to CatalogItemVariable shape
+// Map item_option_new + its choices to CatalogItemVariable shape.
 func MapItemOptionNewToCatalogItemVariable(v ItemOptionNew, choices []QuestionChoice) CatalogItemVariable {
 	cv := CatalogItemVariable{
 		Active:       boolStr(v.Active),

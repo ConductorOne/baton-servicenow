@@ -520,8 +520,7 @@ func (c *Client) CreateUserAccount(ctx context.Context, user any) (*User, error)
 	return &response.Result, nil
 }
 
-// Includes variables that come from variable sets (Table API -> item_option_new)
-// and choices for those set variables
+// Includes variables that come from variable sets (Table API -> item_option_new) and choices for those set variables.
 func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID string) ([]CatalogItemVariable, error) {
 	itemVars, err := c.GetCatalogItemVariables(ctx, itemSysID)
 	if err != nil {
@@ -638,7 +637,7 @@ func (c *Client) GetChoicesForVariables(ctx context.Context, varIDs []string, pg
 	return resp.Result, next, nil
 }
 
-// Unused but consider switching to this to get both direct catalog item variables and variables from variable sets
+// Unused but consider switching to this to get both direct catalog item variables and variables from variable sets.
 func (c *Client) GetVariablesForItem(ctx context.Context, itemSysID string, pg PaginationVars) ([]ItemOptionNew, string, error) {
 	var resp ItemOptionNewResponse
 	req := []ReqOpt{
