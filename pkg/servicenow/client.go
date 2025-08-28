@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/tomnomnom/linkheader"
 	"google.golang.org/grpc/codes"
@@ -65,6 +66,11 @@ const (
 	ChoiceBaseUrl = TableAPIBaseURL + "/sys_choice"
 
 	InstanceURLTemplate = `{{.Deployment}}.service-now.com`
+
+	// Variable sets & variables (Table API).
+	VariableSetM2MBaseUrl = TableAPIBaseURL + "/io_set_item"
+	ItemOptionNewBaseUrl  = TableAPIBaseURL + "/item_option_new" // variables (questions)
+	QuestionChoiceBaseUrl = TableAPIBaseURL + "/question_choice" // option lists
 )
 
 type ListResponse[T any] struct {
@@ -98,6 +104,10 @@ type LabelResponse = SingleResponse[Label]
 type LabelsResponse = ListResponse[Label]
 type LabelEntriesLabelNameResponse = ListResponse[LabelEntryName]
 type RequestedItemStateResponse = ListResponse[RequestItemState]
+type VariableSetM2MResponse = ListResponse[VariableSetM2M]
+type VariableSetsResponse = ListResponse[VariableSet]
+type ItemOptionNewResponse = ListResponse[ItemOptionNew]
+type QuestionChoiceResponse = ListResponse[QuestionChoice]
 
 type Client struct {
 	httpClient          *http.Client
@@ -508,4 +518,138 @@ func (c *Client) CreateUserAccount(ctx context.Context, user any) (*User, error)
 	}
 
 	return &response.Result, nil
+}
+
+// Includes variables that come from variable sets (Table API -> item_option_new) and choices for those set variables.
+func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID string) ([]CatalogItemVariable, error) {
+	itemVars, err := c.GetCatalogItemVariables(ctx, itemSysID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get item variables: %w", err)
+	}
+
+	// Find attached variable sets
+	links, _, err := c.GetVariableSetLinksForItem(ctx, itemSysID, PaginationVars{Limit: 200})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get variable set links: %w", err)
+	}
+	if len(links) == 0 {
+		return itemVars, nil // nothing to add
+	}
+
+	setIDs := make([]string, 0, len(links))
+	for _, l := range links {
+		setIDs = append(setIDs, l.VariableSet)
+	}
+
+	// Fetch variables that belong to those sets
+	setVars, _, err := c.GetVariablesBySetIDs(ctx, setIDs, PaginationVars{Limit: 500})
+	if err != nil {
+		return nil, fmt.Errorf("failde to get variables by set ids: %w", err)
+	}
+
+	// Fetch choices for set variables (so selects have options)
+	varIDs := make([]string, 0, len(setVars))
+	for _, v := range setVars {
+		varIDs = append(varIDs, v.SysID)
+	}
+	choices, _, err := c.GetChoicesForVariables(ctx, varIDs, PaginationVars{Limit: 1000})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get choices for set variables: %w", err)
+	}
+	choicesByQ := make(map[string][]QuestionChoice, len(varIDs))
+	for _, ch := range choices {
+		choicesByQ[ch.Question] = append(choicesByQ[ch.Question], ch)
+	}
+
+	// Map set variables to CatalogItemVariable
+	cvSet := make([]CatalogItemVariable, 0, len(setVars))
+	for _, v := range setVars {
+		cvSet = append(cvSet, MapItemOptionNewToCatalogItemVariable(v, choicesByQ[v.SysID]))
+	}
+
+	// Merge (prefer direct items on ID collisions)
+	out := make([]CatalogItemVariable, 0, len(itemVars)+len(cvSet))
+	seen := make(map[string]struct{}, len(itemVars))
+	for _, v := range itemVars {
+		out = append(out, v)
+		seen[v.ID] = struct{}{}
+	}
+	for _, v := range cvSet {
+		if _, dup := seen[v.ID]; !dup {
+			out = append(out, v)
+		}
+	}
+
+	return out, nil
+}
+
+func (c *Client) GetVariableSetLinksForItem(ctx context.Context, itemSysID string, pg PaginationVars) ([]VariableSetM2M, string, error) {
+	var resp VariableSetM2MResponse
+	req := []ReqOpt{
+		WithQueryParam("sysparm_query", fmt.Sprintf("sc_cat_item=%s", itemSysID)),
+		WithQueryParam("sysparm_fields", "sys_id,variable_set"),
+		WithQueryParam("sysparm_exclude_reference_link", "true"),
+	}
+	req = append(req, paginationVarsToReqOptions(&pg)...)
+
+	next, err := c.get(ctx, fmt.Sprintf(VariableSetM2MBaseUrl, c.deployment), &resp, req...)
+	if err != nil {
+		return nil, "", err
+	}
+	return resp.Result, next, nil
+}
+
+func (c *Client) GetVariablesBySetIDs(ctx context.Context, setIDs []string, pg PaginationVars) ([]ItemOptionNew, string, error) {
+	if len(setIDs) == 0 {
+		return nil, "", nil
+	}
+	var resp ItemOptionNewResponse
+	req := []ReqOpt{
+		WithQueryParam("sysparm_query", "variable_setIN"+strings.Join(setIDs, ",")),
+		WithQueryParam("sysparm_fields", "sys_id,name,question_text,type,mandatory,default_value,reference,attributes,active,cat_item,variable_set"),
+		WithQueryParam("sysparm_exclude_reference_link", "true"),
+	}
+	req = append(req, paginationVarsToReqOptions(&pg)...)
+
+	next, err := c.get(ctx, fmt.Sprintf(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
+	if err != nil {
+		return nil, "", err
+	}
+	return resp.Result, next, nil
+}
+
+func (c *Client) GetChoicesForVariables(ctx context.Context, varIDs []string, pg PaginationVars) ([]QuestionChoice, string, error) {
+	if len(varIDs) == 0 {
+		return nil, "", nil
+	}
+	var resp QuestionChoiceResponse
+	req := []ReqOpt{
+		WithQueryParam("sysparm_query", "questionIN"+strings.Join(varIDs, ",")),
+		WithQueryParam("sysparm_fields", "sys_id,label,value,question"),
+		WithQueryParam("sysparm_exclude_reference_link", "true"),
+	}
+	req = append(req, paginationVarsToReqOptions(&pg)...)
+
+	next, err := c.get(ctx, fmt.Sprintf(QuestionChoiceBaseUrl, c.deployment), &resp, req...)
+	if err != nil {
+		return nil, "", err
+	}
+	return resp.Result, next, nil
+}
+
+// Unused but consider switching to this to get both direct catalog item variables and variables from variable sets.
+func (c *Client) GetVariablesForItem(ctx context.Context, itemSysID string, pg PaginationVars) ([]ItemOptionNew, string, error) {
+	var resp ItemOptionNewResponse
+	req := []ReqOpt{
+		WithQueryParam("sysparm_query", fmt.Sprintf("cat_item=%s", itemSysID)),
+		WithQueryParam("sysparm_fields", "sys_id,name,question_text,type,mandatory,default_value,reference,attributes,active,cat_item,variable_set"),
+		WithQueryParam("sysparm_exclude_reference_link", "true"),
+	}
+	req = append(req, paginationVarsToReqOptions(&pg)...)
+
+	next, err := c.get(ctx, fmt.Sprintf(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
+	if err != nil {
+		return nil, "", err
+	}
+	return resp.Result, next, nil
 }

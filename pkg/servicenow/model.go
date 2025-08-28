@@ -245,6 +245,41 @@ type VariableTypeNew interface{}
 
 type VariableType int
 
+type VariableSetM2M struct {
+	SysID       string `json:"sys_id"`
+	VariableSet string `json:"variable_set"`
+}
+
+type VariableSet struct {
+	SysID       string `json:"sys_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// Raw variable record from item_option_new.
+type ItemOptionNew struct {
+	SysID        string `json:"sys_id"`
+	Name         string `json:"name"`
+	QuestionText string `json:"question_text"`
+	Type         string `json:"type"`
+	Mandatory    string `json:"mandatory"`
+	DefaultValue string `json:"default_value"`
+	Reference    string `json:"reference"`
+	Attributes   string `json:"attributes"`
+	Active       string `json:"active"`
+	CatItem      string `json:"cat_item"`       // present for item-level vars
+	VariableSet  string `json:"variable_set"`   // present for set-level vars
+	RefQualifier string `json:"reference_qual"` // often empty unless set
+}
+
+// Choice rows for select/multi-select.
+type QuestionChoice struct {
+	SysID    string `json:"sys_id"`
+	Label    string `json:"label"`
+	Value    string `json:"value"`
+	Question string `json:"question"`
+}
+
 // TODO(lauren) not sure how to handle all of these
 // These correspond to variable type id.
 const (
@@ -351,15 +386,63 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 	case TypeDuration: // TODO(lauren) make duration field?
 		cf = sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
 	default:
-		// TODO(lauren) should continue instead of erroring?
 		if variable.Mandatory {
 			l.Error("unsupported mandatory type", zap.Any("var", variable))
 			return nil
-			// Just log for now
-			// return nil, errors.New("unsupported mandatory type")
 		}
 		return nil
 	}
 	cf.Annotations = annotations.New(typAnno)
 	return cf
+}
+
+func boolStr(s string) bool {
+	return s == "true" || s == "True" || s == "TRUE" || s == "1"
+}
+
+// Map item_option_new + its choices to CatalogItemVariable shape.
+func MapItemOptionNewToCatalogItemVariable(v ItemOptionNew, choices []QuestionChoice) CatalogItemVariable {
+	cv := CatalogItemVariable{
+		Active:       boolStr(v.Active),
+		Label:        v.QuestionText,
+		Type:         parseVariableType(v.Type),
+		Mandatory:    boolStr(v.Mandatory),
+		DisplayValue: v.DefaultValue,
+		RenderLabel:  true,
+		ReadOnly:     false,
+		Name:         v.Name,
+		Attributes:   v.Attributes,
+		ID:           v.SysID,
+		Value:        v.DefaultValue,
+		Reference:    v.Reference,
+		RefQualifier: v.RefQualifier,
+	}
+
+	if len(choices) > 0 {
+		cv.Choices = make([]Choice, 0, len(choices))
+		for _, c := range choices {
+			cv.Choices = append(cv.Choices, Choice{
+				Label: c.Label,
+				Value: c.Value,
+			})
+		}
+	}
+
+	return cv
+}
+
+func parseVariableType(raw string) interface{} {
+	if raw == "" {
+		return float64(TypeUnspecified)
+	}
+	n := 0
+	for i := 0; i < len(raw); i++ {
+		if raw[i] < '0' || raw[i] > '9' {
+			return float64(TypeUnspecified)
+		}
+	}
+	for i := 0; i < len(raw); i++ {
+		n = n*10 + int(raw[i]-'0')
+	}
+	return float64(n)
 }

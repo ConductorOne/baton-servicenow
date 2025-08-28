@@ -242,16 +242,9 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 
 	customFields := make(map[string]*v2.TicketCustomField)
 
-	// TODO(lauren) move this logic so we dont get for empty variables when listing schemas
-	// List catalog items doesn't include variables but get catalog item does
-	// Get the catalog variables if not present
-	var err error
-	variables := catalogItem.Variables
-	if len(variables) == 0 {
-		variables, err = s.client.GetCatalogItemVariables(ctx, catalogItem.Id)
-		if err != nil {
-			return nil, fmt.Errorf("servicenow-connector: failed to get catalog variables for catalog item %s: %w", catalogItem.Id, err)
-		}
+	variables, err := s.client.GetCatalogItemVariablesPlusSets(ctx, catalogItem.Id)
+	if err != nil {
+		return nil, fmt.Errorf("servicenow-connector: failed to get variables (item + sets) for catalog item %s: %w", catalogItem.Id, err)
 	}
 
 	for _, v := range variables {
