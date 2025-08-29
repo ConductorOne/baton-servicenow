@@ -541,64 +541,62 @@ func (c *Client) UpdateUserActiveStatus(ctx context.Context, userId string, acti
 	return &response.Result, nil
 }
 
-// Includes variables that come from variable sets (Table API -> item_option_new) and choices for those set variables.
+// Includes direct variables and variables that come from variable sets (Table API -> item_option_new)
+// and choices for those set variables.
 func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID string) ([]CatalogItemVariable, error) {
-	itemVars, err := c.GetCatalogItemVariables(ctx, itemSysID)
+	// Item-level variables from Table API
+	itemVarsRaw, _, err := c.GetVariablesForItem(ctx, itemSysID, PaginationVars{Limit: 500})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get item variables: %w", err)
+		return nil, fmt.Errorf("get item-level variables: %w", err)
 	}
 
-	// Find attached variable sets
+	// Variable sets attached to this item
 	links, _, err := c.GetVariableSetLinksForItem(ctx, itemSysID, PaginationVars{Limit: 200})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get variable set links: %w", err)
+		return nil, fmt.Errorf("get variable set links: %w", err)
 	}
-	if len(links) == 0 {
-		return itemVars, nil // nothing to add
-	}
-
 	setIDs := make([]string, 0, len(links))
 	for _, l := range links {
 		setIDs = append(setIDs, l.VariableSet)
 	}
 
-	// Fetch variables that belong to those sets
-	setVars, _, err := c.GetVariablesBySetIDs(ctx, setIDs, PaginationVars{Limit: 500})
-	if err != nil {
-		return nil, fmt.Errorf("failde to get variables by set ids: %w", err)
+	// Variables inside those sets
+	setVarsRaw := []ItemOptionNew{}
+	if len(setIDs) > 0 {
+		setVarsRaw, _, err = c.GetVariablesBySetIDs(ctx, setIDs, PaginationVars{Limit: 1000})
+		if err != nil {
+			return nil, fmt.Errorf("get variables by set ids: %w", err)
+		}
 	}
 
-	// Fetch choices for set variables (so selects have options)
-	varIDs := make([]string, 0, len(setVars))
-	for _, v := range setVars {
+	// Fetch choices for ALL variables (item + set) so selects have options
+	allRaw := append(itemVarsRaw, setVarsRaw...)
+	varIDs := make([]string, 0, len(allRaw))
+	for _, v := range allRaw {
 		varIDs = append(varIDs, v.SysID)
 	}
-	choices, _, err := c.GetChoicesForVariables(ctx, varIDs, PaginationVars{Limit: 1000})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get choices for set variables: %w", err)
-	}
-	choicesByQ := make(map[string][]QuestionChoice, len(varIDs))
-	for _, ch := range choices {
-		choicesByQ[ch.Question] = append(choicesByQ[ch.Question], ch)
-	}
 
-	// Map set variables to CatalogItemVariable
-	cvSet := make([]CatalogItemVariable, 0, len(setVars))
-	for _, v := range setVars {
-		cvSet = append(cvSet, MapItemOptionNewToCatalogItemVariable(v, choicesByQ[v.SysID]))
-	}
-
-	// Merge (prefer direct items on ID collisions)
-	out := make([]CatalogItemVariable, 0, len(itemVars)+len(cvSet))
-	seen := make(map[string]struct{}, len(itemVars))
-	for _, v := range itemVars {
-		out = append(out, v)
-		seen[v.ID] = struct{}{}
-	}
-	for _, v := range cvSet {
-		if _, dup := seen[v.ID]; !dup {
-			out = append(out, v)
+	choicesByQ := map[string][]QuestionChoice{}
+	if len(varIDs) > 0 {
+		choices, _, err := c.GetChoicesForVariables(ctx, varIDs, PaginationVars{Limit: 5000})
+		if err != nil {
+			return nil, fmt.Errorf("get choices for variables: %w", err)
 		}
+		for _, ch := range choices {
+			choicesByQ[ch.Question] = append(choicesByQ[ch.Question], ch)
+		}
+	}
+
+	// Map to CatalogItemVariable
+	out := make([]CatalogItemVariable, 0, len(allRaw))
+	seen := make(map[string]struct{}, len(allRaw)) // just in case of dupes
+	for _, v := range allRaw {
+		cv := MapItemOptionNewToCatalogItemVariable(v, choicesByQ[v.SysID])
+		if _, dup := seen[cv.ID]; dup {
+			continue
+		}
+		out = append(out, cv)
+		seen[cv.ID] = struct{}{}
 	}
 
 	return out, nil

@@ -2,6 +2,8 @@ package servicenow
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -188,26 +190,26 @@ type Choice struct {
 }
 
 type CatalogItemVariable struct {
-	Active                  bool            `json:"active"`
-	Label                   string          `json:"label"`
-	DynamicValueField       string          `json:"dynamic_value_field"`
-	Type                    VariableTypeNew `json:"type"`
-	Mandatory               bool            `json:"mandatory"`
-	DisplayValue            string          `json:"displayvalue"`
-	FriendlyType            string          `json:"friendly_type"`
-	DisplayType             string          `json:"display_type"`
-	RenderLabel             bool            `json:"render_label"`
-	ReadOnly                bool            `json:"read_only"`
-	Name                    string          `json:"name"`
-	Attributes              string          `json:"attributes"`
-	ID                      string          `json:"id"`
-	Choices                 []Choice        `json:"choices"`
-	Value                   string          `json:"value"`
-	DynamicValueDotWalkPath string          `json:"dynamic_value_dot_walk_path"`
-	HelpText                string          `json:"help_text"`
-	Order                   int             `json:"order"`
-	Reference               string          `json:"reference"`
-	RefQualifier            string          `json:"ref_qualifier"`
+	Active                  bool         `json:"active"`
+	Label                   string       `json:"label"`
+	DynamicValueField       string       `json:"dynamic_value_field"`
+	Type                    VariableType `json:"type"`
+	Mandatory               bool         `json:"mandatory"`
+	DisplayValue            string       `json:"displayvalue"`
+	FriendlyType            string       `json:"friendly_type"`
+	DisplayType             string       `json:"display_type"`
+	RenderLabel             bool         `json:"render_label"`
+	ReadOnly                bool         `json:"read_only"`
+	Name                    string       `json:"name"`
+	Attributes              string       `json:"attributes"`
+	ID                      string       `json:"id"`
+	Choices                 []Choice     `json:"choices"`
+	Value                   string       `json:"value"`
+	DynamicValueDotWalkPath string       `json:"dynamic_value_dot_walk_path"`
+	HelpText                string       `json:"help_text"`
+	Order                   int          `json:"order"`
+	Reference               string       `json:"reference"`
+	RefQualifier            string       `json:"ref_qualifier"`
 }
 
 type OrderItemPayload struct {
@@ -242,7 +244,70 @@ type LabelEntryName struct {
 	LabelName string `json:"label.name"`
 }
 
-type VariableTypeNew interface{}
+// ServiceNow returns type in different formats
+// Example of formats accepted:
+// 8, "8", "", null, {"value":"8","display_value":"Reference"}
+func (t *VariableType) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" || string(b) == `""` {
+		*t = TypeUnspecified
+		return nil
+	}
+
+	// object form (when sysparm_display_value=all etc.)
+	if len(b) > 0 && b[0] == '{' {
+		var tmp struct {
+			Value        any    `json:"value"`
+			DisplayValue string `json:"display_value"`
+		}
+		if err := json.Unmarshal(b, &tmp); err != nil {
+			return err
+		}
+		switch v := tmp.Value.(type) {
+		case string:
+			if v == "" {
+				*t = TypeUnspecified
+				return nil
+			}
+			if n, err := strconv.Atoi(v); err == nil {
+				*t = VariableType(n)
+				return nil
+			}
+		case float64:
+			*t = VariableType(int(v))
+			return nil
+		}
+		// If value wasn't numeric, fall back to unspecified
+		*t = TypeUnspecified
+		return nil
+	}
+
+	// quoted number
+	if len(b) >= 2 && b[0] == '"' && b[len(b)-1] == '"' {
+		s := string(b[1 : len(b)-1])
+		if s == "" {
+			*t = TypeUnspecified
+			return nil
+		}
+		if n, err := strconv.Atoi(s); err == nil {
+			*t = VariableType(n)
+			return nil
+		}
+		*t = TypeUnspecified
+		return nil
+	}
+
+	// bare number
+	if n, err := strconv.Atoi(string(b)); err == nil {
+		*t = VariableType(n)
+		return nil
+	}
+	*t = TypeUnspecified
+	return nil
+}
+
+func (t VariableType) MarshalJSON() ([]byte, error) {
+	return []byte(strconv.Itoa(int(t))), nil
+}
 
 type VariableType int
 
@@ -259,18 +324,18 @@ type VariableSet struct {
 
 // Raw variable record from item_option_new.
 type ItemOptionNew struct {
-	SysID        string `json:"sys_id"`
-	Name         string `json:"name"`
-	QuestionText string `json:"question_text"`
-	Type         string `json:"type"`
-	Mandatory    string `json:"mandatory"`
-	DefaultValue string `json:"default_value"`
-	Reference    string `json:"reference"`
-	Attributes   string `json:"attributes"`
-	Active       string `json:"active"`
-	CatItem      string `json:"cat_item"`       // present for item-level vars
-	VariableSet  string `json:"variable_set"`   // present for set-level vars
-	RefQualifier string `json:"reference_qual"` // often empty unless set
+	SysID        string       `json:"sys_id"`
+	Name         string       `json:"name"`
+	QuestionText string       `json:"question_text"`
+	Type         VariableType `json:"type"`
+	Mandatory    string       `json:"mandatory"`
+	DefaultValue string       `json:"default_value"`
+	Reference    string       `json:"reference"`
+	Attributes   string       `json:"attributes"`
+	Active       string       `json:"active"`
+	CatItem      string       `json:"cat_item"`       // present for item-level vars
+	VariableSet  string       `json:"variable_set"`   // present for set-level vars
+	RefQualifier string       `json:"reference_qual"` // often empty unless set
 }
 
 // Choice rows for select/multi-select.
@@ -325,18 +390,9 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 	if !variable.Active || variable.ReadOnly {
 		return nil
 	}
-
 	l := ctxzap.Extract(ctx)
 
-	// TODO(unmarshal func)
-	var typ VariableType
-	t, ok := variable.Type.(float64)
-	if !ok {
-		typ = TypeUnspecified
-	} else {
-		typ = VariableType(int(t))
-	}
-
+	typ := variable.Type
 	var cf *v2.TicketCustomField
 	typAnno := &mv.CatalogRequestedItemVariable{
 		VariableType: int64(typ),
@@ -386,6 +442,8 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 		cf = sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
 	case TypeDuration: // TODO(lauren) make duration field?
 		cf = sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
+	case TypeContainerStart, TypeContainerEnd:
+		return nil
 	default:
 		if variable.Mandatory {
 			l.Error("unsupported mandatory type", zap.Any("var", variable))
@@ -398,7 +456,8 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 }
 
 func boolStr(s string) bool {
-	return s == "true" || s == "True" || s == "TRUE" || s == "1"
+	rv, _ := strconv.ParseBool(s)
+	return rv
 }
 
 // Map item_option_new + its choices to CatalogItemVariable shape.
@@ -406,7 +465,7 @@ func MapItemOptionNewToCatalogItemVariable(v ItemOptionNew, choices []QuestionCh
 	cv := CatalogItemVariable{
 		Active:       boolStr(v.Active),
 		Label:        v.QuestionText,
-		Type:         parseVariableType(v.Type),
+		Type:         v.Type,
 		Mandatory:    boolStr(v.Mandatory),
 		DisplayValue: v.DefaultValue,
 		RenderLabel:  true,
@@ -430,20 +489,4 @@ func MapItemOptionNewToCatalogItemVariable(v ItemOptionNew, choices []QuestionCh
 	}
 
 	return cv
-}
-
-func parseVariableType(raw string) interface{} {
-	if raw == "" {
-		return float64(TypeUnspecified)
-	}
-	n := 0
-	for i := 0; i < len(raw); i++ {
-		if raw[i] < '0' || raw[i] > '9' {
-			return float64(TypeUnspecified)
-		}
-	}
-	for i := 0; i < len(raw); i++ {
-		n = n*10 + int(raw[i]-'0')
-	}
-	return float64(n)
 }
