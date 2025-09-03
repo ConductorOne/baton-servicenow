@@ -569,8 +569,9 @@ func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID 
 		}
 	}
 
+	allRaw := itemVarsRaw
 	// Fetch choices for ALL variables (item + set) so selects have options
-	allRaw := append(itemVarsRaw, setVarsRaw...)
+	allRaw = append(allRaw, setVarsRaw...)
 	varIDs := make([]string, 0, len(allRaw))
 	for _, v := range allRaw {
 		varIDs = append(varIDs, v.SysID)

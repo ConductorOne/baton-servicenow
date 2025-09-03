@@ -244,7 +244,7 @@ type LabelEntryName struct {
 	LabelName string `json:"label.name"`
 }
 
-// ServiceNow returns type in different formats
+// ServiceNow returns type in different formats.
 // Example of formats accepted:
 // 8, "8", "", null, {"value":"8","display_value":"Reference"}
 func (t *VariableType) UnmarshalJSON(b []byte) error {
