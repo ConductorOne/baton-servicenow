@@ -246,7 +246,7 @@ type LabelEntryName struct {
 
 // ServiceNow returns type in different formats.
 // Example of formats accepted:
-// 8, "8", "", null, {"value":"8","display_value":"Reference"}
+// 8, "8", "", null, {"value":"8","display_value":"Reference"}.
 func (t *VariableType) UnmarshalJSON(b []byte) error {
 	if string(b) == "null" || string(b) == `""` {
 		*t = TypeUnspecified
