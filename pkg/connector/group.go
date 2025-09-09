@@ -134,7 +134,7 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 
 	memberIDs := mapGroupMembers(groupMembers)
 	if len(memberIDs) == 0 {
-		return []*v2.Grant{}, "", nil, nil
+		return []*v2.Grant{}, nextPageToken, nil, nil
 	}
 
 	var rv []*v2.Grant
