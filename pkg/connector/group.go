@@ -137,24 +137,11 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 		return []*v2.Grant{}, "", nil, nil
 	}
 
-	targetMembers, _, err := g.client.GetUsers(
-		ctx,
-		servicenow.PaginationVars{
-			Limit: len(memberIDs),
-		},
-		memberIDs,
-	)
-
-	if err != nil {
-		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list members under group %s: %w", resource.Id.Resource, err)
-	}
-
 	var rv []*v2.Grant
-	for _, member := range targetMembers {
-		memberCopy := member
-		ur, err := userResource(&memberCopy)
+	for _, member := range memberIDs {
+		rID, err := rs.NewResourceID(resourceTypeUser, member)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, "", nil, fmt.Errorf("baton-servicenow: error creating principal id")
 		}
 
 		// grant group membership
@@ -163,7 +150,7 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 			grant.NewGrant(
 				resource,
 				groupMembership,
-				ur.Id,
+				rID,
 			),
 		)
 	}
