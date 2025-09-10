@@ -29,12 +29,25 @@ func userResource(user *servicenow.User) (*v2.Resource, error) {
 		"user_roles": user.Roles,
 		"first_name": user.FirstName,
 		"last_name":  user.LastName,
+		"active":     user.Active,
+	}
+
+	// Map ServiceNow active status to Baton user status
+	var userStatus v2.UserTrait_Status_Status
+	switch user.Active {
+	case "true", "True", "TRUE", "1":
+		userStatus = v2.UserTrait_Status_STATUS_ENABLED
+	case "false", "False", "FALSE", "0":
+		userStatus = v2.UserTrait_Status_STATUS_DISABLED
+	default:
+		// Default to disabled for unknown values to be safe
+		userStatus = v2.UserTrait_Status_STATUS_DISABLED
 	}
 
 	userTraitOptions := []rs.UserTraitOption{
 		rs.WithEmail(user.Email, true),
 		rs.WithUserProfile(profile),
-		rs.WithStatus(v2.UserTrait_Status_STATUS_ENABLED),
+		rs.WithStatus(userStatus),
 	}
 
 	resource, err := rs.NewUserResource(

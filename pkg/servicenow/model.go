@@ -24,6 +24,7 @@ type User struct {
 	LastName  string `json:"last_name"`
 	UserName  string `json:"user_name"`
 	Roles     string `json:"roles"`
+	Active    string `json:"active"`
 }
 
 type Role struct {
