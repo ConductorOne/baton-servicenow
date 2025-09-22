@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-var LabelNotFoundErr = errors.New("label not found")
+var ErrLabelNotFound = errors.New("label not found")
 
 type FieldOption func(catalogItemRequestPayload *OrderItemPayload)
 
@@ -213,7 +213,7 @@ func (c *Client) CreateLabel(ctx context.Context, label string) (*Label, error) 
 	if err == nil {
 		return labelResp, nil
 	}
-	if errors.Is(err, LabelNotFoundErr) {
+	if errors.Is(err, ErrLabelNotFound) {
 		return c.createLabel(ctx, label)
 	}
 	return nil, err
@@ -231,7 +231,7 @@ func (c *Client) GetLabel(ctx context.Context, label string) (*Label, error) {
 		return nil, fmt.Errorf("error fetching label '%s': %w", label, err)
 	}
 	if len(labelsResponse.Result) == 0 {
-		return nil, LabelNotFoundErr
+		return nil, ErrLabelNotFound
 	}
 	return &labelsResponse.Result[0], nil
 }
