@@ -15,8 +15,13 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+const (
+	ActionEnableUser  = "enable_user"
+	ActionDisableUser = "disable_user"
+)
+
 var enableUserAction = &v2.BatonActionSchema{
-	Name: "enableUser",
+	Name: ActionEnableUser,
 	Arguments: []*config.Field{
 		{
 			Name:        "userId",
@@ -39,7 +44,7 @@ var enableUserAction = &v2.BatonActionSchema{
 }
 
 var disableUserAction = &v2.BatonActionSchema{
-	Name: "disableUser",
+	Name: ActionDisableUser,
 	Arguments: []*config.Field{
 		{
 			Name:        "userId",
