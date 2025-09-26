@@ -467,7 +467,7 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 		return "", status.Error(codes.Code(uint32(rawResponse.StatusCode)), "Request failed")
 	}
 
-	if method != http.MethodDelete {
+	if method != http.MethodDelete && method != http.MethodPatch {
 		if err := json.NewDecoder(rawResponse.Body).Decode(&resourceResponse); err != nil {
 			return "", err
 		}
