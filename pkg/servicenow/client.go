@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/tomnomnom/linkheader"
 	"google.golang.org/grpc/codes"
@@ -592,11 +593,25 @@ func (c *Client) GetVariableSetLinksForItem(ctx context.Context, itemSysID strin
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, err := c.get(ctx, fmt.Sprintf(VariableSetM2MBaseUrl, c.deployment), &resp, req...)
-	if err != nil {
-		return nil, "", err
+	maxRetries := 3
+	baseDelay := 2 * time.Second
+	
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		next, err := c.get(ctx, fmt.Sprintf(VariableSetM2MBaseUrl, c.deployment), &resp, req...)
+		if err != nil {
+			if status.Code(err) == codes.DeadlineExceeded || strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline exceeded") {
+				if attempt < maxRetries-1 {
+					delay := baseDelay * time.Duration(1<<attempt)
+					time.Sleep(delay)
+					continue
+				}
+			}
+			return nil, "", err
+		}
+		return resp.Result, next, nil
 	}
-	return resp.Result, next, nil
+	
+	return nil, "", fmt.Errorf("failed to get variable set links after %d retries", maxRetries)
 }
 
 func (c *Client) GetVariablesBySetIDs(ctx context.Context, setIDs []string, pg PaginationVars) ([]ItemOptionNew, string, error) {
@@ -611,11 +626,25 @@ func (c *Client) GetVariablesBySetIDs(ctx context.Context, setIDs []string, pg P
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, err := c.get(ctx, fmt.Sprintf(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
-	if err != nil {
-		return nil, "", err
+	maxRetries := 3
+	baseDelay := 2 * time.Second
+	
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		next, err := c.get(ctx, fmt.Sprintf(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
+		if err != nil {
+			if status.Code(err) == codes.DeadlineExceeded || strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline exceeded") {
+				if attempt < maxRetries-1 {
+					delay := baseDelay * time.Duration(1<<attempt)
+					time.Sleep(delay)
+					continue
+				}
+			}
+			return nil, "", err
+		}
+		return resp.Result, next, nil
 	}
-	return resp.Result, next, nil
+	
+	return nil, "", fmt.Errorf("failed to get variables by set IDs after %d retries", maxRetries)
 }
 
 func (c *Client) GetChoicesForVariables(ctx context.Context, varIDs []string, pg PaginationVars) ([]QuestionChoice, string, error) {
@@ -630,11 +659,25 @@ func (c *Client) GetChoicesForVariables(ctx context.Context, varIDs []string, pg
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, err := c.get(ctx, fmt.Sprintf(QuestionChoiceBaseUrl, c.deployment), &resp, req...)
-	if err != nil {
-		return nil, "", err
+	maxRetries := 3
+	baseDelay := 2 * time.Second
+	
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		next, err := c.get(ctx, fmt.Sprintf(QuestionChoiceBaseUrl, c.deployment), &resp, req...)
+		if err != nil {
+			if status.Code(err) == codes.DeadlineExceeded || strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline exceeded") {
+				if attempt < maxRetries-1 {
+					delay := baseDelay * time.Duration(1<<attempt)
+					time.Sleep(delay)
+					continue
+				}
+			}
+			return nil, "", err
+		}
+		return resp.Result, next, nil
 	}
-	return resp.Result, next, nil
+	
+	return nil, "", fmt.Errorf("failed to get choices for variables after %d retries", maxRetries)
 }
 
 // Unused but consider switching to this to get both direct catalog item variables and variables from variable sets.

@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"time"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -120,6 +121,8 @@ func New(ctx context.Context, auth string, deployment string, ticketSchemaFilter
 	if err != nil {
 		return nil, err
 	}
+	
+	httpClient.Timeout = 10 * time.Minute
 
 	servicenowClient, err := servicenow.NewClient(httpClient, auth, deployment, ticketSchemaFilters)
 	if err != nil {
