@@ -80,9 +80,21 @@ func (s *ServiceNow) RegisterActionManager(ctx context.Context) (connectorbuilde
 func (s *ServiceNow) enableUser(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
+	if args == nil {
+		return nil, nil, fmt.Errorf("arguments cannot be nil")
+	}
+
+	if args.Fields == nil {
+		return nil, nil, fmt.Errorf("arguments fields cannot be nil")
+	}
+
 	userId, ok := args.Fields["userId"]
 	if !ok {
 		return nil, nil, fmt.Errorf("missing required argument userId")
+	}
+
+	if userId == nil {
+		return nil, nil, fmt.Errorf("userId value cannot be nil")
 	}
 
 	userIdStr := userId.GetStringValue()
@@ -109,9 +121,21 @@ func (s *ServiceNow) enableUser(ctx context.Context, args *structpb.Struct) (*st
 func (s *ServiceNow) disableUser(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
+	if args == nil {
+		return nil, nil, fmt.Errorf("arguments cannot be nil")
+	}
+
+	if args.Fields == nil {
+		return nil, nil, fmt.Errorf("arguments fields cannot be nil")
+	}
+
 	userId, ok := args.Fields["userId"]
 	if !ok {
 		return nil, nil, fmt.Errorf("missing required argument userId")
+	}
+
+	if userId == nil {
+		return nil, nil, fmt.Errorf("userId value cannot be nil")
 	}
 
 	userIdStr := userId.GetStringValue()
