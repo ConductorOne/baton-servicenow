@@ -467,7 +467,7 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 		return "", status.Error(codes.Code(uint32(rawResponse.StatusCode)), "Request failed")
 	}
 
-	if method != http.MethodDelete && method != http.MethodPatch {
+	if method != http.MethodDelete {
 		if err := json.NewDecoder(rawResponse.Body).Decode(&resourceResponse); err != nil {
 			return "", err
 		}
@@ -520,23 +520,25 @@ func (c *Client) CreateUserAccount(ctx context.Context, user any) (*User, error)
 	return &response.Result, nil
 }
 
-func (c *Client) UpdateUserActiveStatus(ctx context.Context, userId string, active bool) error {
+func (c *Client) UpdateUserActiveStatus(ctx context.Context, userId string, active bool) (*User, error) {
 	payload := map[string]bool{
 		"active": active,
 	}
 
+	var response UserResponse
 	err := c.patch(
 		ctx,
 		fmt.Sprintf(UserBaseUrl, c.deployment, userId),
-		nil,
+		&response,
 		payload,
+		WithIncludeResponseBody(),
 	)
 
 	if err != nil {
-		return fmt.Errorf("failed to update user active status in ServiceNow: %w", err)
+		return nil, fmt.Errorf("failed to update user active status in ServiceNow: %w", err)
 	}
 
-	return nil
+	return &response.Result, nil
 }
 
 // Includes variables that come from variable sets (Table API -> item_option_new) and choices for those set variables.

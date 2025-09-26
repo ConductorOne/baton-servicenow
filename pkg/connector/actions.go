@@ -109,15 +109,20 @@ func (s *ServiceNow) enableUser(ctx context.Context, args *structpb.Struct) (*st
 
 	l.Info("enabling user", zap.String("userId", userIdStr))
 
-	err := s.client.UpdateUserActiveStatus(ctx, userIdStr, true)
+	updatedUser, err := s.client.UpdateUserActiveStatus(ctx, userIdStr, true)
 	if err != nil {
 		l.Error("failed to enable user", zap.String("userId", userIdStr), zap.Error(err))
 		return nil, nil, fmt.Errorf("failed to enable user %s: %w", userIdStr, err)
 	}
 
+	success := updatedUser.Active == "true"
+	if !success {
+		l.Warn("user enable operation completed but user is still inactive", zap.String("userId", userIdStr), zap.String("active", updatedUser.Active))
+	}
+
 	response := &structpb.Struct{
 		Fields: map[string]*structpb.Value{
-			"success": structpb.NewBoolValue(true),
+			"success": structpb.NewBoolValue(success),
 		},
 	}
 	return response, nil, nil
@@ -150,15 +155,20 @@ func (s *ServiceNow) disableUser(ctx context.Context, args *structpb.Struct) (*s
 
 	l.Info("disabling user", zap.String("userId", userIdStr))
 
-	err := s.client.UpdateUserActiveStatus(ctx, userIdStr, false)
+	updatedUser, err := s.client.UpdateUserActiveStatus(ctx, userIdStr, false)
 	if err != nil {
 		l.Error("failed to disable user", zap.String("userId", userIdStr), zap.Error(err))
 		return nil, nil, fmt.Errorf("failed to disable user %s: %w", userIdStr, err)
 	}
 
+	success := updatedUser.Active == "false"
+	if !success {
+		l.Warn("user disable operation completed but user is still active", zap.String("userId", userIdStr), zap.String("active", updatedUser.Active))
+	}
+
 	response := &structpb.Struct{
 		Fields: map[string]*structpb.Value{
-			"success": structpb.NewBoolValue(true),
+			"success": structpb.NewBoolValue(success),
 		},
 	}
 	return response, nil, nil
