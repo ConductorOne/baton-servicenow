@@ -49,6 +49,10 @@ func (s *ServiceNow) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 	}
 }
 
+func (s *ServiceNow) Actions(ctx context.Context) (connectorbuilder.CustomActionManager, error) {
+	return s.RegisterActionManager(ctx)
+}
+
 func (s *ServiceNow) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error) {
 	return &v2.ConnectorMetadata{
 		DisplayName: "ServiceNow",

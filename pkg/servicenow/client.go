@@ -520,6 +520,25 @@ func (c *Client) CreateUserAccount(ctx context.Context, user any) (*User, error)
 	return &response.Result, nil
 }
 
+func (c *Client) UpdateUserActiveStatus(ctx context.Context, userId string, active bool) error {
+	payload := map[string]bool{
+		"active": active,
+	}
+
+	err := c.patch(
+		ctx,
+		fmt.Sprintf(UserBaseUrl, c.deployment, userId),
+		nil,
+		payload,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to update user active status in ServiceNow: %w", err)
+	}
+
+	return nil
+}
+
 // Includes variables that come from variable sets (Table API -> item_option_new) and choices for those set variables.
 func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID string) ([]CatalogItemVariable, error) {
 	itemVars, err := c.GetCatalogItemVariables(ctx, itemSysID)
