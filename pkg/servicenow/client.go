@@ -141,10 +141,10 @@ func (c *Client) GetBaseURL() string {
 }
 
 // Table `sys_user` (Users).
-func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, userIDs []string) ([]User, string, error) {
+func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, userIDs []string, filters []string) ([]User, string, error) {
 	var usersResponse UsersResponse
 
-	reqOpts := filterToReqOptions(prepareUserFilters(userIDs))
+	reqOpts := filterToReqOptions(prepareUserFilters(userIDs, filters))
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 
 	nextPage, err := c.get(

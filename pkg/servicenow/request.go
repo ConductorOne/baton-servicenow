@@ -88,16 +88,25 @@ type FilterVars struct {
 	UserId string
 }
 
-func prepareUserFilters(ids []string) *FilterVars {
-	var query string
+func prepareUserFilters(ids []string, domains []string) *FilterVars {
+	var queries []string
 
 	if ids != nil {
-		query = queryMultipleIDs(ids)
+		queries = append(queries, queryMultipleIDs(ids))
 	}
+
+	for _, domain := range domains {
+		d := strings.TrimSpace(strings.ToLower(domain))
+		if d != "" {
+			queries = append(queries, fmt.Sprintf("emailENDSWITH@%s", d))
+		}
+	}
+
+	combined := strings.Join(queries, "^OR")
 
 	return &FilterVars{
 		Fields: UserFields,
-		Query:  query,
+		Query:  combined,
 	}
 }
 

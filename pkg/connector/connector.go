@@ -38,12 +38,13 @@ var (
 )
 
 type ServiceNow struct {
-	client *servicenow.Client
+	client      *servicenow.Client
+	userFilters []string
 }
 
 func (s *ServiceNow) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
 	return []connectorbuilder.ResourceSyncer{
-		userBuilder(s.client),
+		userBuilder(s.client, s.userFilters),
 		roleBuilder(s.client),
 		groupBuilder(s.client),
 	}
@@ -110,7 +111,7 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 		Limit: 1,
 	}
 
-	_, _, err := s.client.GetUsers(ctx, pagination, nil)
+	_, _, err := s.client.GetUsers(ctx, pagination, nil, s.userFilters)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list users: %w", err)
 	}
@@ -119,7 +120,7 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 }
 
 // New returns the ServiceNow connector.
-func New(ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string) (*ServiceNow, error) {
+func New(ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string, allowedDomains []string) (*ServiceNow, error) {
 	httpClient, err := uhttp.NewClient(ctx, uhttp.WithLogger(true, ctxzap.Extract(ctx)))
 	if err != nil {
 		return nil, err
@@ -131,6 +132,7 @@ func New(ctx context.Context, auth string, deployment string, ticketSchemaFilter
 	}
 
 	return &ServiceNow{
-		client: servicenowClient,
+		client:      servicenowClient,
+		userFilters: allowedDomains,
 	}, nil
 }

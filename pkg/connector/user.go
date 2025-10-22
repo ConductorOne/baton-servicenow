@@ -15,6 +15,7 @@ import (
 type userResourceType struct {
 	resourceType *v2.ResourceType
 	client       *servicenow.Client
+	userFilters  []string
 }
 
 func (u *userResourceType) ResourceType(_ context.Context) *v2.ResourceType {
@@ -77,6 +78,7 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 			Offset: offset,
 		},
 		nil,
+		u.userFilters,
 	)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list users: %w", err)
@@ -110,10 +112,11 @@ func (u *userResourceType) Grants(ctx context.Context, resource *v2.Resource, to
 	return nil, "", nil, nil
 }
 
-func userBuilder(client *servicenow.Client) *userResourceType {
+func userBuilder(client *servicenow.Client, userFilters []string) *userResourceType {
 	return &userResourceType{
 		resourceType: resourceTypeUser,
 		client:       client,
+		userFilters:  userFilters,
 	}
 }
 

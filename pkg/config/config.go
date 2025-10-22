@@ -24,6 +24,11 @@ var (
 	categoryField = field.StringField("category-id",
 		field.WithDisplayName("Category ID"),
 		field.WithDescription("ServiceNow category id to filter catalog items to"))
+	allowedDomainsField = field.StringSliceField("allowed-domains",
+		field.WithDisplayName("Allowed email domains"),
+		field.WithDescription("Limit syncing to users whose email ends with one of the specified domains"),
+		field.WithDefaultValue([]string{}),
+	)
 	externalTicketField = field.TicketingField.ExportAs(field.ExportTargetGUI)
 )
 
@@ -34,6 +39,7 @@ var configurationFields = []field.SchemaField{
 	deploymentField,
 	catalogField,
 	categoryField,
+	allowedDomainsField,
 	externalTicketField,
 }
 
