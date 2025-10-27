@@ -115,6 +115,7 @@ type Client struct {
 	deployment          string
 	baseURL             string
 	TicketSchemaFilters map[string]string
+	AllowedDomains      []string
 }
 
 // Official documentation.
@@ -122,7 +123,7 @@ type Client struct {
 // https://www.servicenow.com/docs/bundle/yokohama-api-reference/page/integrate/inbound-rest/concept/c_TableAPI.html .
 // https://developer.servicenow.com/dev.do#!/reference/api/yokohama/rest/c_TableAPI?navFilter=table .
 
-func NewClient(httpClient *http.Client, auth string, deployment string, ticketSchemaFilters map[string]string) (*Client, error) {
+func NewClient(httpClient *http.Client, auth string, deployment string, ticketSchemaFilters map[string]string, allowedDomains []string) (*Client, error) {
 	baseURL, err := GenerateURL(InstanceURLTemplate, map[string]string{"Deployment": deployment})
 	if err != nil {
 		return nil, err
@@ -133,6 +134,7 @@ func NewClient(httpClient *http.Client, auth string, deployment string, ticketSc
 		deployment:          deployment,
 		baseURL:             baseURL,
 		TicketSchemaFilters: ticketSchemaFilters,
+		AllowedDomains:      allowedDomains,
 	}, nil
 }
 
@@ -141,10 +143,10 @@ func (c *Client) GetBaseURL() string {
 }
 
 // Table `sys_user` (Users).
-func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, userIDs []string, filters []string) ([]User, string, error) {
+func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars, userIDs []string) ([]User, string, error) {
 	var usersResponse UsersResponse
 
-	reqOpts := filterToReqOptions(prepareUserFilters(userIDs, filters))
+	reqOpts := filterToReqOptions(prepareUserFilters(userIDs, c.AllowedDomains))
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 
 	nextPage, err := c.get(
