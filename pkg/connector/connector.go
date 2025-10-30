@@ -110,7 +110,7 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 		Limit: 1,
 	}
 
-	_, _, err := s.client.GetUsers(ctx, pagination, nil)
+	_, _, err := s.client.GetUsers(ctx, pagination)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list users: %w", err)
 	}

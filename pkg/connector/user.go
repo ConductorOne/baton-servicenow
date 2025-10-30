@@ -76,7 +76,6 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 			Limit:  ResourcesPageSize,
 			Offset: offset,
 		},
-		nil,
 	)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list users: %w", err)

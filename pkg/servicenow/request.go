@@ -88,12 +88,8 @@ type FilterVars struct {
 	UserId string
 }
 
-func prepareUserFilters(ids []string, domains []string) *FilterVars {
+func prepareUserFilters(domains []string) *FilterVars {
 	var queries []string
-
-	if ids != nil {
-		queries = append(queries, queryMultipleIDs(ids))
-	}
 
 	for _, domain := range domains {
 		d := strings.TrimSpace(strings.ToLower(domain))
