@@ -1,6 +1,12 @@
 {
   "fields": [
     {
+      "name": "allowed-domains",
+      "displayName": "Allowed email domains",
+      "description": "Limit syncing to users whose email ends with one of the specified domains",
+      "stringSliceField": {}
+    },
+    {
       "name": "catalog-id",
       "displayName": "Catalog ID",
       "description": "ServiceNow catalog id to filter catalog items to",
