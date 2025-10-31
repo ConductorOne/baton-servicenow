@@ -110,7 +110,7 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 		Limit: 1,
 	}
 
-	_, _, err := s.client.GetUsers(ctx, pagination, nil)
+	_, _, err := s.client.GetUsers(ctx, pagination)
 	if err != nil {
 		return nil, fmt.Errorf("servicenow-connector: current user is not able to list users: %w", err)
 	}
@@ -119,13 +119,13 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 }
 
 // New returns the ServiceNow connector.
-func New(ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string) (*ServiceNow, error) {
+func New(ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string, allowedDomains []string) (*ServiceNow, error) {
 	httpClient, err := uhttp.NewClient(ctx, uhttp.WithLogger(true, ctxzap.Extract(ctx)))
 	if err != nil {
 		return nil, err
 	}
 
-	servicenowClient, err := servicenow.NewClient(httpClient, auth, deployment, ticketSchemaFilters)
+	servicenowClient, err := servicenow.NewClient(httpClient, auth, deployment, ticketSchemaFilters, allowedDomains)
 	if err != nil {
 		return nil, err
 	}

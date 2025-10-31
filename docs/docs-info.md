@@ -15,6 +15,21 @@ While developing the connector, please fill out this form. This information is n
     What you can do is: Create a user, add a user to a group, add roles to a user, revoke user from a group,
     revoke user's roles, also you can't revoke roles that are heritated.
 
+3. **New filtering feature:**
+
+   - The connector now supports filtering which users are synced based on email domain.
+   - Configuration field: `allowed-domains` (string slice)
+   - If you specify one or more domains, only users whose `email` ends with **any** of those domains will be imported.
+   - Example YAML snippet:
+
+     ```yaml
+     allowed-domains:
+       - acme.com
+       - contractors.acme.com
+     ```
+
+   - Leaving the list empty (default) means **no domain filtering**—all users are synced.
+
 ## Connector credentials 
 
 1. What credentials or information are needed to set up the connector? (For example, API key, client ID and secret, domain, etc.)
