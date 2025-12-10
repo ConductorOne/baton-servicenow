@@ -1,35 +1,6 @@
 {
   "fields": [
     {
-      "name": "allowed-domains",
-      "displayName": "Allowed email domains",
-      "description": "Limit syncing to users whose email ends with one of the specified domains",
-      "stringSliceField": {}
-    },
-    {
-      "name": "catalog-id",
-      "displayName": "Catalog ID",
-      "description": "ServiceNow catalog id to filter catalog items to",
-      "stringField": {}
-    },
-    {
-      "name": "category-id",
-      "displayName": "Category ID",
-      "description": "ServiceNow category id to filter catalog items to",
-      "stringField": {}
-    },
-    {
-      "name": "deployment",
-      "displayName": "Deployment",
-      "description": "ServiceNow deployment to connect to.",
-      "isRequired": true,
-      "stringField": {
-        "rules": {
-          "isRequired": true
-        }
-      }
-    },
-    {
       "name": "log-level",
       "description": "The log level: debug, info, warn, error",
       "isOps": true,
@@ -44,14 +15,16 @@
       "stringField": {}
     },
     {
-      "name": "otel-collector-endpoint",
-      "description": "The endpoint of the OpenTelemetry collector to send observability data to (used for both tracing and logging if specific endpoints are not provided)",
+      "name": "session-store-maximum-size",
+      "description": "The maximum size of the local in-memory session store cache in bytes.",
       "isOps": true,
-      "stringField": {}
+      "intField": {
+        "defaultValue": "15728640"
+      }
     },
     {
-      "name": "otel-collector-endpoint-tls-cert",
-      "description": "A PEM-encoded certificate to use as a CA for TLS connections to the OpenTelemetry collector",
+      "name": "otel-collector-endpoint",
+      "description": "The endpoint of the OpenTelemetry collector to send observability data to (used for both tracing and logging if specific endpoints are not provided)",
       "isOps": true,
       "stringField": {}
     },
@@ -62,8 +35,20 @@
       "stringField": {}
     },
     {
+      "name": "otel-collector-endpoint-tls-cert",
+      "description": "A PEM-encoded certificate to use as a CA for TLS connections to the OpenTelemetry collector",
+      "isOps": true,
+      "stringField": {}
+    },
+    {
       "name": "otel-collector-endpoint-tls-insecure",
       "description": "Allow insecure connections to the OpenTelemetry collector",
+      "isOps": true,
+      "boolField": {}
+    },
+    {
+      "name": "otel-tracing-disabled",
+      "description": "Disable OpenTelemetry tracing",
       "isOps": true,
       "boolField": {}
     },
@@ -74,10 +59,15 @@
       "boolField": {}
     },
     {
-      "name": "otel-tracing-disabled",
-      "description": "Disable OpenTelemetry tracing",
-      "isOps": true,
-      "boolField": {}
+      "name": "username",
+      "displayName": "Username",
+      "description": "Username of administrator used to connect to the ServiceNow API.",
+      "isRequired": true,
+      "stringField": {
+        "rules": {
+          "isRequired": true
+        }
+      }
     },
     {
       "name": "password",
@@ -92,21 +82,39 @@
       }
     },
     {
-      "name": "ticketing",
-      "displayName": "Enable external ticket provisioning",
-      "description": "This must be set to enable ticketing support",
-      "boolField": {}
-    },
-    {
-      "name": "username",
-      "displayName": "Username",
-      "description": "Username of administrator used to connect to the ServiceNow API.",
+      "name": "deployment",
+      "displayName": "Deployment",
+      "description": "ServiceNow deployment to connect to.",
       "isRequired": true,
       "stringField": {
         "rules": {
           "isRequired": true
         }
       }
+    },
+    {
+      "name": "catalog-id",
+      "displayName": "Catalog ID",
+      "description": "ServiceNow catalog id to filter catalog items to",
+      "stringField": {}
+    },
+    {
+      "name": "category-id",
+      "displayName": "Category ID",
+      "description": "ServiceNow category id to filter catalog items to",
+      "stringField": {}
+    },
+    {
+      "name": "allowed-domains",
+      "displayName": "Allowed email domains",
+      "description": "Limit syncing to users whose email ends with one of the specified domains",
+      "stringSliceField": {}
+    },
+    {
+      "name": "ticketing",
+      "displayName": "Enable external ticket provisioning",
+      "description": "This must be set to enable ticketing support",
+      "boolField": {}
     }
   ],
   "constraints": [
