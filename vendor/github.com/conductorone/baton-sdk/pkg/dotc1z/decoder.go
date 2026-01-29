@@ -107,6 +107,7 @@ func WithDecoderMaxDecodedSize(n uint64) DecoderOption {
 // WithDecoderConcurrency sets the number of created decoders.
 // Default is 1, which disables async decoding/concurrency.
 // 0 uses GOMAXPROCS.
+// -1 uses GOMAXPROCS or 4, whichever is lower.
 func WithDecoderConcurrency(n int) DecoderOption {
 	return func(o *decoderOptions) error {
 		o.decoderConcurrency = n
@@ -185,7 +186,7 @@ func (d *decoder) Read(p []byte) (int, error) {
 
 	// Do underlying read
 	n, err := d.zd.Read(p)
-
+	//nolint:gosec // No risk of overflow/underflow because n is always >= 0.
 	d.decodedBytes += uint64(n)
 	if err != nil {
 		// NOTE(morgabra) This happens if you set a small DecoderMaxMemory

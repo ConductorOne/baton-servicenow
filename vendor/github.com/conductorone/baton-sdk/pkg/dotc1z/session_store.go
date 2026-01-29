@@ -17,10 +17,6 @@ type SessionStore interface {
 
 var _ sessions.SessionStore = (*C1File)(nil)
 
-// The default gRPC message size limit is 4MB (we subtract 30KB for general overhead, which is overkill).
-// Unfortunately, this layer has to be aware of the size limit to avoid exceeding the size limit
-// because the client does not know the size of the items it requests.
-const sessionStoreSizeLimit = 4163584
 const sessionStoreTableVersion = "1"
 const sessionStoreTableName = "connector_sessions"
 const sessionStoreTableSchema = `
@@ -220,7 +216,8 @@ func (c *C1File) Clear(ctx context.Context, opt ...sessions.SessionStoreOption) 
 	q = q.Where(goqu.C("sync_id").Eq(bag.SyncID))
 
 	if bag.Prefix != "" {
-		q = q.Where(goqu.C("key").Like(escapeLike(bag.Prefix) + "%"))
+		pattern := escapeLike(bag.Prefix) + "%"
+		q = q.Where(goqu.L("key LIKE ? ESCAPE '\\'", pattern))
 	}
 
 	sql, params, err := q.ToSQL()
@@ -308,7 +305,7 @@ func (c *C1File) GetMany(ctx context.Context, keys []string, opt ...sessions.Ses
 		key := r.key
 
 		netItemSize := len(value) + 10 // 10 is extra padding for overhead.
-		if messageSize+netItemSize <= sessionStoreSizeLimit {
+		if messageSize+netItemSize <= sessions.MaxSessionStoreSizeLimit {
 			messageSize += netItemSize
 			ret[key] = value
 		} else {
@@ -331,7 +328,7 @@ func (c *C1File) GetAll(ctx context.Context, pageToken string, opt ...sessions.S
 	}
 
 	result := make(map[string][]byte)
-	messageSizeRemaining := sessionStoreSizeLimit
+	messageSizeRemaining := sessions.MaxSessionStoreSizeLimit
 	for {
 		items, nextPageToken, itemsSize, err := c.getAllChunk(ctx, pageToken, messageSizeRemaining, bag)
 		if err != nil {
@@ -370,7 +367,8 @@ func (c *C1File) getAllChunk(ctx context.Context, pageToken string, sizeLimit in
 		Limit(100)
 
 	if bag.Prefix != "" {
-		q = q.Where(goqu.C("key").Like(escapeLike(bag.Prefix) + "%"))
+		pattern := escapeLike(bag.Prefix) + "%"
+		q = q.Where(goqu.L("key LIKE ? ESCAPE '\\'", pattern))
 	}
 
 	if pageToken != "" {
