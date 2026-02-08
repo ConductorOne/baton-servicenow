@@ -29,6 +29,10 @@ var (
 		field.WithDescription("Limit syncing to users whose email ends with one of the specified domains"),
 		field.WithDefaultValue([]string{}),
 	)
+	baseURLField = field.StringField("base-url",
+		field.WithDisplayName("Base URL"),
+		field.WithDescription("Override the ServiceNow API URL (for testing)"),
+	)
 	externalTicketField = field.TicketingField.ExportAs(field.ExportTargetGUI)
 )
 
@@ -40,6 +44,7 @@ var configurationFields = []field.SchemaField{
 	catalogField,
 	categoryField,
 	allowedDomainsField,
+	baseURLField,
 	externalTicketField,
 }
 
