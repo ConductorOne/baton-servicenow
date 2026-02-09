@@ -49,6 +49,9 @@ func (u *User) UnmarshalJSON(data []byte) error {
 	u.CustomFields = make(map[string]string)
 	for k, v := range raw {
 		if strings.HasPrefix(k, "u_") {
+			if string(v) == "null" {
+				continue
+			}
 			var s string
 			if json.Unmarshal(v, &s) == nil {
 				u.CustomFields[k] = s
