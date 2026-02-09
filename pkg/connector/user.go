@@ -32,6 +32,10 @@ func userResource(user *servicenow.User) (*v2.Resource, error) {
 		"active":     user.Active,
 	}
 
+	for k, v := range user.CustomFields {
+		profile[k] = v
+	}
+
 	// Map ServiceNow active status to Baton user status
 	var userStatus v2.UserTrait_Status_Status
 	switch user.Active {

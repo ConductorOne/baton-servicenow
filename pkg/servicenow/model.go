@@ -2,6 +2,8 @@ package servicenow
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -19,12 +21,42 @@ type BaseResource struct {
 
 type User struct {
 	BaseResource
-	Email     string `json:"email"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
-	UserName  string `json:"user_name"`
-	Roles     string `json:"roles"`
-	Active    string `json:"active"`
+	Email        string            `json:"email"`
+	FirstName    string            `json:"first_name"`
+	LastName     string            `json:"last_name"`
+	UserName     string            `json:"user_name"`
+	Roles        string            `json:"roles"`
+	Active       string            `json:"active"`
+	CustomFields map[string]string `json:"-"`
+}
+
+func (u *User) UnmarshalJSON(data []byte) error {
+	type Alias User
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(u),
+	}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	u.CustomFields = make(map[string]string)
+	for k, v := range raw {
+		if strings.HasPrefix(k, "u_") {
+			var s string
+			if json.Unmarshal(v, &s) == nil {
+				u.CustomFields[k] = s
+			}
+		}
+	}
+
+	return nil
 }
 
 type Role struct {

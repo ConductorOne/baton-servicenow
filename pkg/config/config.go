@@ -29,6 +29,11 @@ var (
 		field.WithDescription("Limit syncing to users whose email ends with one of the specified domains"),
 		field.WithDefaultValue([]string{}),
 	)
+	customUserFieldsField = field.StringSliceField("custom-user-fields",
+		field.WithDisplayName("Custom user fields"),
+		field.WithDescription("Additional custom user fields to sync (must start with u_ prefix, e.g., u_type, u_department)"),
+		field.WithDefaultValue([]string{}),
+	)
 	externalTicketField = field.TicketingField.ExportAs(field.ExportTargetGUI)
 )
 
@@ -40,6 +45,7 @@ var configurationFields = []field.SchemaField{
 	catalogField,
 	categoryField,
 	allowedDomainsField,
+	customUserFieldsField,
 	externalTicketField,
 }
 

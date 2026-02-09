@@ -62,7 +62,7 @@ func getConnector(ctx context.Context, snc *config.ServiceNow) (types.ConnectorS
 		ticketSchemaFilters["sysparm_category"] = categoryId
 	}
 
-	servicenowConnector, err := connector.New(ctx, auth, snc.Deployment, ticketSchemaFilters, snc.AllowedDomains)
+	servicenowConnector, err := connector.New(ctx, auth, snc.Deployment, ticketSchemaFilters, snc.AllowedDomains, snc.CustomUserFields)
 	if err != nil {
 		l.Error("error creating connector", zap.Error(err))
 		return nil, err
