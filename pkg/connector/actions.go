@@ -11,7 +11,6 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/actions"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -66,20 +65,16 @@ var disableUserAction = &v2.BatonActionSchema{
 	},
 }
 
-func (s *ServiceNow) RegisterActionManager(ctx context.Context) (connectorbuilder.CustomActionManager, error) {
-	actionManager := actions.NewActionManager(ctx)
-
-	err := actionManager.RegisterAction(ctx, enableUserAction.Name, enableUserAction, s.enableUser)
-	if err != nil {
-		return nil, err
+func (s *ServiceNow) GlobalActions(ctx context.Context, registry actions.ActionRegistry) error {
+	if err := registry.Register(ctx, enableUserAction, s.enableUser); err != nil {
+		return err
 	}
 
-	err = actionManager.RegisterAction(ctx, disableUserAction.Name, disableUserAction, s.disableUser)
-	if err != nil {
-		return nil, err
+	if err := registry.Register(ctx, disableUserAction, s.disableUser); err != nil {
+		return err
 	}
 
-	return actionManager, nil
+	return nil
 }
 
 func (s *ServiceNow) enableUser(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
