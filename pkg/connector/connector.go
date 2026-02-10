@@ -49,10 +49,6 @@ func (s *ServiceNow) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 	}
 }
 
-func (s *ServiceNow) Actions(ctx context.Context) (connectorbuilder.CustomActionManager, error) {
-	return s.RegisterActionManager(ctx)
-}
-
 func (s *ServiceNow) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error) {
 	return &v2.ConnectorMetadata{
 		DisplayName: "ServiceNow",
@@ -119,13 +115,13 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 }
 
 // New returns the ServiceNow connector.
-func New(ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string, allowedDomains []string) (*ServiceNow, error) {
+func New(ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string, allowedDomains []string, customUserFields []string) (*ServiceNow, error) {
 	httpClient, err := uhttp.NewClient(ctx, uhttp.WithLogger(true, ctxzap.Extract(ctx)))
 	if err != nil {
 		return nil, err
 	}
 
-	servicenowClient, err := servicenow.NewClient(httpClient, auth, deployment, ticketSchemaFilters, allowedDomains)
+	servicenowClient, err := servicenow.NewClient(httpClient, auth, deployment, ticketSchemaFilters, allowedDomains, customUserFields)
 	if err != nil {
 		return nil, err
 	}

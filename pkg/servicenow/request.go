@@ -88,7 +88,7 @@ type FilterVars struct {
 	UserId string
 }
 
-func prepareUserFilters(domains []string) *FilterVars {
+func prepareUserFilters(domains []string, customFields []string) *FilterVars {
 	var queries []string
 
 	for _, domain := range domains {
@@ -100,8 +100,15 @@ func prepareUserFilters(domains []string) *FilterVars {
 
 	combined := strings.Join(queries, "^OR")
 
+	fields := UserFields
+	for _, f := range customFields {
+		if strings.HasPrefix(f, "u_") {
+			fields = append(fields, f)
+		}
+	}
+
 	return &FilterVars{
-		Fields: UserFields,
+		Fields: fields,
 		Query:  combined,
 	}
 }

@@ -133,6 +133,12 @@
       "stringSliceField": {}
     },
     {
+      "name": "custom-user-fields",
+      "displayName": "Custom user fields",
+      "description": "Additional custom user fields to sync (must start with u_ prefix, e.g., u_type, u_department)",
+      "stringSliceField": {}
+    },
+    {
       "name": "ticketing",
       "displayName": "Enable external ticket provisioning",
       "description": "This must be set to enable ticketing support",

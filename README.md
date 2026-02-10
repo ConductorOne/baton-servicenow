@@ -64,6 +64,22 @@ baton resources
 - Groups
 - Roles
 
+## Custom User Fields
+
+The connector supports syncing custom user attributes from ServiceNow. ServiceNow custom fields use the `u_` prefix (e.g., `u_type`, `u_department`). To include these fields in synced user profiles, use the `--custom-user-fields` flag or the `BATON_CUSTOM_USER_FIELDS` environment variable:
+
+```
+BATON_CUSTOM_USER_FIELDS=u_type,u_department baton-servicenow --username username --password password --deployment deployment
+```
+
+or
+
+```
+baton-servicenow --custom-user-fields u_type --custom-user-fields u_department --username username --password password --deployment deployment
+```
+
+Custom field values will appear in the user profile with their original `u_` prefixed names. Note that the service account used by the connector must have read access to any custom fields configured here (see [Prerequisites](#prerequisites)).
+
 # Contributing, Support and Issues
 
 We started Baton because we were tired of taking screenshots and manually building spreadsheets. We welcome contributions, and ideas, no matter how small -- our goal is to make identity and permissions sprawl less painful for everyone. If you have questions, problems, or ideas: Please open a Github Issue!
@@ -85,21 +101,23 @@ Available Commands:
   help               Help about any command
 
 Flags:
-      --catalog-id string      ServiceNow catalog id to filter catalog items to ($BATON_CATALOG_ID)
-      --category-id string     ServiceNow category id to filter catalog items to ($BATON_CATEGORY_ID)
-      --client-id string       The client ID used to authenticate with ConductorOne ($BATON_CLIENT_ID)
-      --client-secret string   The client secret used to authenticate with ConductorOne ($BATON_CLIENT_SECRET)
-      --deployment string      required: ServiceNow deployment to connect to. ($BATON_DEPLOYMENT)
-  -f, --file string            The path to the c1z file to sync with ($BATON_FILE) (default "sync.c1z")
-  -h, --help                   help for baton-servicenow
-      --log-format string      The output format for logs: json, console ($BATON_LOG_FORMAT) (default "json")
-      --log-level string       The log level: debug, info, warn, error ($BATON_LOG_LEVEL) (default "info")
-      --password string        required: Application password used to connect to the ServiceNow API. ($BATON_PASSWORD)
-  -p, --provisioning           This must be set in order for provisioning actions to be enabled ($BATON_PROVISIONING)
-      --skip-full-sync         This must be set to skip a full sync ($BATON_SKIP_FULL_SYNC)
-      --ticketing              This must be set to enable ticketing support ($BATON_TICKETING)
-      --username string        required: Username of administrator used to connect to the ServiceNow API. ($BATON_USERNAME)
-  -v, --version                version for baton-servicenow
+      --allowed-domains strings          Limit syncing to users whose email ends with one of the specified domains ($BATON_ALLOWED_DOMAINS)
+      --catalog-id string                ServiceNow catalog id to filter catalog items to ($BATON_CATALOG_ID)
+      --category-id string               ServiceNow category id to filter catalog items to ($BATON_CATEGORY_ID)
+      --client-id string                 The client ID used to authenticate with ConductorOne ($BATON_CLIENT_ID)
+      --client-secret string             The client secret used to authenticate with ConductorOne ($BATON_CLIENT_SECRET)
+      --custom-user-fields strings       Additional custom user fields to sync, must start with u_ prefix ($BATON_CUSTOM_USER_FIELDS)
+      --deployment string                required: ServiceNow deployment to connect to. ($BATON_DEPLOYMENT)
+  -f, --file string                      The path to the c1z file to sync with ($BATON_FILE) (default "sync.c1z")
+  -h, --help                             help for baton-servicenow
+      --log-format string                The output format for logs: json, console ($BATON_LOG_FORMAT) (default "json")
+      --log-level string                 The log level: debug, info, warn, error ($BATON_LOG_LEVEL) (default "info")
+      --password string                  required: Application password used to connect to the ServiceNow API. ($BATON_PASSWORD)
+  -p, --provisioning                     This must be set in order for provisioning actions to be enabled ($BATON_PROVISIONING)
+      --skip-full-sync                   This must be set to skip a full sync ($BATON_SKIP_FULL_SYNC)
+      --ticketing                        This must be set to enable ticketing support ($BATON_TICKETING)
+      --username string                  required: Username of administrator used to connect to the ServiceNow API. ($BATON_USERNAME)
+  -v, --version                          version for baton-servicenow
 
 Use "baton-servicenow [command] --help" for more information about a command.
 ```
