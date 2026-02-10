@@ -1,6 +1,6 @@
 ![Baton Logo](./docs/images/baton-logo.png)
 
-# `baton-servicenow` [![Go Reference](https://pkg.go.dev/badge/github.com/conductorone/baton-servicenow.svg)](https://pkg.go.dev/github.com/conductorone/baton-servicenow) ![main ci](https://github.com/conductorone/baton-servicenow/actions/workflows/main.yaml/badge.svg)
+# `baton-servicenow` [![Go Reference](https://pkg.go.dev/badge/github.com/conductorone/baton-servicenow.svg)](https://pkg.go.dev/github.com/conductorone/baton-servicenow) ![verify](https://github.com/conductorone/baton-servicenow/actions/workflows/verify.yaml/badge.svg)
 
 `baton-servicenow` is a connector for ServiceNow built using the [Baton SDK](https://github.com/conductorone/baton-sdk). It works with the ServiceNow Table API to sync data about users, groups and roles.
 
@@ -10,7 +10,7 @@ Check out [Baton](https://github.com/conductorone/baton) to learn more about the
 
 To work with the connector, you have to have a running instance of ServiceNow. You can request a free developer instance [here](https://developer.servicenow.com/dev.do).
 
-You can then use credentials to log in as credentials for communicating with API (username and password). 
+You can then use credentials to log in as credentials for communicating with API (username and password).
 
 Along with this, user represented by the credentials has to have either `admin` role or ACL (Access control list) set up for relevant tables to be able to read and modify tables in Table API.
 
@@ -26,7 +26,7 @@ By default, user without any roles have only restricted access to tables with us
 
 # Getting Started
 
-Along with credentials, you have to provide also ID of the deployment you are using (under environment variable `BATON_DEPLOYMENT` or CLI flag `--deployment`). 
+Along with credentials, you have to provide also ID of the deployment you are using (under environment variable `BATON_DEPLOYMENT` or CLI flag `--deployment`).
 
 You can find it in the URL of your ServiceNow instance. For example, if your URL is `https://dev12345.service-now.com/`, your deployment ID is `dev12345`.
 
