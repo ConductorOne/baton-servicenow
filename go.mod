@@ -6,7 +6,7 @@ require (
 	github.com/conductorone/baton-sdk v0.7.16
 	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
-	github.com/quasilyte/go-ruleguard/dsl v0.3.22
+	github.com/quasilyte/go-ruleguard/dsl v0.3.23
 	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.1
