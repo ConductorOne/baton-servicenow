@@ -32,6 +32,7 @@ var (
 	baseURLField = field.StringField("base-url",
 		field.WithDisplayName("Base URL"),
 		field.WithDescription("Override the ServiceNow API URL (for testing)"),
+		field.WithHidden(true),
 	)
 	externalTicketField = field.TicketingField.ExportAs(field.ExportTargetGUI)
 )
