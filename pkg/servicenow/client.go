@@ -424,7 +424,36 @@ func (c *Client) delete(
 	return err
 }
 
-func (c *Client) doRequest(ctx context.Context, urlAddress string, method string, data interface{}, resourceResponse interface{}, reqOptions ...ReqOpt) (string, error) {
+func handleStatusCode(statusCode int) codes.Code {
+	switch statusCode {
+	case http.StatusRequestTimeout:
+		return codes.DeadlineExceeded
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return codes.Unavailable
+	case http.StatusNotFound:
+		return codes.NotFound
+	case http.StatusUnauthorized:
+		return codes.Unauthenticated
+	case http.StatusForbidden:
+		return codes.PermissionDenied
+	case http.StatusConflict:
+		return codes.AlreadyExists
+	case http.StatusNotImplemented:
+		return codes.Unimplemented
+	}
+
+	if statusCode >= 500 && statusCode <= 599 {
+		return codes.Unavailable
+	}
+
+	if statusCode < 200 || statusCode >= 300 {
+		return codes.Unknown
+	}
+
+	return codes.OK
+}
+
+func (c *Client) doRequest(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) (string, error) {
 	var body io.Reader
 
 	if data != nil {
@@ -457,18 +486,20 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 
 	req.URL.RawQuery = req.URL.Query().Encode()
 
-	rawResponse, err := c.httpClient.Do(req)
+	rawResponse, err := c.httpClient.Do(req) //nolint:gosec // G704 false positive: URL is built from hardcoded API path templates and trusted deployment config
+	if rawResponse != nil && rawResponse.Body != nil {
+		defer rawResponse.Body.Close()
+	}
 	if err != nil {
 		return "", err
 	}
-	defer rawResponse.Body.Close()
 
 	if rawResponse.StatusCode < 0 || rawResponse.StatusCode > math.MaxUint32 {
 		return "", errors.New("status code is out of range for uint32")
 	}
 
 	if rawResponse.StatusCode >= 300 {
-		return "", status.Error(codes.Code(uint32(rawResponse.StatusCode)), "Request failed")
+		return "", status.Errorf(handleStatusCode(rawResponse.StatusCode), "request failed: status code %d", rawResponse.StatusCode)
 	}
 
 	if method != http.MethodDelete {
