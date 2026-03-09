@@ -124,7 +124,15 @@ type Client struct {
 // https://www.servicenow.com/docs/bundle/yokohama-api-reference/page/integrate/inbound-rest/concept/c_TableAPI.html .
 // https://developer.servicenow.com/dev.do#!/reference/api/yokohama/rest/c_TableAPI?navFilter=table .
 
-func NewClient(httpClient *http.Client, auth string, deployment string, ticketSchemaFilters map[string]string, allowedDomains []string, customUserFields []string, baseURLOverride string) (*Client, error) {
+func NewClient(
+	httpClient *http.Client,
+	auth string,
+	deployment string,
+	ticketSchemaFilters map[string]string,
+	allowedDomains []string,
+	customUserFields []string,
+	baseURLOverride string,
+) (*Client, error) {
 	var baseURL string
 	if baseURLOverride != "" {
 		baseURL = baseURLOverride
