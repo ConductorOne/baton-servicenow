@@ -115,13 +115,13 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 }
 
 // New returns the ServiceNow connector.
-func New(ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string, allowedDomains []string, customUserFields []string) (*ServiceNow, error) {
+func New(ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string, allowedDomains []string, customUserFields []string, baseURL string) (*ServiceNow, error) {
 	httpClient, err := uhttp.NewClient(ctx, uhttp.WithLogger(true, ctxzap.Extract(ctx)))
 	if err != nil {
 		return nil, err
 	}
 
-	servicenowClient, err := servicenow.NewClient(httpClient, auth, deployment, ticketSchemaFilters, allowedDomains, customUserFields)
+	servicenowClient, err := servicenow.NewClient(httpClient, auth, deployment, ticketSchemaFilters, allowedDomains, customUserFields, baseURL)
 	if err != nil {
 		return nil, err
 	}

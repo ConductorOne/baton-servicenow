@@ -12,6 +12,7 @@ type ServiceNow struct {
 	AllowedDomains []string `mapstructure:"allowed-domains"`
 	CustomUserFields []string `mapstructure:"custom-user-fields"`
 	Ticketing bool `mapstructure:"ticketing"`
+	BaseUrl string `mapstructure:"base-url"`
 }
 
 func (c *ServiceNow) findFieldByTag(tagValue string) (any, bool) {
