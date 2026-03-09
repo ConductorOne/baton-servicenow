@@ -492,7 +492,7 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 
 	req.URL.RawQuery = req.URL.Query().Encode()
 
-	rawResponse, err := c.httpClient.Do(req) //nolint:gosec // G704 false positive: URL is built from hardcoded API path templates and trusted deployment config
+	rawResponse, err := c.httpClient.Do(req)
 	if rawResponse != nil && rawResponse.Body != nil {
 		defer rawResponse.Body.Close()
 	}
