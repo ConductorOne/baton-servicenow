@@ -114,6 +114,7 @@ type Client struct {
 	auth                string
 	deployment          string
 	baseURL             string
+	baseURLOverride     bool
 	TicketSchemaFilters map[string]string
 	AllowedDomains      []string
 	CustomUserFields    []string
@@ -148,6 +149,7 @@ func NewClient(
 		auth:                auth,
 		deployment:          deployment,
 		baseURL:             baseURL,
+		baseURLOverride:     baseURLOverride != "",
 		TicketSchemaFilters: ticketSchemaFilters,
 		AllowedDomains:      allowedDomains,
 		CustomUserFields:    customUserFields,
@@ -162,11 +164,9 @@ func (c *Client) GetBaseURL() string {
 // When a base URL override is set, it replaces the default
 // https://DEPLOYMENT.service-now.com/api prefix with the override.
 func (c *Client) apiURL(pattern string, args ...any) string {
-	// Always insert deployment (and optional ID) into the pattern
 	expanded := fmt.Sprintf(pattern, args...)
-	// If we have an override, replace the default base with it
-	defaultBase := fmt.Sprintf("https://%s.service-now.com/api", c.deployment)
-	if c.baseURL != "" && c.baseURL != defaultBase {
+	if c.baseURLOverride {
+		defaultBase := fmt.Sprintf("https://%s.service-now.com/api", c.deployment)
 		return strings.Replace(expanded, defaultBase, c.baseURL, 1)
 	}
 	return expanded
