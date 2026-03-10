@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -115,8 +116,12 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 }
 
 // New returns the ServiceNow connector.
-func New(ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string, allowedDomains []string, customUserFields []string, baseURL string) (*ServiceNow, error) {
-	httpClient, err := uhttp.NewClient(ctx, uhttp.WithLogger(true, ctxzap.Extract(ctx)))
+func New(ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string, allowedDomains []string, customUserFields []string, baseURL string, insecure bool) (*ServiceNow, error) {
+	uhttpOpts := []uhttp.Option{uhttp.WithLogger(true, ctxzap.Extract(ctx))}
+	if insecure {
+		uhttpOpts = append(uhttpOpts, uhttp.WithTLSClientConfig(&tls.Config{InsecureSkipVerify: true})) //nolint:gosec // G402: intentional for testing with self-signed certs
+	}
+	httpClient, err := uhttp.NewClient(ctx, uhttpOpts...)
 	if err != nil {
 		return nil, err
 	}
