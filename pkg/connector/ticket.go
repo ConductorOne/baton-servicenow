@@ -21,6 +21,8 @@ import (
 )
 
 func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token) ([]*v2.TicketSchema, string, annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
 	offset, err := convertPageToken(pt.Token)
 	if err != nil {
 		return nil, "", nil, err
@@ -38,6 +40,13 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to get catalog items: %w", err)
 	}
+
+	l.Debug("listing ticket schemas",
+		zap.Int("catalog_items", len(catalogItems)),
+		zap.Int("page_size", pageSize),
+		zap.Int("offset", offset),
+		zap.String("next_page_token", nextPageToken),
+	)
 
 	requestedItemStates, err := s.client.GetServiceCatalogRequestedItemStates(ctx)
 	if err != nil {
