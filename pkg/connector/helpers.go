@@ -8,6 +8,7 @@ import (
 )
 
 var ResourcesPageSize = 50
+var TicketSchemasPageSize = 10
 
 func annotationsForUserResourceType() annotations.Annotations {
 	annos := annotations.Annotations{}

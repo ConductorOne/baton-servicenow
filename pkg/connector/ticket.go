@@ -25,9 +25,13 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 	if err != nil {
 		return nil, "", nil, err
 	}
+	pageSize := pt.Size
+	if pageSize == 0 {
+		pageSize = TicketSchemasPageSize
+	}
 	catalogItems, nextPageToken, err := s.client.GetCatalogItems(ctx,
 		&servicenow.PaginationVars{
-			Limit:  pt.Size,
+			Limit:  pageSize,
 			Offset: offset,
 		},
 	)
