@@ -27,8 +27,11 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 	if err != nil {
 		return nil, "", nil, err
 	}
+	// Cap page size to avoid Lambda timeouts. Each catalog item requires
+	// 3-4 HTTP roundtrips for variable sets, so large pages can exceed
+	// the execution time limit.
 	pageSize := pt.Size
-	if pageSize == 0 {
+	if pageSize > TicketSchemasPageSize {
 		pageSize = TicketSchemasPageSize
 	}
 	catalogItems, nextPageToken, err := s.client.GetCatalogItems(ctx,
