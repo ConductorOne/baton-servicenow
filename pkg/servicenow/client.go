@@ -114,6 +114,7 @@ type Client struct {
 	auth                string
 	deployment          string
 	baseURL             string
+	baseURLOverride     bool
 	TicketSchemaFilters map[string]string
 	AllowedDomains      []string
 	CustomUserFields    []string
@@ -124,16 +125,31 @@ type Client struct {
 // https://www.servicenow.com/docs/bundle/yokohama-api-reference/page/integrate/inbound-rest/concept/c_TableAPI.html .
 // https://developer.servicenow.com/dev.do#!/reference/api/yokohama/rest/c_TableAPI?navFilter=table .
 
-func NewClient(httpClient *http.Client, auth string, deployment string, ticketSchemaFilters map[string]string, allowedDomains []string, customUserFields []string) (*Client, error) {
-	baseURL, err := GenerateURL(InstanceURLTemplate, map[string]string{"Deployment": deployment})
-	if err != nil {
-		return nil, err
+func NewClient(
+	httpClient *http.Client,
+	auth string,
+	deployment string,
+	ticketSchemaFilters map[string]string,
+	allowedDomains []string,
+	customUserFields []string,
+	baseURLOverride string,
+) (*Client, error) {
+	var baseURL string
+	if baseURLOverride != "" {
+		baseURL = baseURLOverride
+	} else {
+		var err error
+		baseURL, err = GenerateURL(InstanceURLTemplate, map[string]string{"Deployment": deployment})
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &Client{
 		httpClient:          httpClient,
 		auth:                auth,
 		deployment:          deployment,
 		baseURL:             baseURL,
+		baseURLOverride:     baseURLOverride != "",
 		TicketSchemaFilters: ticketSchemaFilters,
 		AllowedDomains:      allowedDomains,
 		CustomUserFields:    customUserFields,
@@ -142,6 +158,18 @@ func NewClient(httpClient *http.Client, auth string, deployment string, ticketSc
 
 func (c *Client) GetBaseURL() string {
 	return c.baseURL
+}
+
+// apiURL builds an API URL from a constant pattern like UsersBaseUrl.
+// When a base URL override is set, it replaces the default
+// https://DEPLOYMENT.service-now.com/api prefix with the override.
+func (c *Client) apiURL(pattern string, args ...any) string {
+	expanded := fmt.Sprintf(pattern, args...)
+	if c.baseURLOverride {
+		defaultBase := fmt.Sprintf("https://%s.service-now.com/api", c.deployment)
+		return strings.Replace(expanded, defaultBase, c.baseURL, 1)
+	}
+	return expanded
 }
 
 // Table `sys_user` (Users).
@@ -153,7 +181,7 @@ func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars) ([
 
 	nextPage, err := c.get(
 		ctx,
-		fmt.Sprintf(UsersBaseUrl, c.deployment),
+		c.apiURL(UsersBaseUrl, c.deployment),
 		&usersResponse,
 		reqOpts...,
 	)
@@ -170,7 +198,7 @@ func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 
 	_, err := c.get(
 		ctx,
-		fmt.Sprintf(UserBaseUrl, c.deployment, userId),
+		c.apiURL(UserBaseUrl, c.deployment, userId),
 		&userResponse,
 		WithFields(UserFields...),
 	)
@@ -190,7 +218,7 @@ func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars, g
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 	nextPageToken, err := c.get(
 		ctx,
-		fmt.Sprintf(GroupsBaseUrl, c.deployment),
+		c.apiURL(GroupsBaseUrl, c.deployment),
 		&groupsResponse,
 		reqOpts...,
 	)
@@ -207,7 +235,7 @@ func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
 
 	_, err := c.get(
 		ctx,
-		fmt.Sprintf(GroupBaseUrl, c.deployment, groupId),
+		c.apiURL(GroupBaseUrl, c.deployment, groupId),
 		&groupResponse,
 		WithFields(GroupFields...),
 	)
@@ -228,7 +256,7 @@ func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId stri
 
 	nextPageToken, err := c.get(
 		ctx,
-		fmt.Sprintf(GroupMembersBaseUrl, c.deployment),
+		c.apiURL(GroupMembersBaseUrl, c.deployment),
 		&groupMembersResponse,
 		reqOpts...,
 	)
@@ -243,7 +271,7 @@ func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId stri
 func (c *Client) AddUserToGroup(ctx context.Context, record GroupMemberPayload) error {
 	return c.post(
 		ctx,
-		fmt.Sprintf(GroupMembersBaseUrl, c.deployment),
+		c.apiURL(GroupMembersBaseUrl, c.deployment),
 		nil,
 		&record,
 		WithIncludeResponseBody(),
@@ -253,7 +281,7 @@ func (c *Client) AddUserToGroup(ctx context.Context, record GroupMemberPayload) 
 func (c *Client) RemoveUserFromGroup(ctx context.Context, id string) error {
 	return c.delete(
 		ctx,
-		fmt.Sprintf(GroupMemberDetailBaseUrl, c.deployment, id),
+		c.apiURL(GroupMemberDetailBaseUrl, c.deployment, id),
 		nil,
 	)
 }
@@ -268,7 +296,7 @@ func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([
 
 	nextPageToken, err := c.get(
 		ctx,
-		fmt.Sprintf(RolesBaseUrl, c.deployment),
+		c.apiURL(RolesBaseUrl, c.deployment),
 		&rolesResponse,
 		reqOpts...,
 	)
@@ -289,7 +317,7 @@ func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string
 
 	nextPageToken, err := c.get(
 		ctx,
-		fmt.Sprintf(UserRolesBaseUrl, c.deployment),
+		c.apiURL(UserRolesBaseUrl, c.deployment),
 		&userToRoleResponse,
 		reqOpts...,
 	)
@@ -304,7 +332,7 @@ func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string
 func (c *Client) GrantRoleToUser(ctx context.Context, record UserToRolePayload) error {
 	return c.post(
 		ctx,
-		fmt.Sprintf(UserRolesBaseUrl, c.deployment),
+		c.apiURL(UserRolesBaseUrl, c.deployment),
 		nil,
 		&record,
 		WithIncludeResponseBody(),
@@ -314,7 +342,7 @@ func (c *Client) GrantRoleToUser(ctx context.Context, record UserToRolePayload) 
 func (c *Client) RevokeRoleFromUser(ctx context.Context, id string) error {
 	return c.delete(
 		ctx,
-		fmt.Sprintf(UserRoleDetailBaseUrl, c.deployment, id),
+		c.apiURL(UserRoleDetailBaseUrl, c.deployment, id),
 		nil,
 	)
 }
@@ -327,7 +355,7 @@ func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId stri
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 	nextPageToken, err := c.get(
 		ctx,
-		fmt.Sprintf(GroupRolesBaseUrl, c.deployment),
+		c.apiURL(GroupRolesBaseUrl, c.deployment),
 		&groupToRoleResponse,
 		reqOpts...,
 	)
@@ -342,7 +370,7 @@ func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId stri
 func (c *Client) GrantRoleToGroup(ctx context.Context, record GroupToRolePayload) error {
 	return c.post(
 		ctx,
-		fmt.Sprintf(GroupRolesBaseUrl, c.deployment),
+		c.apiURL(GroupRolesBaseUrl, c.deployment),
 		nil,
 		&record,
 		WithIncludeResponseBody(),
@@ -352,7 +380,7 @@ func (c *Client) GrantRoleToGroup(ctx context.Context, record GroupToRolePayload
 func (c *Client) RevokeRoleFromGroup(ctx context.Context, id string) error {
 	return c.delete(
 		ctx,
-		fmt.Sprintf(GroupRoleDetailBaseUrl, c.deployment, id),
+		c.apiURL(GroupRoleDetailBaseUrl, c.deployment, id),
 		nil,
 	)
 }
@@ -486,7 +514,7 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 
 	req.URL.RawQuery = req.URL.Query().Encode()
 
-	rawResponse, err := c.httpClient.Do(req) //nolint:gosec // G704 false positive: URL is built from hardcoded API path templates and trusted deployment config
+	rawResponse, err := c.httpClient.Do(req)
 	if rawResponse != nil && rawResponse.Body != nil {
 		defer rawResponse.Body.Close()
 	}
@@ -542,7 +570,7 @@ func (c *Client) CreateUserAccount(ctx context.Context, user any) (*User, error)
 
 	err := c.post(
 		ctx,
-		fmt.Sprintf(UsersBaseUrl, c.deployment),
+		c.apiURL(UsersBaseUrl, c.deployment),
 		&response,
 		user,
 		WithIncludeResponseBody(),
@@ -563,7 +591,7 @@ func (c *Client) UpdateUserActiveStatus(ctx context.Context, userId string, acti
 	var response UserResponse
 	err := c.patch(
 		ctx,
-		fmt.Sprintf(UserBaseUrl, c.deployment, userId),
+		c.apiURL(UserBaseUrl, c.deployment, userId),
 		&response,
 		payload,
 		WithIncludeResponseBody(),
@@ -648,7 +676,7 @@ func (c *Client) GetVariableSetLinksForItem(ctx context.Context, itemSysID strin
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, err := c.get(ctx, fmt.Sprintf(VariableSetM2MBaseUrl, c.deployment), &resp, req...)
+	next, err := c.get(ctx, c.apiURL(VariableSetM2MBaseUrl, c.deployment), &resp, req...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -667,7 +695,7 @@ func (c *Client) GetVariablesBySetIDs(ctx context.Context, setIDs []string, pg P
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, err := c.get(ctx, fmt.Sprintf(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
+	next, err := c.get(ctx, c.apiURL(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -686,7 +714,7 @@ func (c *Client) GetChoicesForVariables(ctx context.Context, varIDs []string, pg
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, err := c.get(ctx, fmt.Sprintf(QuestionChoiceBaseUrl, c.deployment), &resp, req...)
+	next, err := c.get(ctx, c.apiURL(QuestionChoiceBaseUrl, c.deployment), &resp, req...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -703,7 +731,7 @@ func (c *Client) GetVariablesForItem(ctx context.Context, itemSysID string, pg P
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, err := c.get(ctx, fmt.Sprintf(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
+	next, err := c.get(ctx, c.apiURL(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
 	if err != nil {
 		return nil, "", err
 	}

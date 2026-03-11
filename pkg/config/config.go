@@ -35,6 +35,17 @@ var (
 		field.WithDefaultValue([]string{}),
 	)
 	externalTicketField = field.TicketingField.ExportAs(field.ExportTargetGUI)
+	baseURLField = field.StringField("base-url",
+		field.WithDescription("Override the ServiceNow API URL (for testing)"),
+		field.WithHidden(true),
+		field.WithExportTarget(field.ExportTargetCLIOnly),
+	)
+	insecureField = field.BoolField("insecure",
+		field.WithDescription("Allow insecure TLS connections (for testing with self-signed certificates)"),
+		field.WithDefaultValue(false),
+		field.WithHidden(true),
+		field.WithExportTarget(field.ExportTargetCLIOnly),
+	)
 )
 
 // configurationFields defines the external configuration required for the connector to run.
@@ -47,6 +58,8 @@ var configurationFields = []field.SchemaField{
 	allowedDomainsField,
 	customUserFieldsField,
 	externalTicketField,
+	baseURLField,
+	insecureField,
 }
 
 var configRelations = []field.SchemaFieldRelationship{

@@ -23,7 +23,7 @@ func (c *Client) GetServiceCatalogRequest(ctx context.Context, requestId string)
 	var serviceCatalogRequestResponse ServiceCatalogRequestResponse
 	_, err := c.get(
 		ctx,
-		fmt.Sprintf(ServiceCatalogRequestDetailsBaseUrl, c.deployment, requestId),
+		c.apiURL(ServiceCatalogRequestDetailsBaseUrl, c.deployment, requestId),
 		&serviceCatalogRequestResponse,
 		WithIncludeExternalRefLink(),
 	)
@@ -37,7 +37,7 @@ func (c *Client) GetServiceCatalogRequestItem(ctx context.Context, requestItemId
 	var requestItemResponse RequestItemResponse
 	_, err := c.get(
 		ctx,
-		fmt.Sprintf(ServiceCatalogRequestedItemDetailsBaseUrl, c.deployment, requestItemId),
+		c.apiURL(ServiceCatalogRequestedItemDetailsBaseUrl, c.deployment, requestItemId),
 		&requestItemResponse,
 		WithIncludeExternalRefLink(),
 	)
@@ -66,7 +66,7 @@ func (c *Client) UpdateServiceCatalogRequestItem(ctx context.Context, requestIte
 	var requestItemResponse RequestItemResponse
 	err := c.patch(
 		ctx,
-		fmt.Sprintf(ServiceCatalogRequestedItemDetailsBaseUrl, c.deployment, requestItemId),
+		c.apiURL(ServiceCatalogRequestedItemDetailsBaseUrl, c.deployment, requestItemId),
 		&requestItemResponse,
 		&payload,
 		WithIncludeResponseBody(),
@@ -82,7 +82,7 @@ func (c *Client) GetServiceCatalogRequestItems(ctx context.Context, reqOptions .
 	var requestItemsResponse RequestItemsResponse
 	nextPageToken, err := c.get(
 		ctx,
-		fmt.Sprintf(ServiceCatalogRequestedItemBaseUrl, c.deployment),
+		c.apiURL(ServiceCatalogRequestedItemBaseUrl, c.deployment),
 		&requestItemsResponse,
 		reqOptions...,
 	)
@@ -103,7 +103,7 @@ func (c *Client) GetCatalogItems(ctx context.Context, paginationVars *Pagination
 	}
 	nextPageToken, err := c.get(
 		ctx,
-		fmt.Sprintf(ServiceCatalogItemBaseUrl, c.deployment),
+		c.apiURL(ServiceCatalogItemBaseUrl, c.deployment),
 		&catalogItemsResponse,
 		reqOpts...,
 	)
@@ -117,7 +117,7 @@ func (c *Client) GetCatalogItem(ctx context.Context, catalogItemId string) (*Cat
 	var catalogItemResponse CatalogItemResponse
 	_, err := c.get(
 		ctx,
-		fmt.Sprintf(ServiceCatalogItemGetUrl, c.deployment, catalogItemId),
+		c.apiURL(ServiceCatalogItemGetUrl, c.deployment, catalogItemId),
 		&catalogItemResponse,
 	)
 	if err != nil {
@@ -130,7 +130,7 @@ func (c *Client) GetCatalogItemVariables(ctx context.Context, catalogItemId stri
 	var catalogItemVariablesResponse CatalogItemVariablesResponse
 	_, err := c.get(
 		ctx,
-		fmt.Sprintf(ServiceCatalogItemVariablesUrl, c.deployment, catalogItemId),
+		c.apiURL(ServiceCatalogItemVariablesUrl, c.deployment, catalogItemId),
 		&catalogItemVariablesResponse,
 	)
 	if err != nil {
@@ -158,7 +158,7 @@ func (c *Client) OrderItemNow(ctx context.Context, catalogItemId string, payload
 	var orderCatalogItemResponse OrderCatalogItemResponse
 	err := c.post(
 		ctx,
-		fmt.Sprintf(ServiceCatalogOrderItemUrl, c.deployment, catalogItemId),
+		c.apiURL(ServiceCatalogOrderItemUrl, c.deployment, catalogItemId),
 		&orderCatalogItemResponse,
 		&payload,
 		WithIncludeResponseBody(),
@@ -191,7 +191,7 @@ func (c *Client) addLabelToRequestedItem(ctx context.Context, requestedItemId st
 	var labelEntryResponse IDResponse
 	err := c.post(
 		ctx,
-		fmt.Sprintf(LabelEntryBaseUrl, c.deployment),
+		c.apiURL(LabelEntryBaseUrl, c.deployment),
 		&labelEntryResponse,
 		&LabelEntryPayload{
 			Table:    "sc_req_item",
@@ -223,7 +223,7 @@ func (c *Client) GetLabel(ctx context.Context, label string) (*Label, error) {
 	var labelsResponse LabelsResponse
 	_, err := c.get(
 		ctx,
-		fmt.Sprintf(LabelBaseUrl, c.deployment),
+		c.apiURL(LabelBaseUrl, c.deployment),
 		&labelsResponse,
 		WithQuery(fmt.Sprintf("name=%s", label)),
 	)
@@ -240,7 +240,7 @@ func (c *Client) createLabel(ctx context.Context, label string) (*Label, error) 
 	var labelResponse LabelResponse
 	err := c.post(
 		ctx,
-		fmt.Sprintf(LabelBaseUrl, c.deployment),
+		c.apiURL(LabelBaseUrl, c.deployment),
 		&labelResponse,
 		&Label{
 			ViewableBy: "everyone",
@@ -258,7 +258,7 @@ func (c *Client) GetLabelsForRequestedItem(ctx context.Context, requestedItemId 
 	var labelResponse LabelEntriesLabelNameResponse
 	_, err := c.get(
 		ctx,
-		fmt.Sprintf(LabelEntryBaseUrl, c.deployment),
+		c.apiURL(LabelEntryBaseUrl, c.deployment),
 		&labelResponse,
 		WithQuery(fmt.Sprintf("table=sc_req_item^table_key=%s", requestedItemId)),
 		WithFields("label.name"),
@@ -277,7 +277,7 @@ func (c *Client) GetServiceCatalogRequestedItemStates(ctx context.Context) ([]Re
 	var catalogsResponse RequestedItemStateResponse
 	_, err := c.get(
 		ctx,
-		fmt.Sprintf(ChoiceBaseUrl, c.deployment),
+		c.apiURL(ChoiceBaseUrl, c.deployment),
 		&catalogsResponse,
 		WithQuery("name=task^element=state^language=en^inactive=false"),
 		WithFields("label,value"),
@@ -293,7 +293,7 @@ func (c *Client) GetCatalogs(ctx context.Context, paginationVars PaginationVars)
 	var catalogsResponse CatalogsResponse
 	nextPageToken, err := c.get(
 		ctx,
-		fmt.Sprintf(ServiceCatalogListCatalogsUrl, c.deployment),
+		c.apiURL(ServiceCatalogListCatalogsUrl, c.deployment),
 		&catalogsResponse,
 		WithPageLimit(paginationVars.Limit),
 		WithOffset(paginationVars.Offset),
