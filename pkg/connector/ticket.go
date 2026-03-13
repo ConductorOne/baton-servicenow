@@ -21,19 +21,35 @@ import (
 )
 
 func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token) ([]*v2.TicketSchema, string, annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
 	offset, err := convertPageToken(pt.Token)
 	if err != nil {
 		return nil, "", nil, err
 	}
+	// Cap page size to avoid Lambda timeouts. Each catalog item requires
+	// 3-4 HTTP roundtrips for variable sets, so large pages can exceed
+	// the execution time limit.
+	pageSize := pt.Size
+	if pageSize > TicketSchemasPageSize {
+		pageSize = TicketSchemasPageSize
+	}
 	catalogItems, nextPageToken, err := s.client.GetCatalogItems(ctx,
 		&servicenow.PaginationVars{
-			Limit:  pt.Size,
+			Limit:  pageSize,
 			Offset: offset,
 		},
 	)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to get catalog items: %w", err)
 	}
+
+	l.Debug("listing ticket schemas",
+		zap.Int("catalog_items", len(catalogItems)),
+		zap.Int("page_size", pageSize),
+		zap.Int("offset", offset),
+		zap.String("next_page_token", nextPageToken),
+	)
 
 	requestedItemStates, err := s.client.GetServiceCatalogRequestedItemStates(ctx)
 	if err != nil {
