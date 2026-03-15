@@ -284,6 +284,7 @@ type VariableType int
 type VariableSetM2M struct {
 	SysID       string `json:"sys_id"`
 	VariableSet string `json:"variable_set"`
+	CatItem     string `json:"sc_cat_item"`
 }
 
 type VariableSet struct {
