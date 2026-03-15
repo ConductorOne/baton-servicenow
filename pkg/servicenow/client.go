@@ -604,8 +604,11 @@ func (c *Client) GetCatalogItemVariablesPlusSetsMulti(ctx context.Context, itemS
 		return nil, nil
 	}
 
-	// Batch: find all variable set links for all items at once
-	allLinks, _, err := c.GetVariableSetLinksForItems(ctx, itemSysIDs, PaginationVars{Limit: 500})
+	// Batch: find all variable set links for all items at once.
+	// Use a large limit to avoid truncation. If the result set is at the limit,
+	// some links may be missing — this matches the existing per-item behavior
+	// which also uses a fixed limit.
+	allLinks, _, err := c.GetVariableSetLinksForItems(ctx, itemSysIDs, PaginationVars{Limit: 2000})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get variable set links: %w", err)
 	}
