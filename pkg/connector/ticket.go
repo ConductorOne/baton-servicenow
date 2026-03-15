@@ -58,10 +58,21 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 
 	ticketStatuses := requestedItemStatesToTicketStatus(requestedItemStates)
 
+	// Batch-fetch variable set data for all catalog items at once,
+	// reducing N per-item API calls to a single batch query.
+	itemIDs := make([]string, 0, len(catalogItems))
+	for _, ci := range catalogItems {
+		itemIDs = append(itemIDs, ci.Id)
+	}
+	setVarsByItem, err := s.client.GetCatalogItemVariablesPlusSetsMulti(ctx, itemIDs)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to batch-fetch variable sets: %w", err)
+	}
+
 	var ret []*v2.TicketSchema
 	for _, catalogItem := range catalogItems {
 		catalogItem := catalogItem
-		catalogItemSchema, err := s.schemaForCatalogItem(ctx, &catalogItem)
+		catalogItemSchema, err := s.schemaForCatalogItemWithSetVars(ctx, &catalogItem, setVarsByItem[catalogItem.Id])
 		if err != nil {
 			return nil, "", nil, err
 		}
@@ -283,6 +294,48 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 	}
 
 	return ret, nil
+}
+
+// schemaForCatalogItemWithSetVars builds a TicketSchema using pre-fetched set variables
+// (from the batch query) plus per-item direct variables from the catalog API.
+func (s *ServiceNow) schemaForCatalogItemWithSetVars(ctx context.Context, catalogItem *servicenow.CatalogItem, setVars []servicenow.CatalogItemVariable) (*v2.TicketSchema, error) {
+	var ticketTypes []*v2.TicketType
+	customFields := make(map[string]*v2.TicketCustomField)
+
+	// Fetch direct (non-set) variables per item — this still uses the catalog API per item
+	itemVars, err := s.client.GetCatalogItemVariables(ctx, catalogItem.Id)
+	if err != nil {
+		return nil, fmt.Errorf("servicenow-connector: failed to get direct variables for catalog item %s: %w", catalogItem.Id, err)
+	}
+
+	// Merge: direct vars first, then set vars (prefer direct on collision)
+	allVars := make([]servicenow.CatalogItemVariable, 0, len(itemVars)+len(setVars))
+	seen := make(map[string]struct{}, len(itemVars))
+	for _, v := range itemVars {
+		allVars = append(allVars, v)
+		seen[v.ID] = struct{}{}
+	}
+	for _, v := range setVars {
+		if _, dup := seen[v.ID]; !dup {
+			allVars = append(allVars, v)
+		}
+	}
+
+	for _, v := range allVars {
+		vCopy := v
+		cf := servicenow.ConvertVariableToSchemaCustomField(ctx, &vCopy)
+		if cf == nil {
+			continue
+		}
+		customFields[vCopy.Name] = cf
+	}
+
+	return &v2.TicketSchema{
+		Id:           catalogItem.Id,
+		DisplayName:  catalogItem.Name,
+		Types:        ticketTypes,
+		CustomFields: customFields,
+	}, nil
 }
 
 func (s *ServiceNow) serviceCatalogRequestItemToTicket(ctx context.Context, requestedItem *servicenow.RequestedItem) (*v2.Ticket, annotations.Annotations, error) {
