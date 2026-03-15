@@ -55,7 +55,6 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 
 	var ret []*v2.TicketSchema
 	for _, catalogItem := range catalogItems {
-		catalogItem := catalogItem
 		catalogItemSchema, err := s.schemaForCatalogItemWithSetVars(ctx, &catalogItem, setVarsByItem[catalogItem.Id])
 		if err != nil {
 			return nil, "", nil, err
