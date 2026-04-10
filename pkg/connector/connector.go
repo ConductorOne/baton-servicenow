@@ -116,7 +116,10 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 }
 
 // New returns the ServiceNow connector.
-func New(ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string, allowedDomains []string, customUserFields []string, baseURL string, insecure bool) (*ServiceNow, error) {
+func New(
+	ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string,
+	allowedDomains []string, customUserFields []string, baseURL string, insecure bool,
+) (*ServiceNow, error) {
 	uhttpOpts := []uhttp.Option{uhttp.WithLogger(true, ctxzap.Extract(ctx))}
 	if insecure {
 		uhttpOpts = append(uhttpOpts, uhttp.WithTLSClientConfig(&tls.Config{InsecureSkipVerify: true})) //nolint:gosec // G402: intentional for testing with self-signed certs
