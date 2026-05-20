@@ -612,12 +612,71 @@ func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID 
 	}
 
 	// Find attached variable sets
-	links, _, err := c.GetVariableSetLinksForItem(ctx, itemSysID, PaginationVars{Limit: 200})
+	links, _, err := c.GetVariableSetLinksForItems(ctx, []string{itemSysID}, PaginationVars{Limit: 200})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get variable set links: %w", err)
 	}
+
+	setVars, choicesByQ, err := c.getSetVariablesAndChoices(ctx, links)
+	if err != nil {
+		return nil, err
+	}
+
+	return mergeVariables(itemVars, setVars, choicesByQ), nil
+}
+
+// GetCatalogItemVariablesPlusSetsMulti fetches variable set data for multiple catalog items
+// in a single batch query instead of per-item. Returns a map of itemSysID -> []CatalogItemVariable.
+func (c *Client) GetCatalogItemVariablesPlusSetsMulti(ctx context.Context, itemSysIDs []string) (map[string][]CatalogItemVariable, error) {
+	if len(itemSysIDs) == 0 {
+		return nil, nil
+	}
+
+	// Batch: find all variable set links for all items at once.
+	// Use a large limit to avoid truncation. If the result set is at the limit,
+	// some links may be missing — this matches the existing per-item behavior
+	// which also uses a fixed limit.
+	allLinks, _, err := c.GetVariableSetLinksForItems(ctx, itemSysIDs, PaginationVars{Limit: 2000})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get variable set links: %w", err)
+	}
+
+	// Group links by catalog item
+	linksByItem := make(map[string][]VariableSetM2M, len(itemSysIDs))
+	for _, l := range allLinks {
+		linksByItem[l.CatItem] = append(linksByItem[l.CatItem], l)
+	}
+
+	// Batch: fetch all set variables and choices at once
+	setVars, choicesByQ, err := c.getSetVariablesAndChoices(ctx, allLinks)
+	if err != nil {
+		return nil, err
+	}
+
+	// Index set variables by their variable_set ID for grouping
+	varsBySet := make(map[string][]CatalogItemVariable)
+	for _, v := range setVars {
+		cv := MapItemOptionNewToCatalogItemVariable(v, choicesByQ[v.SysID])
+		varsBySet[v.VariableSet] = append(varsBySet[v.VariableSet], cv)
+	}
+
+	// Build per-item results
+	result := make(map[string][]CatalogItemVariable, len(itemSysIDs))
+	for _, itemID := range itemSysIDs {
+		var itemSetVars []CatalogItemVariable
+		for _, link := range linksByItem[itemID] {
+			itemSetVars = append(itemSetVars, varsBySet[link.VariableSet]...)
+		}
+		result[itemID] = itemSetVars
+	}
+
+	return result, nil
+}
+
+// getSetVariablesAndChoices fetches variables and their choices for a set of variable set links.
+func (c *Client) getSetVariablesAndChoices(ctx context.Context, links []VariableSetM2M) ([]ItemOptionNew, map[string][]QuestionChoice, error) {
 	if len(links) == 0 {
-		return itemVars, nil // nothing to add
+		return nil, nil, nil
 	}
 
 	setIDs := make([]string, 0, len(links))
@@ -628,7 +687,7 @@ func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID 
 	// Fetch variables that belong to those sets
 	setVars, _, err := c.GetVariablesBySetIDs(ctx, setIDs, PaginationVars{Limit: 500})
 	if err != nil {
-		return nil, fmt.Errorf("failde to get variables by set ids: %w", err)
+		return nil, nil, fmt.Errorf("failed to get variables by set ids: %w", err)
 	}
 
 	// Fetch choices for set variables (so selects have options)
@@ -638,40 +697,52 @@ func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID 
 	}
 	choices, _, err := c.GetChoicesForVariables(ctx, varIDs, PaginationVars{Limit: 1000})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get choices for set variables: %w", err)
+		return nil, nil, fmt.Errorf("failed to get choices for set variables: %w", err)
 	}
 	choicesByQ := make(map[string][]QuestionChoice, len(varIDs))
 	for _, ch := range choices {
 		choicesByQ[ch.Question] = append(choicesByQ[ch.Question], ch)
 	}
 
-	// Map set variables to CatalogItemVariable
-	cvSet := make([]CatalogItemVariable, 0, len(setVars))
-	for _, v := range setVars {
-		cvSet = append(cvSet, MapItemOptionNewToCatalogItemVariable(v, choicesByQ[v.SysID]))
-	}
+	return setVars, choicesByQ, nil
+}
 
-	// Merge (prefer direct items on ID collisions)
-	out := make([]CatalogItemVariable, 0, len(itemVars)+len(cvSet))
+// mergeVariables merges direct item variables with set variables, preferring direct items on ID collisions.
+func mergeVariables(itemVars []CatalogItemVariable, setVars []ItemOptionNew, choicesByQ map[string][]QuestionChoice) []CatalogItemVariable {
+	out := make([]CatalogItemVariable, 0, len(itemVars)+len(setVars))
 	seen := make(map[string]struct{}, len(itemVars))
 	for _, v := range itemVars {
 		out = append(out, v)
 		seen[v.ID] = struct{}{}
 	}
-	for _, v := range cvSet {
-		if _, dup := seen[v.ID]; !dup {
-			out = append(out, v)
+	for _, v := range setVars {
+		cv := MapItemOptionNewToCatalogItemVariable(v, choicesByQ[v.SysID])
+		if _, dup := seen[cv.ID]; !dup {
+			out = append(out, cv)
 		}
 	}
-
-	return out, nil
+	return out
 }
 
 func (c *Client) GetVariableSetLinksForItem(ctx context.Context, itemSysID string, pg PaginationVars) ([]VariableSetM2M, string, error) {
+	return c.GetVariableSetLinksForItems(ctx, []string{itemSysID}, pg)
+}
+
+// GetVariableSetLinksForItems fetches variable set links for multiple catalog items in a single query.
+func (c *Client) GetVariableSetLinksForItems(ctx context.Context, itemSysIDs []string, pg PaginationVars) ([]VariableSetM2M, string, error) {
+	if len(itemSysIDs) == 0 {
+		return nil, "", nil
+	}
+	var query string
+	if len(itemSysIDs) == 1 {
+		query = fmt.Sprintf("sc_cat_item=%s", itemSysIDs[0])
+	} else {
+		query = "sc_cat_itemIN" + strings.Join(itemSysIDs, ",")
+	}
 	var resp VariableSetM2MResponse
 	req := []ReqOpt{
-		WithQueryParam("sysparm_query", fmt.Sprintf("sc_cat_item=%s", itemSysID)),
-		WithQueryParam("sysparm_fields", "sys_id,variable_set"),
+		WithQueryParam("sysparm_query", query),
+		WithQueryParam("sysparm_fields", "sys_id,variable_set,sc_cat_item"),
 		WithQueryParam("sysparm_exclude_reference_link", "true"),
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
