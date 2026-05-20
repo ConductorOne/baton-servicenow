@@ -130,7 +130,7 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 					if requestedForID == "" {
 						requestedForID = servicenow.SystemAdminUserId
 					}
-					ticketFields[id].GetStringValue().Value = requestedForID
+					ticketFields[id].GetStringValue().SetValue(requestedForID)
 				}
 			}
 

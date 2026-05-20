@@ -384,7 +384,7 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 		cf = sdkTicket.BoolFieldSchema(variable.Name, variable.Label, variable.Mandatory)
 	case TypeMultiLineText, TypeSingleLineText, TypeWideSingleLineText, TypeHTML, TypeEmail, TypeURL, TypeIPAddress:
 		cf = sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
-		cf.GetStringValue().DefaultValue = variable.Value
+		cf.GetStringValue().SetDefaultValue(variable.Value)
 	case TypeMultipleChoice, TypeLookupMultipleChoice:
 		var allowedChoices []*v2.TicketCustomFieldObjectValue
 		choices := variable.Choices
@@ -410,13 +410,13 @@ func ConvertVariableToSchemaCustomField(ctx context.Context, variable *CatalogIt
 	case TypeReference:
 		// This should be a sys_id
 		cf = sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
-		cf.GetStringValue().DefaultValue = variable.Value
+		cf.GetStringValue().SetDefaultValue(variable.Value)
 		typAnno.RefQualifier = variable.RefQualifier
 		typAnno.Reference = variable.Reference
 	case TypeRequestedFor:
 		// This should be sys_id of user
 		cf = sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
-		cf.GetStringValue().DefaultValue = SystemAdminUserId
+		cf.GetStringValue().SetDefaultValue(SystemAdminUserId)
 	case TypeListCollector:
 		cf = sdkTicket.StringFieldSchema(variable.Name, variable.Label, variable.Mandatory)
 	case TypeDuration: // TODO(lauren) make duration field?
