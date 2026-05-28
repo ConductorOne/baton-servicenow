@@ -81,25 +81,25 @@ func (s *ServiceNow) enableUser(ctx context.Context, args *structpb.Struct) (*st
 	l := ctxzap.Extract(ctx)
 
 	if args == nil {
-		return nil, nil, fmt.Errorf("arguments cannot be nil")
+		return nil, nil, fmt.Errorf("baton-servicenow: arguments cannot be nil")
 	}
 
 	if args.Fields == nil {
-		return nil, nil, fmt.Errorf("arguments fields cannot be nil")
+		return nil, nil, fmt.Errorf("baton-servicenow: arguments fields cannot be nil")
 	}
 
 	userId, ok := args.Fields["userId"]
 	if !ok {
-		return nil, nil, fmt.Errorf("missing required argument userId")
+		return nil, nil, fmt.Errorf("baton-servicenow: missing required argument userId")
 	}
 
 	if userId == nil {
-		return nil, nil, fmt.Errorf("userId value cannot be nil")
+		return nil, nil, fmt.Errorf("baton-servicenow: userId value cannot be nil")
 	}
 
 	userIdStr := userId.GetStringValue()
 	if userIdStr == "" {
-		return nil, nil, fmt.Errorf("userId cannot be empty")
+		return nil, nil, fmt.Errorf("baton-servicenow: userId cannot be empty")
 	}
 
 	l.Info("enabling user", zap.String("userId", userIdStr))
@@ -107,7 +107,7 @@ func (s *ServiceNow) enableUser(ctx context.Context, args *structpb.Struct) (*st
 	updatedUser, err := s.client.UpdateUserActiveStatus(ctx, userIdStr, true)
 	if err != nil {
 		l.Error("failed to enable user", zap.String("userId", userIdStr), zap.Error(err))
-		return nil, nil, fmt.Errorf("failed to enable user %s: %w", userIdStr, err)
+		return nil, nil, fmt.Errorf("baton-servicenow: failed to enable user %s: %w", userIdStr, err)
 	}
 
 	success := updatedUser.Active == "true"
@@ -127,25 +127,25 @@ func (s *ServiceNow) disableUser(ctx context.Context, args *structpb.Struct) (*s
 	l := ctxzap.Extract(ctx)
 
 	if args == nil {
-		return nil, nil, fmt.Errorf("arguments cannot be nil")
+		return nil, nil, fmt.Errorf("baton-servicenow: arguments cannot be nil")
 	}
 
 	if args.Fields == nil {
-		return nil, nil, fmt.Errorf("arguments fields cannot be nil")
+		return nil, nil, fmt.Errorf("baton-servicenow: arguments fields cannot be nil")
 	}
 
 	userId, ok := args.Fields["userId"]
 	if !ok {
-		return nil, nil, fmt.Errorf("missing required argument userId")
+		return nil, nil, fmt.Errorf("baton-servicenow: missing required argument userId")
 	}
 
 	if userId == nil {
-		return nil, nil, fmt.Errorf("userId value cannot be nil")
+		return nil, nil, fmt.Errorf("baton-servicenow: userId value cannot be nil")
 	}
 
 	userIdStr := userId.GetStringValue()
 	if userIdStr == "" {
-		return nil, nil, fmt.Errorf("userId cannot be empty")
+		return nil, nil, fmt.Errorf("baton-servicenow: userId cannot be empty")
 	}
 
 	l.Info("disabling user", zap.String("userId", userIdStr))
@@ -153,7 +153,7 @@ func (s *ServiceNow) disableUser(ctx context.Context, args *structpb.Struct) (*s
 	updatedUser, err := s.client.UpdateUserActiveStatus(ctx, userIdStr, false)
 	if err != nil {
 		l.Error("failed to disable user", zap.String("userId", userIdStr), zap.Error(err))
-		return nil, nil, fmt.Errorf("failed to disable user %s: %w", userIdStr, err)
+		return nil, nil, fmt.Errorf("baton-servicenow: failed to disable user %s: %w", userIdStr, err)
 	}
 
 	success := updatedUser.Active == "false"

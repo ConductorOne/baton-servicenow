@@ -82,7 +82,7 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		},
 	)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list users: %w", err)
+		return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list users: %w", err)
 	}
 
 	nextPage, err := bag.NextToken(nextPageToken)
@@ -142,25 +142,25 @@ func (u *userResourceType) CreateAccount(
 	error) {
 	profile := accountInfo.GetProfile().AsMap()
 	if profile == nil {
-		return nil, nil, nil, fmt.Errorf("missing profile in CreateAccountRequest")
+		return nil, nil, nil, fmt.Errorf("baton-servicenow: missing profile in CreateAccountRequest")
 	}
 
 	userName, ok := profile["username"].(string)
 	if !ok || userName == "" {
-		return nil, nil, nil, fmt.Errorf("missing or invalid 'userName' in profile")
+		return nil, nil, nil, fmt.Errorf("baton-servicenow: missing or invalid 'userName' in profile")
 	}
 
 	email, ok := profile["email"].(string)
 	if !ok || email == "" {
-		return nil, nil, nil, fmt.Errorf("missing or invalid 'email' in profile")
+		return nil, nil, nil, fmt.Errorf("baton-servicenow: missing or invalid 'email' in profile")
 	}
 	firstName, ok := profile["first_name"].(string)
 	if !ok || firstName == "" {
-		return nil, nil, nil, fmt.Errorf("missing or invalid 'first_name' in profile")
+		return nil, nil, nil, fmt.Errorf("baton-servicenow: missing or invalid 'first_name' in profile")
 	}
 	lastName, ok := profile["last_name"].(string)
 	if !ok || lastName == "" {
-		return nil, nil, nil, fmt.Errorf("missing or invalid 'last_name' in profile")
+		return nil, nil, nil, fmt.Errorf("baton-servicenow: missing or invalid 'last_name' in profile")
 	}
 
 	user := map[string]string{
@@ -173,12 +173,12 @@ func (u *userResourceType) CreateAccount(
 
 	createdUser, err := u.client.CreateUserAccount(ctx, user)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create user in ServiceNow: %w", err)
+		return nil, nil, nil, fmt.Errorf("baton-servicenow: failed to create user: %w", err)
 	}
 
 	resource, err := userResource(createdUser)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create Baton resource: %w", err)
+		return nil, nil, nil, fmt.Errorf("baton-servicenow: failed to create user resource: %w", err)
 	}
 
 	return &v2.CreateAccountResponse_SuccessResult{Resource: resource}, nil, nil, nil

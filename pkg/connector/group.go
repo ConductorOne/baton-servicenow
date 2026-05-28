@@ -67,7 +67,7 @@ func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagi
 		nil,
 	)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list groups: %w", err)
+		return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list groups: %w", err)
 	}
 
 	nextPage, err := bag.NextToken(nextPageToken)
@@ -124,7 +124,7 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 		},
 	)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list groupMembers: %w", err)
+		return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list groupMembers: %w", err)
 	}
 
 	nextPage, err := bag.NextToken(nextPageToken)
@@ -179,7 +179,7 @@ func (r *groupResourceType) Grant(ctx context.Context, principal *v2.Resource, e
 		servicenow.PaginationVars{Limit: 1},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: failed to get group members for %s: %w", entitlement.Id, err)
+		return nil, fmt.Errorf("baton-servicenow: failed to get group members for %s: %w", entitlement.Id, err)
 	}
 
 	// check if user is already a member of the group
@@ -202,7 +202,7 @@ func (r *groupResourceType) Grant(ctx context.Context, principal *v2.Resource, e
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: failed to add user %s to group %s: %w", principal.Id.Resource, groupId, err)
+		return nil, fmt.Errorf("baton-servicenow: failed to add user %s to group %s: %w", principal.Id.Resource, groupId, err)
 	}
 
 	return nil, nil
@@ -230,7 +230,7 @@ func (r *groupResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annota
 		servicenow.PaginationVars{Limit: 1},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: failed to get user roles for %s: %w", grant.Principal.Id.Resource, err)
+		return nil, fmt.Errorf("baton-servicenow: failed to get user roles for %s: %w", grant.Principal.Id.Resource, err)
 	}
 
 	// check if group is empty
@@ -251,7 +251,7 @@ func (r *groupResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annota
 			grpMember.Id,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("servicenow-connector: failed to remove user %s from group: %w", grant.Principal.Id.Resource, err)
+			return nil, fmt.Errorf("baton-servicenow: failed to remove user %s from group: %w", grant.Principal.Id.Resource, err)
 		}
 
 		l.Debug("revoked role from user", zap.String("role", grant.Entitlement.Id))

@@ -41,7 +41,7 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 		},
 	)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to get catalog items: %w", err)
+		return nil, "", nil, fmt.Errorf("baton-servicenow: failed to get catalog items: %w", err)
 	}
 
 	l.Debug("listing ticket schemas",
@@ -53,7 +53,7 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 
 	requestedItemStates, err := s.client.GetServiceCatalogRequestedItemStates(ctx)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to get catalog requested item states: %w", err)
+		return nil, "", nil, fmt.Errorf("baton-servicenow: failed to get catalog requested item states: %w", err)
 	}
 
 	ticketStatuses := requestedItemStatesToTicketStatus(requestedItemStates)
@@ -75,11 +75,11 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 func (s *ServiceNow) GetTicket(ctx context.Context, ticketId string) (*v2.Ticket, annotations.Annotations, error) {
 	serviceCatalogRequestedItem, err := s.client.GetServiceCatalogRequestItem(ctx, ticketId)
 	if err != nil {
-		return nil, nil, fmt.Errorf("servicenow-connector: failed to get catalog requested item %s: %w", ticketId, err)
+		return nil, nil, fmt.Errorf("baton-servicenow: failed to get catalog requested item %s: %w", ticketId, err)
 	}
 	ticket, annos, err := s.serviceCatalogRequestItemToTicket(ctx, serviceCatalogRequestedItem)
 	if err != nil {
-		return ticket, nil, fmt.Errorf("servicenow-connector: %w", err)
+		return ticket, nil, fmt.Errorf("baton-servicenow: %w", err)
 	}
 
 	return ticket, annos, err
@@ -120,7 +120,7 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 			if GetVariableTypeAnnotation(cf.Annotations) == servicenow.TypeRequestedFor {
 				val, err = sdkTicket.GetCustomFieldValue(ticketFields[id])
 				if err != nil {
-					return nil, nil, fmt.Errorf("servicenow-connector: failed to get custom field value: %s", id)
+					return nil, nil, fmt.Errorf("baton-servicenow: failed to get custom field value: %s", id)
 				}
 
 				// If "requested_for" variable type is not set, we use the service now user id from the ticket requested for
@@ -162,7 +162,7 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 
 	serviceCatalogRequestedItem, err := s.client.CreateServiceCatalogRequest(ctx, catalogItemID, createServiceCatalogRequestPayload)
 	if err != nil {
-		return nil, nil, fmt.Errorf("servicenow-connector: failed to create service catalog request %s: %w", catalogItemID, err)
+		return nil, nil, fmt.Errorf("baton-servicenow: failed to create service catalog request %s: %w", catalogItemID, err)
 	}
 	labelErr := s.client.AddLabelsToRequest(ctx, serviceCatalogRequestedItem.Id, ticket.Labels)
 
@@ -173,7 +173,7 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 		},
 	)
 	if updateErr != nil {
-		updateErr = fmt.Errorf("failed to update catalog requested item description: %w", updateErr)
+		updateErr = fmt.Errorf("baton-servicenow: failed to update catalog requested item description: %w", updateErr)
 	}
 
 	ticket, annos, err := s.serviceCatalogRequestItemToTicket(ctx, serviceCatalogRequestedItem)
@@ -183,7 +183,7 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 
 	err = multierr.Combine(labelErr, updateErr, err)
 	if err != nil {
-		err = fmt.Errorf("servicenow-connector: %w", err)
+		err = fmt.Errorf("baton-servicenow: %w", err)
 	}
 
 	l.Info("created service catalog request", zap.Any("ticket", ticket), zap.Error(err))
@@ -237,11 +237,11 @@ func (s *ServiceNow) BulkGetTickets(ctx context.Context, request *v2.TicketsServ
 func (s *ServiceNow) GetTicketSchema(ctx context.Context, schemaID string) (*v2.TicketSchema, annotations.Annotations, error) {
 	catalogItem, err := s.client.GetCatalogItem(ctx, schemaID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("servicenow-connector: failed to get catalog item %s: %w", schemaID, err)
+		return nil, nil, fmt.Errorf("baton-servicenow: failed to get catalog item %s: %w", schemaID, err)
 	}
 	requestedItemStates, err := s.client.GetServiceCatalogRequestedItemStates(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("servicenow-connector: failed to get catalog requested item states: %w", err)
+		return nil, nil, fmt.Errorf("baton-servicenow: failed to get catalog requested item states: %w", err)
 	}
 	ticketStatuses := requestedItemStatesToTicketStatus(requestedItemStates)
 	schema, err := s.schemaForCatalogItem(ctx, catalogItem)
@@ -260,7 +260,7 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 
 	variables, err := s.client.GetCatalogItemVariablesPlusSets(ctx, catalogItem.Id)
 	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: failed to get variables (item + sets) for catalog item %s: %w", catalogItem.Id, err)
+		return nil, fmt.Errorf("baton-servicenow: failed to get variables (item + sets) for catalog item %s: %w", catalogItem.Id, err)
 	}
 
 	for _, v := range variables {
@@ -323,7 +323,7 @@ func (s *ServiceNow) serviceCatalogRequestItemToTicket(ctx context.Context, requ
 
 	labels, err := s.client.GetLabelsForRequestedItem(ctx, requestedItem.Id)
 	if err != nil {
-		return t, nil, fmt.Errorf("failed to get labels for requested item %s: %w", requestedItem.Id, err)
+		return t, nil, fmt.Errorf("baton-servicenow: failed to get labels for requested item %s: %w", requestedItem.Id, err)
 	}
 
 	t.Labels = labels

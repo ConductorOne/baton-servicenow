@@ -65,7 +65,7 @@ func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		},
 	)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list roles: %w", err)
+		return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list roles: %w", err)
 	}
 
 	nextPage, err := bag.NextToken(nextPageToken)
@@ -134,7 +134,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			},
 		)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list users under role %s: %w", resource.Id.Resource, err)
+			return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list users under role %s: %w", resource.Id.Resource, err)
 		}
 
 		err = bag.Next(nextPageToken)
@@ -168,7 +168,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			},
 		)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("servicenow-connector: failed to list groups under role %s: %w", resource.Id.Resource, err)
+			return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list groups under role %s: %w", resource.Id.Resource, err)
 		}
 
 		err = bag.Next(nextPageToken)
@@ -193,7 +193,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 		}
 
 	default:
-		return nil, "", nil, fmt.Errorf("unknown resource type: %s", bag.ResourceTypeID())
+		return nil, "", nil, fmt.Errorf("baton-servicenow: unknown resource type: %s", bag.ResourceTypeID())
 	}
 
 	nextPage, err := bag.Marshal()
@@ -224,13 +224,13 @@ func (r *roleResourceType) GrantToUser(ctx context.Context, l *zap.Logger, princ
 		servicenow.PaginationVars{Limit: 1},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: failed to get user roles for %s: %w", principal, err)
+		return nil, fmt.Errorf("baton-servicenow: failed to get user roles for %s: %w", principal, err)
 	}
 
 	// check if the user already has the role
 	if len(userRoles) > 0 {
 		l.Warn(
-			"servicenow-connector: user already has specified role",
+			"baton-servicenow: user already has specified role",
 			zap.String("user", principal),
 			zap.String("role", roleId),
 		)
@@ -247,7 +247,7 @@ func (r *roleResourceType) GrantToUser(ctx context.Context, l *zap.Logger, princ
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: failed to grant role %s to user %s: %w", roleId, principal, err)
+		return nil, fmt.Errorf("baton-servicenow: failed to grant role %s to user %s: %w", roleId, principal, err)
 	}
 
 	l.Debug("granted role to user", zap.String("role", roleId))
@@ -262,18 +262,18 @@ func (r *roleResourceType) GrantToGroup(ctx context.Context, l *zap.Logger, prin
 		servicenow.PaginationVars{Limit: 1},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: failed to get group roles for %s: %w", principal, err)
+		return nil, fmt.Errorf("baton-servicenow: failed to get group roles for %s: %w", principal, err)
 	}
 
 	// check if the group already has the role
 	if len(groupRoles) > 0 {
 		l.Warn(
-			"servicenow-connector: group already has specified role",
+			"baton-servicenow: group already has specified role",
 			zap.String("group", principal),
 			zap.String("role", roleId),
 		)
 
-		return nil, fmt.Errorf("servicenow-connector: group already has specified role")
+		return nil, fmt.Errorf("baton-servicenow: group already has specified role")
 	}
 
 	// grant the role to the group
@@ -285,7 +285,7 @@ func (r *roleResourceType) GrantToGroup(ctx context.Context, l *zap.Logger, prin
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: failed to grant role %s to group %s: %w", roleId, principal, err)
+		return nil, fmt.Errorf("baton-servicenow: failed to grant role %s to group %s: %w", roleId, principal, err)
 	}
 
 	l.Debug("granted role to group", zap.String("role", roleId))
@@ -300,12 +300,12 @@ func (r *roleResourceType) Grant(ctx context.Context, principal *v2.Resource, en
 
 	if !principalIsUser && !principalIsGroup {
 		l.Warn(
-			"servicenow-connector: only users or groups can be granted role membership",
+			"baton-servicenow: only users or groups can be granted role membership",
 			zap.String("principal_type", principal.Id.ResourceType),
 			zap.String("principal_id", principal.Id.Resource),
 		)
 
-		return nil, fmt.Errorf("servicenow-connector: only users or groups can be granted role membership")
+		return nil, fmt.Errorf("baton-servicenow: only users or groups can be granted role membership")
 	}
 
 	roleId := entitlement.Resource.Id.Resource
@@ -330,12 +330,12 @@ func (r *roleResourceType) RevokeFromUser(ctx context.Context, l *zap.Logger, pr
 		servicenow.PaginationVars{Limit: 1},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: failed to get user roles for %s: %w", principal.Id.Resource, err)
+		return nil, fmt.Errorf("baton-servicenow: failed to get user roles for %s: %w", principal.Id.Resource, err)
 	}
 
 	if len(userRoles) == 0 {
 		l.Warn(
-			"servicenow-connector: cannot revoke not existing role from user",
+			"baton-servicenow: cannot revoke not existing role from user",
 			zap.String("user", principal.Id.Resource),
 			zap.String("role", roleId),
 		)
@@ -350,7 +350,7 @@ func (r *roleResourceType) RevokeFromUser(ctx context.Context, l *zap.Logger, pr
 			userRole.Id,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("servicenow-connector: failed to revoke role %s from user %s: %w", roleId, principal.Id.Resource, err)
+			return nil, fmt.Errorf("baton-servicenow: failed to revoke role %s from user %s: %w", roleId, principal.Id.Resource, err)
 		}
 
 		l.Debug("revoked role from user", zap.String("role", roleId))
@@ -368,17 +368,17 @@ func (r *roleResourceType) RevokeFromGroup(ctx context.Context, l *zap.Logger, p
 		servicenow.PaginationVars{Limit: 1},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("servicenow-connector: failed to get group roles for %s: %w", principal.Id.Resource, err)
+		return nil, fmt.Errorf("baton-servicenow: failed to get group roles for %s: %w", principal.Id.Resource, err)
 	}
 
 	if len(groupRoles) == 0 {
 		l.Warn(
-			"servicenow-connector: cannot revoke not existing role from group",
+			"baton-servicenow: cannot revoke not existing role from group",
 			zap.String("group", principal.Id.Resource),
 			zap.String("role", roleId),
 		)
 
-		return nil, fmt.Errorf("servicenow-connector: cannot revoke not existing role from group")
+		return nil, fmt.Errorf("baton-servicenow: cannot revoke not existing role from group")
 	}
 
 	// revoke all roles (inherited or not) from the group
@@ -388,7 +388,7 @@ func (r *roleResourceType) RevokeFromGroup(ctx context.Context, l *zap.Logger, p
 			groupRole.Id,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("servicenow-connector: failed to revoke role %s from group %s: %w", roleId, principal.Id.Resource, err)
+			return nil, fmt.Errorf("baton-servicenow: failed to revoke role %s from group %s: %w", roleId, principal.Id.Resource, err)
 		}
 
 		l.Debug("revoked role from group", zap.String("role", roleId))
@@ -407,12 +407,12 @@ func (r *roleResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annotat
 
 	if !principalIsUser && !principalIsGroup {
 		l.Warn(
-			"servicenow-connector: only users or groups can be revoked role membership",
+			"baton-servicenow: only users or groups can be revoked role membership",
 			zap.String("principal_type", principal.Id.ResourceType),
 			zap.String("principal_id", principal.Id.Resource),
 		)
 
-		return nil, fmt.Errorf("servicenow-connector: only users or groups can be revoked role membership")
+		return nil, fmt.Errorf("baton-servicenow: only users or groups can be revoked role membership")
 	}
 
 	roleId := entitlement.Resource.Id.Resource
