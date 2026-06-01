@@ -11,8 +11,11 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"github.com/tomnomnom/linkheader"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -386,7 +389,7 @@ func (c *Client) RevokeRoleFromGroup(ctx context.Context, id string) error {
 }
 
 func (c *Client) get(ctx context.Context, urlAddress string, resourceResponse interface{}, reqOptions ...ReqOpt) (string, error) {
-	return c.doRequest(
+	return c.doRequestWithRetry(
 		ctx,
 		urlAddress,
 		http.MethodGet,
@@ -403,7 +406,7 @@ func (c *Client) post(
 	data interface{},
 	requestOptions ...ReqOpt,
 ) error {
-	_, err := c.doRequest(
+	_, err := c.doRequestWithRetry(
 		ctx,
 		urlAddress,
 		http.MethodPost,
@@ -422,7 +425,7 @@ func (c *Client) patch(
 	data interface{},
 	requestOptions ...ReqOpt,
 ) error {
-	_, err := c.doRequest(
+	_, err := c.doRequestWithRetry(
 		ctx,
 		urlAddress,
 		http.MethodPatch,
@@ -440,7 +443,7 @@ func (c *Client) delete(
 	resourceResponse interface{},
 	reqOptions ...ReqOpt,
 ) error {
-	_, err := c.doRequest(
+	_, err := c.doRequestWithRetry(
 		ctx,
 		urlAddress,
 		http.MethodDelete,
@@ -527,7 +530,8 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 	}
 
 	if rawResponse.StatusCode >= 300 {
-		return "", status.Errorf(handleStatusCode(rawResponse.StatusCode), "request failed: status code %d", rawResponse.StatusCode)
+		respBody, _ := io.ReadAll(rawResponse.Body)
+		return "", status.Errorf(handleStatusCode(rawResponse.StatusCode), "baton-servicenow: request failed with status %d: %s", rawResponse.StatusCode, string(respBody))
 	}
 
 	if method != http.MethodDelete {
@@ -563,6 +567,69 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 	}
 
 	return pageToken, nil
+}
+
+const (
+	maxAuthRetries    = 3
+	authRetryBaseWait = time.Second
+)
+
+// doRequestWithRetry wraps doRequest with a small retry loop for transient 401 responses.
+// On each 401 it logs the ServiceNow error body and waits an increasing delay before retrying.
+func (c *Client) doRequestWithRetry(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) (string, error) {
+	l := ctxzap.Extract(ctx)
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAuthRetries+1; attempt++ {
+		if attempt > 1 {
+			delay := time.Duration(attempt-1) * authRetryBaseWait
+			l.Debug("baton-servicenow: retrying request after 401",
+				zap.String("url", urlAddress),
+				zap.String("method", method),
+				zap.Int("attempt", attempt),
+				zap.Int("max_attempts", maxAuthRetries+1),
+				zap.Duration("delay", delay),
+			)
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+
+		pageToken, err := c.doRequest(ctx, urlAddress, method, data, resourceResponse, reqOptions...)
+		if err == nil {
+			if attempt > 1 {
+				l.Debug("baton-servicenow: request succeeded after retry",
+					zap.String("url", urlAddress),
+					zap.String("method", method),
+					zap.Int("attempt", attempt),
+				)
+			}
+			return pageToken, nil
+		}
+
+		if status.Code(err) != codes.Unauthenticated {
+			return "", err
+		}
+
+		l.Debug("baton-servicenow: received 401 unauthorized",
+			zap.String("url", urlAddress),
+			zap.String("method", method),
+			zap.Int("attempt", attempt),
+			zap.Int("max_attempts", maxAuthRetries+1),
+			zap.Error(err),
+		)
+		lastErr = err
+	}
+
+	l.Warn("baton-servicenow: request failed after all retry attempts",
+		zap.String("url", urlAddress),
+		zap.String("method", method),
+		zap.Int("max_attempts", maxAuthRetries+1),
+		zap.Error(lastErr),
+	)
+	return "", lastErr
 }
 
 func (c *Client) CreateUserAccount(ctx context.Context, user any) (*User, error) {
