@@ -623,7 +623,7 @@ func (c *Client) doRequestWithRetry(ctx context.Context, urlAddress string, meth
 		lastErr = err
 	}
 
-	l.Warn("baton-servicenow: request failed after all retry attempts",
+	l.Debug("baton-servicenow: request failed after all retry attempts",
 		zap.String("url", urlAddress),
 		zap.String("method", method),
 		zap.Int("max_attempts", maxAuthRetries+1),
