@@ -156,6 +156,33 @@ func prepareUserToGroupFilter(userId string, groupId string) *FilterVars {
 	}
 }
 
+func prepareRosterFilters() *FilterVars {
+	return &FilterVars{
+		Fields: []string{"sys_id", "name", "rota"},
+	}
+}
+
+func prepareRotaMemberFilter(rosterId string, memberId string) *FilterVars {
+	var query string
+
+	if rosterId != "" {
+		query = fmt.Sprintf("roster=%s", rosterId)
+	}
+
+	if memberId != "" {
+		if query != "" {
+			query = fmt.Sprintf("%s^member=%s", query, memberId)
+		} else {
+			query = fmt.Sprintf("member=%s", memberId)
+		}
+	}
+
+	return &FilterVars{
+		Fields: []string{"sys_id", "roster", "member", "order"},
+		Query:  query,
+	}
+}
+
 func prepareUserToRoleFilter(userId string, roleId string) *FilterVars {
 	var query string
 	if userId != "" {

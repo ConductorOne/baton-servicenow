@@ -42,6 +42,11 @@ const (
 
 	UserRoleInheritanceBaseUrl = GlobalApiBaseURL + "/user_role_inheritance"
 
+	// On-Call Scheduling.
+	RostersBaseUrl          = TableAPIBaseURL + "/cmn_rota_roster"
+	RotaMembersBaseUrl      = TableAPIBaseURL + "/cmn_rota_member"
+	RotaMemberDetailBaseUrl = RotaMembersBaseUrl + "/%s"
+
 	// Service Catalogs.
 	ServiceCatalogRequestedItemBaseUrl        = TableAPIBaseURL + "/sc_req_item"
 	ServiceCatalogRequestedItemDetailsBaseUrl = ServiceCatalogRequestedItemBaseUrl + "/%s"
@@ -91,6 +96,8 @@ type RolesResponse = ListResponse[Role]
 type GroupsResponse = ListResponse[Group]
 type GroupResponse = SingleResponse[Group]
 type GroupMembersResponse = ListResponse[GroupMember]
+type RostersResponse = ListResponse[Roster]
+type RotaMembersResponse = ListResponse[RotaMember]
 type UserRolesResponse = SingleResponse[UserRoles]
 type UserToRoleResponse ListResponse[UserToRole]
 type GroupToRoleResponse ListResponse[GroupToRole]

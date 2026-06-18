@@ -137,3 +137,25 @@ func TestUser_UnmarshalJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareRotaMemberFilter(t *testing.T) {
+	tests := []struct {
+		name      string
+		rosterId  string
+		memberId  string
+		wantQuery string
+	}{
+		{"roster only", "ros456", "", "roster=ros456"},
+		{"both", "ros456", "usr789", "roster=ros456^member=usr789"},
+		{"member only", "", "usr789", "member=usr789"},
+		{"neither", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := prepareRotaMemberFilter(tt.rosterId, tt.memberId)
+			if got.Query != tt.wantQuery {
+				t.Errorf("Query = %q, want %q", got.Query, tt.wantQuery)
+			}
+		})
+	}
+}
