@@ -296,6 +296,64 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, id string) error {
 	)
 }
 
+// Table `cmn_rota_roster` (On-Call Rosters).
+func (c *Client) GetRosters(ctx context.Context, paginationVars PaginationVars) ([]Roster, string, error) {
+	var rostersResponse RostersResponse
+
+	reqOpts := filterToReqOptions(prepareRosterFilters())
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
+
+	nextPageToken, err := c.get(
+		ctx,
+		c.apiURL(RostersBaseUrl, c.deployment),
+		&rostersResponse,
+		reqOpts...,
+	)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return rostersResponse.Result, nextPageToken, nil
+}
+
+// Table `cmn_rota_member` (On-Call Roster Members).
+func (c *Client) GetRotaMembers(ctx context.Context, rosterId string, memberId string, paginationVars PaginationVars) ([]RotaMember, string, error) {
+	var rotaMembersResponse RotaMembersResponse
+
+	reqOpts := filterToReqOptions(prepareRotaMemberFilter(rosterId, memberId))
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
+
+	nextPageToken, err := c.get(
+		ctx,
+		c.apiURL(RotaMembersBaseUrl, c.deployment),
+		&rotaMembersResponse,
+		reqOpts...,
+	)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return rotaMembersResponse.Result, nextPageToken, nil
+}
+
+func (c *Client) AddUserToRoster(ctx context.Context, record RotaMemberPayload) error {
+	return c.post(
+		ctx,
+		c.apiURL(RotaMembersBaseUrl, c.deployment),
+		nil,
+		&record,
+		WithIncludeResponseBody(),
+	)
+}
+
+func (c *Client) RemoveRotaMember(ctx context.Context, id string) error {
+	return c.delete(
+		ctx,
+		c.apiURL(RotaMemberDetailBaseUrl, c.deployment, id),
+		nil,
+	)
+}
+
 // Table `sys_user_role` (Roles).
 func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([]Role, string, error) {
 	var rolesResponse RolesResponse
