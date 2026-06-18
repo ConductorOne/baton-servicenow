@@ -142,7 +142,7 @@ func (r *rosterResourceType) Grants(ctx context.Context, resource *v2.Resource, 
 	for _, member := range memberIDs {
 		rID, err := rs.NewResourceID(resourceTypeUser, member)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("baton-servicenow: error creating principal id")
+			return nil, "", nil, fmt.Errorf("baton-servicenow: error creating principal id: %w", err)
 		}
 
 		rv = append(rv, grant.NewGrant(resource, rosterMembership, rID))
@@ -210,6 +210,8 @@ func (r *rosterResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annot
 			zap.String("principal_type", principal.Id.ResourceType),
 			zap.String("principal_id", principal.Id.Resource),
 		)
+
+		return nil, nil
 	}
 
 	rosterId := entitlement.Resource.Id.Resource
