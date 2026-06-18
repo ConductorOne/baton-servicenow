@@ -36,6 +36,13 @@ var (
 			v2.ResourceType_TRAIT_GROUP,
 		},
 	}
+	resourceTypeRoster = &v2.ResourceType{
+		Id:          "roster",
+		DisplayName: "On-Call Roster",
+		Traits: []v2.ResourceType_Trait{
+			v2.ResourceType_TRAIT_GROUP,
+		},
+	}
 )
 
 type ServiceNow struct {
@@ -47,6 +54,7 @@ func (s *ServiceNow) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 		userBuilder(s.client),
 		roleBuilder(s.client),
 		groupBuilder(s.client),
+		rosterBuilder(s.client),
 	}
 }
 
