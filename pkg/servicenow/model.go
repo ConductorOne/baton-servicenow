@@ -86,6 +86,33 @@ type GroupMemberPayload struct {
 	Group string `json:"group"`
 }
 
+// Table `cmn_rota` (On-Call Rotation). One rotation belongs to a group.
+type Rota struct {
+	BaseResource
+	Name  string `json:"name"`
+	Group string `json:"group"`
+}
+
+// Table `cmn_rota_roster` (On-Call Roster). A roster belongs to a rota.
+type Roster struct {
+	BaseResource
+	Name string `json:"name"`
+	Rota string `json:"rota"`
+}
+
+// Table `cmn_rota_member` (On-Call Roster Member). Joins a user to a roster.
+type RotaMember struct {
+	BaseResource
+	Roster string `json:"roster"`
+	Member string `json:"member"`
+	Order  string `json:"order"`
+}
+
+type RotaMemberPayload struct {
+	Roster string `json:"roster"`
+	Member string `json:"member"`
+}
+
 type UserToRole struct {
 	BaseResource
 	Inherited string `json:"inherited"`

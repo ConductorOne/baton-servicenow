@@ -5,6 +5,40 @@ import (
 	"testing"
 )
 
+func TestRotaMember_Unmarshal(t *testing.T) {
+	const input = `{"sys_id":"mem123","roster":"ros456","member":"usr789","order":"1"}`
+
+	var got RotaMember
+	if err := json.Unmarshal([]byte(input), &got); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got.Id != "mem123" {
+		t.Errorf("Id = %q, want mem123", got.Id)
+	}
+	if got.Roster != "ros456" {
+		t.Errorf("Roster = %q, want ros456", got.Roster)
+	}
+	if got.Member != "usr789" {
+		t.Errorf("Member = %q, want usr789", got.Member)
+	}
+	if got.Order != "1" {
+		t.Errorf("Order = %q, want 1", got.Order)
+	}
+}
+
+func TestRoster_Unmarshal(t *testing.T) {
+	const input = `{"sys_id":"ros456","name":"Primary","rota":"rot111"}`
+
+	var got Roster
+	if err := json.Unmarshal([]byte(input), &got); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Id != "ros456" || got.Name != "Primary" || got.Rota != "rot111" {
+		t.Errorf("got %+v, want {Id:ros456 Name:Primary Rota:rot111}", got)
+	}
+}
+
 func TestUser_UnmarshalJSON(t *testing.T) {
 	tests := []struct {
 		name               string
