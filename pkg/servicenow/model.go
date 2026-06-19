@@ -15,6 +15,30 @@ import (
 
 const SystemAdminUserId = "6816f79cc0a8016401c5a33be04be441"
 
+// Table names backing the connector's resources/grants, used as the
+// sys_audit_delete `tablename` filter for deletion capture. The join tables
+// (TableUserGroupMember, TableUserHasRole, TableGroupHasRole) carry the
+// membership/assignment row sys_id in sys_audit_delete.documentkey.
+const (
+	TableUser            = "sys_user"
+	TableUserGroup       = "sys_user_group"
+	TableUserRole        = "sys_user_role"
+	TableUserGroupMember = "sys_user_grmember"
+	TableUserHasRole     = "sys_user_has_role"
+	TableGroupHasRole    = "sys_group_has_role"
+)
+
+// AuditedTables is every connector table whose hard deletes incremental sync
+// reconciles from sys_audit_delete.
+var AuditedTables = []string{
+	TableUser,
+	TableUserGroup,
+	TableUserRole,
+	TableUserGroupMember,
+	TableUserHasRole,
+	TableGroupHasRole,
+}
+
 type BaseResource struct {
 	Id string `json:"sys_id"`
 }
@@ -121,6 +145,26 @@ type UserRoles struct {
 	FromRole  []string `json:"from_role"`
 	FromGroup []string `json:"from_group"`
 }
+
+// AuditDeleteRecord is a row from the sys_audit_delete table. ServiceNow logs a
+// row here for every HARD delete of an audited record. It is the only signal a
+// sys_updated_on watermark cannot provide (a deleted row never gets a newer
+// timestamp), so incremental sync uses it to prune resources/grants that no
+// longer exist.
+//
+//   - Tablename:    the table the deleted row belonged to (e.g. "sys_user").
+//   - DocumentKey:  the sys_id of the DELETED row. For a join table
+//     (sys_user_grmember / sys_user_has_role / sys_group_has_role) this is the
+//     membership/assignment row's sys_id, NOT the user/group/role sys_id.
+//   - SysCreatedOn: when the delete was logged ("YYYY-MM-DD HH:MM:SS", UTC). Used
+//     to advance the per-deployment delete watermark.
+type AuditDeleteRecord struct {
+	Tablename    string `json:"tablename"`
+	DocumentKey  string `json:"documentkey"`
+	SysCreatedOn string `json:"sys_created_on"`
+}
+
+type AuditDeleteResponse = ListResponse[AuditDeleteRecord]
 
 // TODO(lauren) remove unecessary fields.
 // Service Catalog request models.

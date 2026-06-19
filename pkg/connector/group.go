@@ -58,6 +58,7 @@ func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagi
 	// Incremental path: drain only groups changed since the watermark, merge
 	// over the cached snapshot, and emit the full union in one page.
 	if g.state.Enabled() {
+		g.state.Reconcile(ctx)
 		changed, err := g.client.GetAllGroupsUpdatedSince(ctx, g.state.Watermark(incremental.StreamGroups))
 		if err != nil {
 			g.state.MarkFailed()
@@ -142,6 +143,7 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 	// the watermark, merge over the cached snapshot for this group, and emit the
 	// full union of memberships in one page.
 	if g.state.Enabled() {
+		g.state.Reconcile(ctx)
 		changed, err := g.client.GetAllUserToGroupUpdatedSince(ctx, resource.Id.Resource, g.state.Watermark(incremental.StreamGroupMembers))
 		if err != nil {
 			g.state.MarkFailed()

@@ -34,6 +34,10 @@ const (
 	GroupMembersBaseUrl      = TableAPIBaseURL + "/sys_user_grmember"
 	GroupMemberDetailBaseUrl = GroupMembersBaseUrl + "/%s"
 
+	// AuditDeleteBaseUrl is the sys_audit_delete table: one row per hard delete
+	// of an audited record. Used to capture deletions during incremental sync.
+	AuditDeleteBaseUrl = TableAPIBaseURL + "/sys_audit_delete"
+
 	RolesBaseUrl           = TableAPIBaseURL + "/sys_user_role"
 	UserRolesBaseUrl       = TableAPIBaseURL + "/sys_user_has_role"
 	UserRoleDetailBaseUrl  = UserRolesBaseUrl + "/%s"
@@ -242,6 +246,58 @@ func (c *Client) GetAllUserToRoleUpdatedSince(ctx context.Context, roleId string
 func (c *Client) GetAllGroupToRoleUpdatedSince(ctx context.Context, roleId string, updatedSince string) ([]GroupToRole, error) {
 	return drainAll(ctx, func(ctx context.Context, pv PaginationVars) ([]GroupToRole, string, error) {
 		return c.GetGroupToRoleUpdatedSince(ctx, "", roleId, pv, updatedSince)
+	})
+}
+
+// AuditDeleteFields is the minimal field set fetched from sys_audit_delete.
+var AuditDeleteFields = []string{"tablename", "documentkey", "sys_created_on"}
+
+// GetDeletedSince lists sys_audit_delete rows for one or more tables whose
+// delete was logged at or after createdSince ("YYYY-MM-DD HH:MM:SS", UTC). An
+// empty createdSince fetches the full audit history for those tables. Each
+// returned record's DocumentKey is the sys_id of the deleted row (a join-row
+// sys_id for the membership/assignment tables).
+//
+// Note: an error here (e.g. auditing disabled, or the caller lacks read access
+// to sys_audit_delete) must be handled gracefully by callers — deletions simply
+// won't be captured that run; the periodic full-sync backstop reconciles them.
+func (c *Client) GetDeletedSince(ctx context.Context, tableNames []string, createdSince string, paginationVars PaginationVars) ([]AuditDeleteRecord, string, error) {
+	var resp AuditDeleteResponse
+
+	var query string
+	switch {
+	case len(tableNames) == 1:
+		query = fmt.Sprintf("tablename=%s", tableNames[0])
+	case len(tableNames) > 1:
+		query = "tablenameIN" + strings.Join(tableNames, ",")
+	}
+	if createdSince != "" {
+		clause := fmt.Sprintf("sys_created_on>=%s", createdSince)
+		if query != "" {
+			query += "^" + clause
+		} else {
+			query = clause
+		}
+	}
+
+	reqOpts := []ReqOpt{
+		WithQuery(query),
+		WithFields(AuditDeleteFields...),
+	}
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
+
+	nextPage, err := c.get(ctx, c.apiURL(AuditDeleteBaseUrl, c.deployment), &resp, reqOpts...)
+	if err != nil {
+		return nil, "", err
+	}
+	return resp.Result, nextPage, nil
+}
+
+// GetAllDeletedSince drains every sys_audit_delete row for the given tables
+// logged at or after createdSince.
+func (c *Client) GetAllDeletedSince(ctx context.Context, tableNames []string, createdSince string) ([]AuditDeleteRecord, error) {
+	return drainAll(ctx, func(ctx context.Context, pv PaginationVars) ([]AuditDeleteRecord, string, error) {
+		return c.GetDeletedSince(ctx, tableNames, createdSince, pv)
 	})
 }
 

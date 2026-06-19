@@ -157,7 +157,7 @@ func New(
 		return nil, err
 	}
 
-	state, err := incremental.Load(stateDir, deployment, incrementalEnabled)
+	state, err := incremental.Load(stateDir, deployment, incrementalEnabled, servicenowClient)
 	if err != nil {
 		return nil, fmt.Errorf("baton-servicenow: failed to load incremental state: %w", err)
 	}

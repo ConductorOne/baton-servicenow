@@ -57,6 +57,7 @@ func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 	// Incremental path: drain only roles changed since the watermark, merge over
 	// the cached snapshot, and emit the full union in one page.
 	if r.state.Enabled() {
+		r.state.Reconcile(ctx)
 		changed, err := r.client.GetAllRolesUpdatedSince(ctx, r.state.Watermark(incremental.StreamRoles))
 		if err != nil {
 			r.state.MarkFailed()
@@ -140,6 +141,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 	// role changed since the watermark, merge each over the cached snapshot, and
 	// emit the full union (both principal kinds) in one page.
 	if r.state.Enabled() {
+		r.state.Reconcile(ctx)
 		rv, err := r.incrementalGrants(ctx, resource)
 		if err != nil {
 			r.state.MarkFailed()

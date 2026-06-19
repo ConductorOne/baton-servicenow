@@ -76,6 +76,9 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 	// The SDK does a full replace per sync and does not merge across pages, so
 	// the union must be complete in one response to keep the c1z whole.
 	if u.state.Enabled() {
+		// Capture hard deletes once per run (prunes the snapshot) before building
+		// the merged union, so deleted rows do not reappear in the c1z.
+		u.state.Reconcile(ctx)
 		changed, err := u.client.GetAllUsersUpdatedSince(ctx, u.state.Watermark(incremental.StreamUsers))
 		if err != nil {
 			u.state.MarkFailed()

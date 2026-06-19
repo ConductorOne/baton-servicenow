@@ -44,18 +44,34 @@
 package incremental
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
+
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
 )
 
 // stateVersion is bumped when the on-disk schema changes incompatibly; a
 // mismatch is treated as "no usable state" and forces a full sync.
-const stateVersion = 1
+//
+// v2 added the DeleteWatermark field (deletion capture via sys_audit_delete).
+// A v1 file unmarshals fine into the v2 struct, but the version check forces a
+// full pull on upgrade so the delete watermark starts from a known-good
+// snapshot rather than mid-history.
+const stateVersion = 2
+
+// Deleter fetches hard-delete audit rows. It is satisfied by *servicenow.Client
+// (GetAllDeletedSince). It is injected at Load time so the incremental package
+// stays decoupled from the HTTP client and is easy to fake in tests.
+type Deleter interface {
+	GetAllDeletedSince(ctx context.Context, tableNames []string, createdSince string) ([]servicenow.AuditDeleteRecord, error)
+}
 
 // Stream identifies an independently-watermarked record stream. Each stream
 // advances its own watermark so a failure in one (which prevents its Save)
@@ -82,6 +98,13 @@ type Snapshot struct {
 	// ("YYYY-MM-DD HH:MM:SS", UTC). The next run pulls each stream's rows with
 	// sys_updated_on>=Watermarks[stream].
 	Watermarks map[Stream]string `json:"watermarks"`
+
+	// DeleteWatermark is the high-water sys_created_on from sys_audit_delete
+	// ("YYYY-MM-DD HH:MM:SS", UTC) across ALL audited connector tables. The next
+	// run fetches delete-audit rows with sys_created_on>=DeleteWatermark and
+	// prunes the matching sys_ids from the snapshot. A single shared watermark is
+	// safe because deletions are reconciled once per run over all tables together.
+	DeleteWatermark string `json:"delete_watermark"`
 
 	Users  map[string]servicenow.User  `json:"users"`
 	Roles  map[string]servicenow.Role  `json:"roles"`
@@ -127,6 +150,12 @@ type State struct {
 	// failed is set if a syncer reported an error this run, blocking subsequent
 	// persistence so a partial run never advances watermarks past unsynced rows.
 	failed bool
+
+	// deleter fetches sys_audit_delete rows; nil disables deletion capture.
+	deleter Deleter
+	// reconcileOnce guards the single per-run deletion reconciliation so it runs
+	// exactly once no matter which syncer (users/groups/roles) reaches it first.
+	reconcileOnce sync.Once
 }
 
 // Load opens (or initializes) the incremental state for a deployment.
@@ -140,7 +169,7 @@ type State struct {
 // or version-mismatched file yields an empty snapshot (the next sync is a full
 // pull that seeds the cache) rather than an error, so a bad cache never fails
 // a sync.
-func Load(dir string, deployment string, enabled bool) (*State, error) {
+func Load(dir string, deployment string, enabled bool, deleter Deleter) (*State, error) {
 	if !enabled {
 		return &State{enabled: false, snapshot: newSnapshot(deployment)}, nil
 	}
@@ -156,7 +185,7 @@ func Load(dir string, deployment string, enabled bool) (*State, error) {
 	}
 	path := filepath.Join(dir, fmt.Sprintf("baton-servicenow-incremental-%s.json", sanitize(deployment)))
 
-	s := &State{path: path, enabled: true, snapshot: newSnapshot(deployment)}
+	s := &State{path: path, enabled: true, snapshot: newSnapshot(deployment), deleter: deleter}
 
 	data, err := os.ReadFile(path)
 	switch {
@@ -211,6 +240,135 @@ func (s *State) advance(stream Stream, ts string) {
 	if ts > s.snapshot.Watermarks[stream] {
 		s.snapshot.Watermarks[stream] = ts
 	}
+}
+
+// Reconcile captures hard deletes once per run. It fetches sys_audit_delete
+// rows for every audited connector table logged at or after the stored delete
+// watermark, prunes the matching sys_ids out of the snapshot (resources by
+// sys_id; join rows out of the nested membership/assignment maps), advances the
+// delete watermark to the max sys_created_on observed, and persists.
+//
+// It runs at most once per process (sync.Once), so whichever syncer hits its
+// incremental branch first triggers it; the prune mutates the shared snapshot
+// maps in place, so every later Merge* emits a union that already excludes the
+// deleted rows. The reconciliation point is therefore "at sync start, before any
+// union is built", as required.
+//
+// Graceful degradation: if the audit table is unqueryable (auditing disabled,
+// no read access, any 4xx/5xx) the error is logged and swallowed — deletions
+// are simply not captured this run and the periodic full-sync backstop covers
+// them. A failed reconcile NEVER fails the sync and NEVER advances the delete
+// watermark. It is a no-op when disabled, after MarkFailed, or with no deleter.
+func (s *State) Reconcile(ctx context.Context) {
+	if !s.Enabled() || s.deleter == nil {
+		return
+	}
+	s.reconcileOnce.Do(func() {
+		l := ctxzap.Extract(ctx)
+
+		s.mu.Lock()
+		since := s.snapshot.DeleteWatermark
+		s.mu.Unlock()
+
+		records, err := s.deleter.GetAllDeletedSince(ctx, servicenow.AuditedTables, since)
+		if err != nil {
+			// Degrade gracefully: deletions not captured this run; the full-sync
+			// backstop reconciles them. Do not fail the sync.
+			l.Warn("baton-servicenow: deletion capture unavailable, skipping (full sync will reconcile)",
+				zap.String("delete_watermark", since),
+				zap.Error(err),
+			)
+			return
+		}
+
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		pruned, maxTS := pruneDeletions(s.snapshot, records)
+		if maxTS > s.snapshot.DeleteWatermark {
+			s.snapshot.DeleteWatermark = maxTS
+		}
+		if err := s.persist(); err != nil {
+			l.Warn("baton-servicenow: failed to persist state after deletion reconcile", zap.Error(err))
+			return
+		}
+		l.Debug("baton-servicenow: deletion reconcile complete",
+			zap.Int("audit_rows", len(records)),
+			zap.Int("pruned", pruned),
+			zap.String("delete_watermark", s.snapshot.DeleteWatermark),
+		)
+	})
+}
+
+// pruneDeletions removes every deleted sys_id (records[i].DocumentKey) from the
+// snapshot and returns the count pruned and the max sys_created_on seen. A
+// DocumentKey may be a resource sys_id (sys_user/sys_user_group/sys_user_role)
+// or a join-row sys_id (sys_user_grmember/sys_user_has_role/sys_group_has_role);
+// for join rows it is removed from whichever nested map contains it. The lookup
+// is driven by Tablename so a sys_id collision across tables cannot prune the
+// wrong record. Caller must hold the snapshot's lock (or own the snapshot).
+//
+// Split out as a pure function over *Snapshot so the prune logic is unit-tested
+// without HTTP/IO.
+func pruneDeletions(snap *Snapshot, records []servicenow.AuditDeleteRecord) (int, string) {
+	pruned := 0
+	maxTS := ""
+	for _, rec := range records {
+		if rec.SysCreatedOn > maxTS {
+			maxTS = rec.SysCreatedOn
+		}
+		key := rec.DocumentKey
+		if key == "" {
+			continue
+		}
+		switch rec.Tablename {
+		case servicenow.TableUser:
+			if _, ok := snap.Users[key]; ok {
+				delete(snap.Users, key)
+				pruned++
+			}
+		case servicenow.TableUserGroup:
+			if _, ok := snap.Groups[key]; ok {
+				delete(snap.Groups, key)
+				pruned++
+			}
+			// A deleted group's membership/role rows may linger; drop the nested
+			// maps keyed by this group too so its grants disappear.
+			delete(snap.GroupMembers, key)
+		case servicenow.TableUserRole:
+			if _, ok := snap.Roles[key]; ok {
+				delete(snap.Roles, key)
+				pruned++
+			}
+		case servicenow.TableUserGroupMember:
+			if pruneNested(snap.GroupMembers, key) {
+				pruned++
+			}
+		case servicenow.TableUserHasRole:
+			if pruneNested(snap.UserRoles, key) {
+				pruned++
+			}
+		case servicenow.TableGroupHasRole:
+			if pruneNested(snap.GroupRoles, key) {
+				pruned++
+			}
+		}
+	}
+	return pruned, maxTS
+}
+
+// pruneNested removes a join-row sys_id from whichever outer bucket
+// (group/role) holds it in a snapshot nested map. Returns true if removed.
+func pruneNested[T any](m map[string]map[string]T, rowID string) bool {
+	for outer, inner := range m {
+		if _, ok := inner[rowID]; ok {
+			delete(inner, rowID)
+			if len(inner) == 0 {
+				delete(m, outer)
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // persist marshals and atomically writes the snapshot. Caller must hold s.mu.
