@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -25,6 +26,28 @@ import (
 type scheduleResourceType struct {
 	resourceType *v2.ResourceType
 	client       *servicenow.Client
+
+	// moduleAbsentOnce guards a single advisory warning when the On-Call
+	// Scheduling plugin is not installed (see warnModuleAbsent).
+	moduleAbsentOnce sync.Once
+}
+
+// warnModuleAbsent logs, at most once per process, that the On-Call Scheduling
+// plugin is not installed, so schedule resources are being skipped. It is called
+// when a schedule read hits a ServiceNow "Invalid table" error on the on-call
+// tables (cmn_rota_roster / cmn_rota_member), which means the optional plugin
+// (com.snc.on_call_rotation) is absent. Skipping schedules must NOT fail the
+// sync of users, groups, and roles (separate resource types), so callers return
+// empty rather than propagating the error.
+func (s *scheduleResourceType) warnModuleAbsent(ctx context.Context) {
+	s.moduleAbsentOnce.Do(func() {
+		ctxzap.Extract(ctx).Warn(
+			"baton-servicenow: ServiceNow On-Call Scheduling plugin (com.snc.on_call_rotation) " +
+				"appears not to be installed (cmn_rota_roster table is absent); skipping schedule " +
+				"resources, entitlements, and grants. User, group, and role sync are unaffected. " +
+				"Install the On-Call Scheduling plugin to enable schedule support.",
+		)
+	})
 }
 
 func (s *scheduleResourceType) ResourceType(_ context.Context) *v2.ResourceType {
@@ -81,6 +104,12 @@ func (s *scheduleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *p
 		},
 	)
 	if err != nil {
+		// On-Call Scheduling plugin not installed: skip schedules instead of
+		// failing the whole sync (users/groups/roles are independent).
+		if servicenow.IsInvalidTableError(err) {
+			s.warnModuleAbsent(ctx)
+			return nil, "", nil, nil
+		}
 		return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list schedules: %w", err)
 	}
 
@@ -152,6 +181,12 @@ func (s *scheduleResourceType) Grants(ctx context.Context, resource *v2.Resource
 		},
 	)
 	if err != nil {
+		// Defensive: if the on-call plugin was uninstalled after List ran, skip
+		// rather than fail the sync.
+		if servicenow.IsInvalidTableError(err) {
+			s.warnModuleAbsent(ctx)
+			return nil, "", nil, nil
+		}
 		return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list schedule members: %w", err)
 	}
 

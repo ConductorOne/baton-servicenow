@@ -593,6 +593,18 @@ func (c *Client) delete(
 	return err
 }
 
+// IsInvalidTableError reports whether err is a ServiceNow "Invalid table" error.
+// ServiceNow returns HTTP 400 with body message "Invalid table <name>" when a
+// queried table does not exist on the instance — e.g. the on-call scheduling
+// tables (cmn_rota_roster, cmn_rota_member) when the On-Call Scheduling plugin
+// (com.snc.on_call_rotation) is not installed. The connector uses this to skip
+// optional-module resources gracefully instead of failing the whole sync. The
+// error message carries the raw response body (see the >=300 path in
+// doRequestWithRetry), so a substring match is reliable.
+func IsInvalidTableError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Invalid table")
+}
+
 func handleStatusCode(statusCode int) codes.Code {
 	switch statusCode {
 	case http.StatusRequestTimeout:
