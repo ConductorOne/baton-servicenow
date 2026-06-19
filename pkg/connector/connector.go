@@ -38,7 +38,7 @@ var (
 	}
 	resourceTypeSchedule = &v2.ResourceType{
 		Id:          "schedule",
-		DisplayName: "On-Call Schedule",
+		DisplayName: "Schedule",
 		Traits: []v2.ResourceType_Trait{
 			v2.ResourceType_TRAIT_GROUP,
 		},
