@@ -2,6 +2,7 @@ package servicenow
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -157,5 +158,62 @@ func TestPrepareRotaMemberFilter(t *testing.T) {
 				t.Errorf("Query = %q, want %q", got.Query, tt.wantQuery)
 			}
 		})
+	}
+}
+
+func TestOnCallMember_Unmarshal(t *testing.T) {
+	const input = `{"userId":"usr1","roster":"ros1","rota":"rot1","group":"grp1","order":1,"isOverride":false}`
+	var got OnCallMember
+	if err := json.Unmarshal([]byte(input), &got); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.UserId != "usr1" || got.Roster != "ros1" || got.Rota != "rot1" || got.Group != "grp1" {
+		t.Errorf("refs = %+v, want userId=usr1 roster=ros1 rota=rot1 group=grp1", got)
+	}
+	if got.Order != 1 {
+		t.Errorf("Order = %d, want 1", got.Order)
+	}
+}
+
+func TestRota_Unmarshal(t *testing.T) {
+	const input = `{"sys_id":"rot1","name":"Primary Rotation","group":"grp1"}`
+	var got Rota
+	if err := json.Unmarshal([]byte(input), &got); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Id != "rot1" || got.Name != "Primary Rotation" || got.Group != "grp1" {
+		t.Errorf("got %+v, want {Id:rot1 Name:Primary Rotation Group:grp1}", got)
+	}
+}
+
+func TestGroup_ManagerUnmarshal(t *testing.T) {
+	const input = `{"sys_id":"grp1","name":"Eng","description":"d","manager":"mgr1"}`
+	var got Group
+	if err := json.Unmarshal([]byte(input), &got); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Manager != "mgr1" {
+		t.Errorf("Manager = %q, want mgr1", got.Manager)
+	}
+}
+
+func TestOnCallActionPayloads_Marshal(t *testing.T) {
+	addBytes, _ := json.Marshal(OnCallAddMemberPayload{Member: "u1", Rosters: "r1", Rota: "rt1", FromDate: "2026-06-19"})
+	add := string(addBytes)
+	for _, want := range []string{`"member":"u1"`, `"rosters":"r1"`, `"rota":"rt1"`, `"from_date":"2026-06-19"`} {
+		if !strings.Contains(add, want) {
+			t.Errorf("add payload %s missing %s", add, want)
+		}
+	}
+	rmBytes, _ := json.Marshal(OnCallRemoveMemberPayload{User: "u1", Rosters: "r1", FromDate: "2026-06-19", DeleteMember: "true"})
+	rm := string(rmBytes)
+	for _, want := range []string{`"user":"u1"`, `"rosters":"r1"`, `"delete_member":"true"`} {
+		if !strings.Contains(rm, want) {
+			t.Errorf("remove payload %s missing %s", rm, want)
+		}
+	}
+	// rota is omitempty: absent when empty
+	if strings.Contains(rm, `"rota"`) {
+		t.Errorf("remove payload should omit empty rota: %s", rm)
 	}
 }
