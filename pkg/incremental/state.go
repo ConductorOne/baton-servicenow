@@ -156,6 +156,16 @@ type State struct {
 	// reconcileOnce guards the single per-run deletion reconciliation so it runs
 	// exactly once no matter which syncer (users/groups/roles) reaches it first.
 	reconcileOnce sync.Once
+
+	// readWatermarks freezes the watermark each stream uses for FETCHING for the
+	// duration of a run. Without this, group-members/user-roles/group-roles —
+	// which are fetched per group/role across many parallel calls within one sync
+	// — would read a watermark that Merge* is concurrently advancing, so a row
+	// with a far-future sys_updated_on (e.g. demo data) processed early would push
+	// the watermark past rows of groups/roles processed later, dropping them. The
+	// frozen value is captured the first time a stream's watermark is read this
+	// run and never moves again until the next process.
+	readWatermarks map[Stream]string
 }
 
 // Load opens (or initializes) the incremental state for a deployment.
@@ -224,13 +234,26 @@ func (s *State) MarkFailed() {
 // Watermark returns the sys_updated_on lower bound for a stream, to pass to the
 // matching *UpdatedSince client method. Empty string means "full pull" (first
 // sync, disabled mode, or a stream that has not yet completed once).
+//
+// The value is FROZEN at the first read per run (see readWatermarks): every
+// per-group / per-role fetch in one sync uses the same lower bound, so a
+// concurrently-advancing stored watermark (driven by far-future demo timestamps)
+// cannot cause later groups/roles to skip their rows.
 func (s *State) Watermark(stream Stream) string {
 	if !s.Enabled() {
 		return ""
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.snapshot.Watermarks[stream]
+	if s.readWatermarks == nil {
+		s.readWatermarks = map[Stream]string{}
+	}
+	if wm, ok := s.readWatermarks[stream]; ok {
+		return wm
+	}
+	wm := s.snapshot.Watermarks[stream]
+	s.readWatermarks[stream] = wm
+	return wm
 }
 
 // advance bumps a stream's watermark to ts if ts is greater. Lexical comparison
@@ -381,11 +404,28 @@ func (s *State) persist() error {
 	if err != nil {
 		return fmt.Errorf("baton-servicenow: marshaling incremental state: %w", err)
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	// Write to a UNIQUE temp file (not a fixed "<path>.tmp") then rename. The
+	// baton-sdk may run the connector across multiple goroutines/instances that
+	// share the same state path; a fixed temp name lets two writers collide so
+	// one's rename hits a temp the other already renamed away (ENOENT). A unique
+	// temp per write keeps each rename atomic and independent.
+	dir := filepath.Dir(s.path)
+	tmpFile, err := os.CreateTemp(dir, filepath.Base(s.path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("baton-servicenow: creating temp incremental state in %q: %w", dir, err)
+	}
+	tmp := tmpFile.Name()
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		os.Remove(tmp)
 		return fmt.Errorf("baton-servicenow: writing incremental state %q: %w", tmp, err)
 	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("baton-servicenow: closing incremental state %q: %w", tmp, err)
+	}
 	if err := os.Rename(tmp, s.path); err != nil {
+		os.Remove(tmp)
 		return fmt.Errorf("baton-servicenow: committing incremental state %q: %w", s.path, err)
 	}
 	return nil

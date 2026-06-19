@@ -342,6 +342,33 @@ func TestReconcileDegradesGracefullyOnError(t *testing.T) {
 	}
 }
 
+func TestWatermarkFrozenWithinRun(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Load(dir, "dev1", true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Seed a prior watermark so the read returns a non-empty baseline.
+	s.snapshot.Watermarks[StreamGroupMembers] = "2026-01-01 00:00:00"
+
+	first := s.Watermark(StreamGroupMembers)
+	if first != "2026-01-01 00:00:00" {
+		t.Fatalf("unexpected initial watermark %q", first)
+	}
+	// A far-future row advances the STORED watermark mid-run (mimics demo data
+	// processed for an early group).
+	if _, err := s.MergeGroupMembers("g-future", []servicenow.GroupMember{
+		{BaseResource: servicenow.BaseResource{Id: "m-future"}, SysUpdatedOn: "2031-01-01 00:00:00"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A later group must still read the FROZEN lower bound, not the advanced one,
+	// so it does not skip its own rows.
+	if again := s.Watermark(StreamGroupMembers); again != first {
+		t.Fatalf("watermark must be frozen within a run: got %q want %q", again, first)
+	}
+}
+
 func TestReconcileNoOpWhenDisabled(t *testing.T) {
 	fd := &fakeDeleter{}
 	s, err := Load(t.TempDir(), "dev1", false, fd)
