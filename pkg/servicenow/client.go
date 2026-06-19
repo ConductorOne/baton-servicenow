@@ -163,6 +163,88 @@ func (c *Client) GetBaseURL() string {
 	return c.baseURL
 }
 
+// incrementalPageSize is the page size used when draining all delta rows in a
+// single incremental List/Grants call. ServiceNow Table API caps practical
+// page sizes well below this; the value just bounds round-trips.
+const incrementalPageSize = 1000
+
+// drainAll repeatedly calls fetch (a paginated list method) starting at offset
+// 0 until the returned next-page token is empty, accumulating every row. It is
+// used for incremental syncs, where the connector fetches the full changed set
+// in one shot, merges it over its cached snapshot, and emits the union as a
+// single page (the SDK does not merge across paginated responses).
+func drainAll[T any](
+	ctx context.Context,
+	fetch func(ctx context.Context, pv PaginationVars) ([]T, string, error),
+) ([]T, error) {
+	var all []T
+	offset := 0
+	for {
+		page, next, err := fetch(ctx, PaginationVars{Limit: incrementalPageSize, Offset: offset})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if next == "" {
+			return all, nil
+		}
+		off, err := ConvertPageToken(next)
+		if err != nil {
+			return nil, err
+		}
+		// Guard against a non-advancing token to avoid an infinite loop.
+		if off <= offset {
+			return all, nil
+		}
+		offset = off
+	}
+}
+
+// GetAllUsersUpdatedSince drains every user changed at or after updatedSince.
+func (c *Client) GetAllUsersUpdatedSince(ctx context.Context, updatedSince string) ([]User, error) {
+	return drainAll(ctx, func(ctx context.Context, pv PaginationVars) ([]User, string, error) {
+		return c.GetUsersUpdatedSince(ctx, pv, updatedSince)
+	})
+}
+
+// GetAllGroupsUpdatedSince drains every group changed at or after updatedSince.
+func (c *Client) GetAllGroupsUpdatedSince(ctx context.Context, updatedSince string) ([]Group, error) {
+	return drainAll(ctx, func(ctx context.Context, pv PaginationVars) ([]Group, string, error) {
+		return c.GetGroupsUpdatedSince(ctx, pv, nil, updatedSince)
+	})
+}
+
+// GetAllRolesUpdatedSince drains every role changed at or after updatedSince.
+func (c *Client) GetAllRolesUpdatedSince(ctx context.Context, updatedSince string) ([]Role, error) {
+	return drainAll(ctx, func(ctx context.Context, pv PaginationVars) ([]Role, string, error) {
+		return c.GetRolesUpdatedSince(ctx, pv, updatedSince)
+	})
+}
+
+// GetAllUserToGroupUpdatedSince drains every group-membership row for groupId
+// changed at or after updatedSince.
+func (c *Client) GetAllUserToGroupUpdatedSince(ctx context.Context, groupId string, updatedSince string) ([]GroupMember, error) {
+	return drainAll(ctx, func(ctx context.Context, pv PaginationVars) ([]GroupMember, string, error) {
+		return c.GetUserToGroupUpdatedSince(ctx, "", groupId, pv, updatedSince)
+	})
+}
+
+// GetAllUserToRoleUpdatedSince drains every user-role row for roleId changed at
+// or after updatedSince.
+func (c *Client) GetAllUserToRoleUpdatedSince(ctx context.Context, roleId string, updatedSince string) ([]UserToRole, error) {
+	return drainAll(ctx, func(ctx context.Context, pv PaginationVars) ([]UserToRole, string, error) {
+		return c.GetUserToRoleUpdatedSince(ctx, "", roleId, pv, updatedSince)
+	})
+}
+
+// GetAllGroupToRoleUpdatedSince drains every group-role row for roleId changed
+// at or after updatedSince.
+func (c *Client) GetAllGroupToRoleUpdatedSince(ctx context.Context, roleId string, updatedSince string) ([]GroupToRole, error) {
+	return drainAll(ctx, func(ctx context.Context, pv PaginationVars) ([]GroupToRole, string, error) {
+		return c.GetGroupToRoleUpdatedSince(ctx, "", roleId, pv, updatedSince)
+	})
+}
+
 // apiURL builds an API URL from a constant pattern like UsersBaseUrl.
 // When a base URL override is set, it replaces the default
 // https://DEPLOYMENT.service-now.com/api prefix with the override.
@@ -177,9 +259,19 @@ func (c *Client) apiURL(pattern string, args ...any) string {
 
 // Table `sys_user` (Users).
 func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars) ([]User, string, error) {
+	return c.GetUsersUpdatedSince(ctx, paginationVars, "")
+}
+
+// GetUsersUpdatedSince lists users optionally restricted to those whose
+// sys_updated_on is at or after updatedSince. When updatedSince is empty it
+// behaves identically to GetUsers (full pull). This is the incremental-sync
+// entry point: callers pass the watermark from the previous successful sync.
+func (c *Client) GetUsersUpdatedSince(ctx context.Context, paginationVars PaginationVars, updatedSince string) ([]User, string, error) {
 	var usersResponse UsersResponse
 
-	reqOpts := filterToReqOptions(prepareUserFilters(c.AllowedDomains, c.CustomUserFields))
+	filters := prepareUserFilters(c.AllowedDomains, c.CustomUserFields)
+	filters.Query = appendUpdatedSince(filters.Query, updatedSince)
+	reqOpts := filterToReqOptions(filters)
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 
 	nextPage, err := c.get(
@@ -215,9 +307,17 @@ func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 
 // Table `sys_user_group` (Groups).
 func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars, groupIDs []string) ([]Group, string, error) {
+	return c.GetGroupsUpdatedSince(ctx, paginationVars, groupIDs, "")
+}
+
+// GetGroupsUpdatedSince lists groups optionally restricted to those updated at
+// or after updatedSince. Empty updatedSince == full pull.
+func (c *Client) GetGroupsUpdatedSince(ctx context.Context, paginationVars PaginationVars, groupIDs []string, updatedSince string) ([]Group, string, error) {
 	var groupsResponse GroupsResponse
 
-	reqOpts := filterToReqOptions(prepareGroupFilters(groupIDs))
+	filters := prepareGroupFilters(groupIDs)
+	filters.Query = appendUpdatedSince(filters.Query, updatedSince)
+	reqOpts := filterToReqOptions(filters)
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 	nextPageToken, err := c.get(
 		ctx,
@@ -252,9 +352,17 @@ func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
 
 // Table `sys_user_grmember` (Group Members).
 func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId string, paginationVars PaginationVars) ([]GroupMember, string, error) {
+	return c.GetUserToGroupUpdatedSince(ctx, userId, groupId, paginationVars, "")
+}
+
+// GetUserToGroupUpdatedSince lists group-membership rows optionally restricted
+// to those updated at or after updatedSince. Empty updatedSince == full pull.
+func (c *Client) GetUserToGroupUpdatedSince(ctx context.Context, userId string, groupId string, paginationVars PaginationVars, updatedSince string) ([]GroupMember, string, error) {
 	var groupMembersResponse GroupMembersResponse
 
-	reqOpts := filterToReqOptions(prepareUserToGroupFilter(userId, groupId))
+	filters := prepareUserToGroupFilter(userId, groupId)
+	filters.Query = appendUpdatedSince(filters.Query, updatedSince)
+	reqOpts := filterToReqOptions(filters)
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 
 	nextPageToken, err := c.get(
@@ -291,10 +399,18 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, id string) error {
 
 // Table `sys_user_role` (Roles).
 func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([]Role, string, error) {
+	return c.GetRolesUpdatedSince(ctx, paginationVars, "")
+}
+
+// GetRolesUpdatedSince lists roles optionally restricted to those updated at or
+// after updatedSince. Empty updatedSince == full pull.
+func (c *Client) GetRolesUpdatedSince(ctx context.Context, paginationVars PaginationVars, updatedSince string) ([]Role, string, error) {
 	var rolesResponse RolesResponse
 
 	paginationVars.Limit++
-	reqOpts := filterToReqOptions(prepareRoleFilters())
+	filters := prepareRoleFilters()
+	filters.Query = appendUpdatedSince(filters.Query, updatedSince)
+	reqOpts := filterToReqOptions(filters)
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 
 	nextPageToken, err := c.get(
@@ -313,9 +429,17 @@ func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([
 
 // Table `sys_user_has_role` (User to Role).
 func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string, paginationVars PaginationVars) ([]UserToRole, string, error) {
+	return c.GetUserToRoleUpdatedSince(ctx, userId, roleId, paginationVars, "")
+}
+
+// GetUserToRoleUpdatedSince lists user-role rows optionally restricted to those
+// updated at or after updatedSince. Empty updatedSince == full pull.
+func (c *Client) GetUserToRoleUpdatedSince(ctx context.Context, userId string, roleId string, paginationVars PaginationVars, updatedSince string) ([]UserToRole, string, error) {
 	var userToRoleResponse UserToRoleResponse
 
-	reqOpts := filterToReqOptions(prepareUserToRoleFilter(userId, roleId))
+	filters := prepareUserToRoleFilter(userId, roleId)
+	filters.Query = appendUpdatedSince(filters.Query, updatedSince)
+	reqOpts := filterToReqOptions(filters)
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 
 	nextPageToken, err := c.get(
@@ -352,9 +476,17 @@ func (c *Client) RevokeRoleFromUser(ctx context.Context, id string) error {
 
 // Table `sys_group_has_role` (Group to Role).
 func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId string, paginationVars PaginationVars) ([]GroupToRole, string, error) {
+	return c.GetGroupToRoleUpdatedSince(ctx, groupId, roleId, paginationVars, "")
+}
+
+// GetGroupToRoleUpdatedSince lists group-role rows optionally restricted to
+// those updated at or after updatedSince. Empty updatedSince == full pull.
+func (c *Client) GetGroupToRoleUpdatedSince(ctx context.Context, groupId string, roleId string, paginationVars PaginationVars, updatedSince string) ([]GroupToRole, string, error) {
 	var groupToRoleResponse GroupToRoleResponse
 
-	reqOpts := filterToReqOptions(prepareGroupToRoleFilter(groupId, roleId))
+	filters := prepareGroupToRoleFilter(groupId, roleId)
+	filters.Query = appendUpdatedSince(filters.Query, updatedSince)
+	reqOpts := filterToReqOptions(filters)
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 	nextPageToken, err := c.get(
 		ctx,

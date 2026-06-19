@@ -27,6 +27,7 @@ type User struct {
 	UserName     string            `json:"user_name"`
 	Roles        string            `json:"roles"`
 	Active       string            `json:"active"`
+	SysUpdatedOn string            `json:"sys_updated_on"`
 	CustomFields map[string]string `json:"-"`
 }
 
@@ -64,21 +65,24 @@ func (u *User) UnmarshalJSON(data []byte) error {
 
 type Role struct {
 	BaseResource
-	Name      string `json:"name"`
-	Grantable string `json:"grantable"`
+	Name         string `json:"name"`
+	Grantable    string `json:"grantable"`
+	SysUpdatedOn string `json:"sys_updated_on"`
 }
 
 type Group struct {
 	BaseResource
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Roles       string `json:"roles"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Roles        string `json:"roles"`
+	SysUpdatedOn string `json:"sys_updated_on"`
 }
 
 type GroupMember struct {
 	BaseResource
-	User  string `json:"user"`
-	Group string `json:"group"`
+	User         string `json:"user"`
+	Group        string `json:"group"`
+	SysUpdatedOn string `json:"sys_updated_on"`
 }
 
 type GroupMemberPayload struct {
@@ -88,9 +92,10 @@ type GroupMemberPayload struct {
 
 type UserToRole struct {
 	BaseResource
-	Inherited string `json:"inherited"`
-	User      string `json:"user"`
-	Role      string `json:"role"`
+	Inherited    string `json:"inherited"`
+	User         string `json:"user"`
+	Role         string `json:"role"`
+	SysUpdatedOn string `json:"sys_updated_on"`
 }
 
 type UserToRolePayload struct {
@@ -100,9 +105,10 @@ type UserToRolePayload struct {
 
 type GroupToRole struct {
 	BaseResource
-	Inherits string `json:"inherits"`
-	Group    string `json:"group"`
-	Role     string `json:"role"`
+	Inherits     string `json:"inherits"`
+	Group        string `json:"group"`
+	Role         string `json:"role"`
+	SysUpdatedOn string `json:"sys_updated_on"`
 }
 
 type GroupToRolePayload struct {
