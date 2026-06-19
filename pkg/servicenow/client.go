@@ -47,6 +47,9 @@ const (
 	RotaMembersBaseUrl      = TableAPIBaseURL + "/cmn_rota_member"
 	RotaMemberDetailBaseUrl = RotaMembersBaseUrl + "/%s"
 
+	// On-Call REST API (not the Table API): returns who is on call now.
+	WhoIsOnCallUrl = BaseURL + "/now/on_call_rota/whoisoncall"
+
 	// Service Catalogs.
 	ServiceCatalogRequestedItemBaseUrl        = TableAPIBaseURL + "/sc_req_item"
 	ServiceCatalogRequestedItemDetailsBaseUrl = ServiceCatalogRequestedItemBaseUrl + "/%s"
@@ -98,6 +101,7 @@ type GroupResponse = SingleResponse[Group]
 type GroupMembersResponse = ListResponse[GroupMember]
 type RostersResponse = ListResponse[Roster]
 type RotaMembersResponse = ListResponse[RotaMember]
+type WhoIsOnCallResponse = ListResponse[OnCallMember]
 type UserRolesResponse = SingleResponse[UserRoles]
 type UserToRoleResponse ListResponse[UserToRole]
 type GroupToRoleResponse ListResponse[GroupToRole]
@@ -352,6 +356,27 @@ func (c *Client) RemoveRotaMember(ctx context.Context, id string) error {
 		c.apiURL(RotaMemberDetailBaseUrl, c.deployment, id),
 		nil,
 	)
+}
+
+// WhoIsOnCall returns the on-call lineup for a roster as of now, via the
+// On-Call REST API. The result is ordered (Order==1 is the user currently
+// on call; higher orders are the escalation chain). Note: roster members
+// must also belong to the underlying assignment group for the on-call
+// engine to include them.
+func (c *Client) WhoIsOnCall(ctx context.Context, rosterId string) ([]OnCallMember, error) {
+	var resp WhoIsOnCallResponse
+
+	_, err := c.get(
+		ctx,
+		c.apiURL(WhoIsOnCallUrl, c.deployment),
+		&resp,
+		WithQueryParam("roster_ids", rosterId),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.Result, nil
 }
 
 // Table `sys_user_role` (Roles).

@@ -106,6 +106,19 @@ type RotaMemberPayload struct {
 	Member string `json:"member"`
 }
 
+// OnCallMember is one entry returned by the On-Call REST API
+// (/api/now/on_call_rota/whoisoncall). For a roster at a given time the API
+// returns the on-call lineup ranked by Order: Order==1 is the user actively
+// on call now; higher orders are the escalation/next-up chain.
+type OnCallMember struct {
+	UserId     string `json:"userId"`
+	Roster     string `json:"roster"`
+	Rota       string `json:"rota"`
+	Group      string `json:"group"`
+	Order      int    `json:"order"`
+	IsOverride bool   `json:"isOverride"`
+}
+
 type UserToRole struct {
 	BaseResource
 	Inherited string `json:"inherited"`

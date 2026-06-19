@@ -29,7 +29,10 @@ func (s *scheduleResourceType) ResourceType(_ context.Context) *v2.ResourceType 
 	return s.resourceType
 }
 
-const scheduleMember = "member"
+const (
+	scheduleMember = "member"  // anyone on the schedule's roster
+	scheduleOnCall = "on-call" // the user currently on call (whoisoncall order==1)
+)
 
 // Create a new connector resource for a ServiceNow on-call schedule (roster).
 func scheduleResource(roster *servicenow.Roster) (*v2.Resource, error) {
@@ -99,17 +102,22 @@ func (s *scheduleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *p
 func (s *scheduleResourceType) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	var rv []*v2.Entitlement
 
-	assignmentOptions := []ent.EntitlementOption{
+	memberOptions := []ent.EntitlementOption{
 		ent.WithGrantableTo(resourceTypeUser),
 		ent.WithDisplayName(fmt.Sprintf("%s schedule %s", resource.DisplayName, scheduleMember)),
 		ent.WithDescription(fmt.Sprintf("%s ServiceNow schedule %s", resource.DisplayName, scheduleMember)),
 	}
 
-	rv = append(rv, ent.NewAssignmentEntitlement(
-		resource,
-		scheduleMember,
-		assignmentOptions...,
-	))
+	onCallOptions := []ent.EntitlementOption{
+		ent.WithGrantableTo(resourceTypeUser),
+		ent.WithDisplayName(fmt.Sprintf("%s schedule %s", resource.DisplayName, scheduleOnCall)),
+		ent.WithDescription(fmt.Sprintf("%s ServiceNow schedule %s", resource.DisplayName, scheduleOnCall)),
+	}
+
+	rv = append(rv,
+		ent.NewAssignmentEntitlement(resource, scheduleMember, memberOptions...),
+		ent.NewAssignmentEntitlement(resource, scheduleOnCall, onCallOptions...),
+	)
 
 	return rv, "", nil, nil
 }
@@ -138,19 +146,34 @@ func (s *scheduleResourceType) Grants(ctx context.Context, resource *v2.Resource
 		return nil, "", nil, err
 	}
 
-	memberIDs := mapRotaMembers(rotaMembers)
-	if len(memberIDs) == 0 {
-		return []*v2.Grant{}, nextPage, nil, nil
-	}
-
 	var rv []*v2.Grant
-	for _, member := range memberIDs {
+	for _, member := range mapRotaMembers(rotaMembers) {
 		rID, err := rs.NewResourceID(resourceTypeUser, member)
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("baton-servicenow: error creating principal id: %w", err)
 		}
 
 		rv = append(rv, grant.NewGrant(resource, scheduleMember, rID))
+	}
+
+	// On the first page only, emit the on-call grant for whoever is currently
+	// on call (whoisoncall Order==1). This is a single computation independent
+	// of member pagination, so it must not be repeated on subsequent pages.
+	if offset == 0 {
+		onCall, err := s.client.WhoIsOnCall(ctx, resource.Id.Resource)
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("baton-servicenow: failed to get on-call user for schedule %s: %w", resource.Id.Resource, err)
+		}
+		for _, oc := range onCall {
+			if oc.Order != 1 || oc.UserId == "" {
+				continue
+			}
+			rID, err := rs.NewResourceID(resourceTypeUser, oc.UserId)
+			if err != nil {
+				return nil, "", nil, fmt.Errorf("baton-servicenow: error creating on-call principal id: %w", err)
+			}
+			rv = append(rv, grant.NewGrant(resource, scheduleOnCall, rID))
+		}
 	}
 
 	return rv, nextPage, nil, nil
