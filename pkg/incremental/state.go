@@ -50,6 +50,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -256,13 +257,27 @@ func (s *State) Watermark(stream Stream) string {
 	return wm
 }
 
-// advance bumps a stream's watermark to ts if ts is greater. Lexical comparison
-// is valid because sys_updated_on is a fixed-width "YYYY-MM-DD HH:MM:SS" UTC
-// string. Caller must hold s.mu.
+// advance bumps a stream's watermark to ts if ts is greater, but never past the
+// current UTC time. A future-dated sys_updated_on (clock skew, ServiceNow
+// demo-data date shifting, or imports that preserve source timestamps) would
+// otherwise push the watermark beyond real changes and silently stall
+// incremental detection for that stream until a full sync. Future-dated rows are
+// still fetched and merged each run (idempotent); they just don't advance the
+// watermark. Lexical comparison is valid because the value is a fixed-width
+// "YYYY-MM-DD HH:MM:SS" UTC string. Caller must hold s.mu.
 func (s *State) advance(stream Stream, ts string) {
+	if ts == "" || ts > nowWatermark() {
+		return
+	}
 	if ts > s.snapshot.Watermarks[stream] {
 		s.snapshot.Watermarks[stream] = ts
 	}
+}
+
+// nowWatermark is the current time in ServiceNow's UTC "YYYY-MM-DD HH:MM:SS"
+// format, for lexical comparison against sys_updated_on / sys_created_on values.
+func nowWatermark() string {
+	return time.Now().UTC().Format("2006-01-02 15:04:05")
 }
 
 // Reconcile captures hard deletes once per run. It fetches sys_audit_delete
@@ -307,7 +322,9 @@ func (s *State) Reconcile(ctx context.Context) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		pruned, maxTS := pruneDeletions(s.snapshot, records)
-		if maxTS > s.snapshot.DeleteWatermark {
+		// Cap at now() for the same reason as advance(): a future-dated audit
+		// row must not push the delete watermark past real deletes.
+		if maxTS != "" && maxTS <= nowWatermark() && maxTS > s.snapshot.DeleteWatermark {
 			s.snapshot.DeleteWatermark = maxTS
 		}
 		if err := s.persist(); err != nil {

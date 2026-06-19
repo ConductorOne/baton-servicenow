@@ -380,3 +380,16 @@ func TestReconcileNoOpWhenDisabled(t *testing.T) {
 		t.Fatalf("disabled state must not call the deleter, got %d calls", fd.calls)
 	}
 }
+
+func TestAdvanceIgnoresFutureTimestamps(t *testing.T) {
+	s := &State{enabled: true, snapshot: newSnapshot("dev")}
+	s.advance(StreamUsers, "2026-06-19 04:43:22") // real change
+	s.advance(StreamUsers, "2031-06-03 16:05:36") // future (demo/skew) — must NOT advance
+	if got := s.snapshot.Watermarks[StreamUsers]; got != "2026-06-19 04:43:22" {
+		t.Errorf("watermark = %q, want 2026-06-19 04:43:22 (future ts must not advance the watermark)", got)
+	}
+	s.advance(StreamUsers, "") // empty — no-op
+	if got := s.snapshot.Watermarks[StreamUsers]; got != "2026-06-19 04:43:22" {
+		t.Errorf("watermark = %q, empty ts must not change it", got)
+	}
+}
