@@ -2,7 +2,7 @@
 
 # `baton-servicenow` [![Go Reference](https://pkg.go.dev/badge/github.com/conductorone/baton-servicenow.svg)](https://pkg.go.dev/github.com/conductorone/baton-servicenow) ![verify](https://github.com/conductorone/baton-servicenow/actions/workflows/verify.yaml/badge.svg)
 
-`baton-servicenow` is a connector for ServiceNow built using the [Baton SDK](https://github.com/conductorone/baton-sdk). It works with the ServiceNow Table API to sync data about users, groups, roles, and on-call rosters.
+`baton-servicenow` is a connector for ServiceNow built using the [Baton SDK](https://github.com/conductorone/baton-sdk). It works with the ServiceNow Table API to sync data about users, groups, roles, and on-call schedules.
 
 Check out [Baton](https://github.com/conductorone/baton) to learn more about the project in general.
 
@@ -14,7 +14,7 @@ You can then use credentials to log in as credentials for communicating with API
 
 Along with this, user represented by the credentials has to have either `admin` role or ACL (Access control list) set up for relevant tables to be able to read and modify tables in Table API.
 
-By default, user without any roles have only restricted access to tables with users and groups. If you assign `admin` role to the user, ACLs for relevant tables are already set up and can use the connector without any additional configuration. If you don't want to use default `admin` role, you can configure ACLs for relevant tables manually. For on-call roster support, the connecting account needs read access to `cmn_rota_roster` and `cmn_rota_member`, plus write access to `cmn_rota_member` for provisioning; the `admin` role covers both. You can find more information about ACLs [here](https://docs.servicenow.com/bundle/utah-platform-security/page/administer/contextual-security/concept/access-control-rules.html).
+By default, user without any roles have only restricted access to tables with users and groups. If you assign `admin` role to the user, ACLs for relevant tables are already set up and can use the connector without any additional configuration. If you don't want to use default `admin` role, you can configure ACLs for relevant tables manually. For on-call schedule support, the connecting account needs read access to `cmn_rota_roster` and `cmn_rota_member`; the `admin` role covers this. (On-call schedule membership is currently read-only — see the note on `cmn_rota_member.roster` being a read-only, m2m-managed field.) You can find more information about ACLs [here](https://docs.servicenow.com/bundle/utah-platform-security/page/administer/contextual-security/concept/access-control-rules.html).
 
 ### Relevant Tables:
 - `sys_user` - Users
@@ -23,8 +23,8 @@ By default, user without any roles have only restricted access to tables with us
 - `sys_user_grmember` - Group membership
 - `sys_user_has_role` - User roles
 - `sys_group_has_role` - Group roles
-- `cmn_rota_roster` - On-call rosters
-- `cmn_rota_member` - On-call roster membership (read + provision)
+- `cmn_rota_roster` - On-call schedules (rosters)
+- `cmn_rota_member` - On-call schedule membership (read-only)
 
 # Getting Started
 
