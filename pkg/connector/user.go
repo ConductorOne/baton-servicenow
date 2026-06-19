@@ -9,12 +9,14 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/conductorone/baton-servicenow/pkg/incremental"
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
 )
 
 type userResourceType struct {
 	resourceType *v2.ResourceType
 	client       *servicenow.Client
+	state        *incremental.State
 }
 
 func (u *userResourceType) ResourceType(_ context.Context) *v2.ResourceType {
@@ -69,6 +71,29 @@ func userResource(user *servicenow.User) (*v2.Resource, error) {
 }
 
 func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+	// Incremental path: drain only users changed since the watermark, merge
+	// them over the cached snapshot, and emit the full union as a single page.
+	// The SDK does a full replace per sync and does not merge across pages, so
+	// the union must be complete in one response to keep the c1z whole.
+	if u.state.Enabled() {
+		changed, err := u.client.GetAllUsersUpdatedSince(ctx, u.state.Watermark(incremental.StreamUsers))
+		if err != nil {
+			u.state.MarkFailed()
+			return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list users (incremental): %w", err)
+		}
+		merged, err := u.state.MergeUsers(changed)
+		if err != nil {
+			u.state.MarkFailed()
+			return nil, "", nil, fmt.Errorf("baton-servicenow: failed to persist users state: %w", err)
+		}
+		rv, err := usersToResources(merged)
+		if err != nil {
+			u.state.MarkFailed()
+			return nil, "", nil, err
+		}
+		return rv, "", nil, nil
+	}
+
 	bag, offset, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeUser.Id})
 	if err != nil {
 		return nil, "", nil, err
@@ -90,19 +115,25 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		return nil, "", nil, err
 	}
 
+	rv, err := usersToResources(users)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	return rv, nextPage, nil, nil
+}
+
+func usersToResources(users []servicenow.User) ([]*v2.Resource, error) {
 	var rv []*v2.Resource
 	for _, user := range users {
 		userCopy := user
 		ur, err := userResource(&userCopy)
-
 		if err != nil {
-			return nil, "", nil, err
+			return nil, err
 		}
-
 		rv = append(rv, ur)
 	}
-
-	return rv, nextPage, nil, nil
+	return rv, nil
 }
 
 func (u *userResourceType) Entitlements(ctx context.Context, resource *v2.Resource, token *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
@@ -113,10 +144,11 @@ func (u *userResourceType) Grants(ctx context.Context, resource *v2.Resource, to
 	return nil, "", nil, nil
 }
 
-func userBuilder(client *servicenow.Client) *userResourceType {
+func userBuilder(client *servicenow.Client, state *incremental.State) *userResourceType {
 	return &userResourceType{
 		resourceType: resourceTypeUser,
 		client:       client,
+		state:        state,
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/conductorone/baton-servicenow/pkg/incremental"
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -18,6 +19,7 @@ import (
 type groupResourceType struct {
 	resourceType *v2.ResourceType
 	client       *servicenow.Client
+	state        *incremental.State
 }
 
 func (g *groupResourceType) ResourceType(_ context.Context) *v2.ResourceType {
@@ -53,6 +55,27 @@ func groupResource(group *servicenow.Group) (*v2.Resource, error) {
 }
 
 func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+	// Incremental path: drain only groups changed since the watermark, merge
+	// over the cached snapshot, and emit the full union in one page.
+	if g.state.Enabled() {
+		changed, err := g.client.GetAllGroupsUpdatedSince(ctx, g.state.Watermark(incremental.StreamGroups))
+		if err != nil {
+			g.state.MarkFailed()
+			return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list groups (incremental): %w", err)
+		}
+		merged, err := g.state.MergeGroups(changed)
+		if err != nil {
+			g.state.MarkFailed()
+			return nil, "", nil, fmt.Errorf("baton-servicenow: failed to persist groups state: %w", err)
+		}
+		rv, err := groupsToResources(merged)
+		if err != nil {
+			g.state.MarkFailed()
+			return nil, "", nil, err
+		}
+		return rv, "", nil, nil
+	}
+
 	bag, offset, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeGroup.Id})
 	if err != nil {
 		return nil, "", nil, err
@@ -75,19 +98,25 @@ func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagi
 		return nil, "", nil, err
 	}
 
+	rv, err := groupsToResources(groups)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	return rv, nextPage, nil, nil
+}
+
+func groupsToResources(groups []servicenow.Group) ([]*v2.Resource, error) {
 	var rv []*v2.Resource
 	for _, group := range groups {
 		groupCopy := group
 		rr, err := groupResource(&groupCopy)
-
 		if err != nil {
-			return nil, "", nil, err
+			return nil, err
 		}
-
 		rv = append(rv, rr)
 	}
-
-	return rv, nextPage, nil, nil
+	return rv, nil
 }
 
 func (g *groupResourceType) Entitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
@@ -109,6 +138,28 @@ func (g *groupResourceType) Entitlements(ctx context.Context, resource *v2.Resou
 }
 
 func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, pt *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+	// Incremental path: drain only membership rows for this group changed since
+	// the watermark, merge over the cached snapshot for this group, and emit the
+	// full union of memberships in one page.
+	if g.state.Enabled() {
+		changed, err := g.client.GetAllUserToGroupUpdatedSince(ctx, resource.Id.Resource, g.state.Watermark(incremental.StreamGroupMembers))
+		if err != nil {
+			g.state.MarkFailed()
+			return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list groupMembers (incremental): %w", err)
+		}
+		merged, err := g.state.MergeGroupMembers(resource.Id.Resource, changed)
+		if err != nil {
+			g.state.MarkFailed()
+			return nil, "", nil, fmt.Errorf("baton-servicenow: failed to persist group members state: %w", err)
+		}
+		rv, err := groupMembersToGrants(resource, mapGroupMembers(merged))
+		if err != nil {
+			g.state.MarkFailed()
+			return nil, "", nil, err
+		}
+		return rv, "", nil, nil
+	}
+
 	bag, offset, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeGroup.Id})
 	if err != nil {
 		return nil, "", nil, err
@@ -137,25 +188,24 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 		return []*v2.Grant{}, nextPageToken, nil, nil
 	}
 
+	rv, err := groupMembersToGrants(resource, memberIDs)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	return rv, nextPage, nil, nil
+}
+
+func groupMembersToGrants(resource *v2.Resource, memberIDs []string) ([]*v2.Grant, error) {
 	var rv []*v2.Grant
 	for _, member := range memberIDs {
 		rID, err := rs.NewResourceID(resourceTypeUser, member)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("baton-servicenow: error creating principal id")
+			return nil, fmt.Errorf("baton-servicenow: error creating principal id")
 		}
-
-		// grant group membership
-		rv = append(
-			rv,
-			grant.NewGrant(
-				resource,
-				groupMembership,
-				rID,
-			),
-		)
+		rv = append(rv, grant.NewGrant(resource, groupMembership, rID))
 	}
-
-	return rv, nextPage, nil, nil
+	return rv, nil
 }
 
 func (r *groupResourceType) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
@@ -260,9 +310,10 @@ func (r *groupResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annota
 	return nil, nil
 }
 
-func groupBuilder(client *servicenow.Client) *groupResourceType {
+func groupBuilder(client *servicenow.Client, state *incremental.State) *groupResourceType {
 	return &groupResourceType{
 		resourceType: resourceTypeGroup,
 		client:       client,
+		state:        state,
 	}
 }

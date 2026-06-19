@@ -35,7 +35,7 @@ var (
 		field.WithDefaultValue([]string{}),
 	)
 	externalTicketField = field.TicketingField.ExportAs(field.ExportTargetGUI)
-	baseURLField = field.StringField("base-url",
+	baseURLField        = field.StringField("base-url",
 		field.WithDescription("Override the ServiceNow API URL (for testing)"),
 		field.WithHidden(true),
 		field.WithExportTarget(field.ExportTargetCLIOnly),
@@ -44,6 +44,16 @@ var (
 		field.WithDescription("Allow insecure TLS connections (for testing with self-signed certificates)"),
 		field.WithDefaultValue(false),
 		field.WithHidden(true),
+		field.WithExportTarget(field.ExportTargetCLIOnly),
+	)
+	incrementalField = field.BoolField("incremental",
+		field.WithDisplayName("Incremental sync"),
+		field.WithDescription("After the first full sync, only fetch records changed since the last sync (using ServiceNow sys_updated_on). Requires a persistent state directory."),
+		field.WithDefaultValue(false),
+	)
+	stateDirField = field.StringField("state-dir",
+		field.WithDisplayName("Incremental state directory"),
+		field.WithDescription("Directory where the incremental-sync watermark and snapshot are stored (one file per deployment). Defaults to the working directory. Only used when incremental is enabled."),
 		field.WithExportTarget(field.ExportTargetCLIOnly),
 	)
 )
@@ -60,6 +70,8 @@ var configurationFields = []field.SchemaField{
 	externalTicketField,
 	baseURLField,
 	insecureField,
+	incrementalField,
+	stateDirField,
 }
 
 var configRelations = []field.SchemaFieldRelationship{
