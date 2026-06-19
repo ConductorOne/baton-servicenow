@@ -8,10 +8,31 @@ import (
 )
 
 var (
-	UserFields  = []string{"sys_id", "name", "roles", "user_name", "email", "first_name", "last_name", "active"}
-	RoleFields  = []string{"sys_id", "grantable", "name"}
-	GroupFields = []string{"sys_id", "description", "name"}
+	UserFields  = []string{"sys_id", "name", "roles", "user_name", "email", "first_name", "last_name", "active", "sys_updated_on"}
+	RoleFields  = []string{"sys_id", "grantable", "name", "sys_updated_on"}
+	GroupFields = []string{"sys_id", "description", "name", "manager", "sys_updated_on"}
 )
+
+// UpdatedSinceField is the ServiceNow column used to filter rows by last-change
+// time. Every Table API row carries it; comparisons in sysparm_query are
+// evaluated in the API caller's session timezone (UTC for typical integration
+// accounts), and the value is itself a UTC "YYYY-MM-DD HH:MM:SS".
+const UpdatedSinceField = "sys_updated_on"
+
+// WithUpdatedSince appends a "sys_updated_on>=<ts>" clause to an existing
+// FilterVars query, returning a watermark-filtered query string. ts must be
+// a ServiceNow datetime literal ("YYYY-MM-DD HH:MM:SS"). An empty ts is a
+// no-op (full pull). The clause is ANDed (^) with any existing query.
+func appendUpdatedSince(query string, ts string) string {
+	if ts == "" {
+		return query
+	}
+	clause := fmt.Sprintf("%s>=%s", UpdatedSinceField, ts)
+	if query == "" {
+		return clause
+	}
+	return query + "^" + clause
+}
 
 func queryMultipleIDs(ids []string) string {
 	var preparedIDs []string
@@ -150,7 +171,7 @@ func prepareUserToGroupFilter(userId string, groupId string) *FilterVars {
 
 	return &FilterVars{
 		Fields: []string{
-			"sys_id", "user", "group",
+			"sys_id", "user", "group", "sys_updated_on",
 		},
 		Query: query,
 	}
@@ -172,7 +193,7 @@ func prepareUserToRoleFilter(userId string, roleId string) *FilterVars {
 
 	return &FilterVars{
 		Fields: []string{
-			"sys_id", "user", "role", "inherited",
+			"sys_id", "user", "role", "inherited", "sys_updated_on",
 		},
 		Query: query,
 	}
@@ -194,7 +215,7 @@ func prepareGroupToRoleFilter(groupId string, roleId string) *FilterVars {
 
 	return &FilterVars{
 		Fields: []string{
-			"sys_id", "role", "group", "inherits",
+			"sys_id", "role", "group", "inherits", "sys_updated_on",
 		},
 		Query: query,
 	}

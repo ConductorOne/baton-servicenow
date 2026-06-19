@@ -34,6 +34,16 @@ const (
 	GroupMembersBaseUrl      = TableAPIBaseURL + "/sys_user_grmember"
 	GroupMemberDetailBaseUrl = GroupMembersBaseUrl + "/%s"
 
+	// AuditDeleteBaseUrl is the sys_audit_delete table: one row per hard delete
+	// of an audited record. The event feed reads it to emit grant-revoke events.
+	AuditDeleteBaseUrl = TableAPIBaseURL + "/sys_audit_delete"
+
+	// AuditBaseUrl is the sys_audit table: one row per field-level change of an
+	// audited record (tablename/documentkey/fieldname/oldvalue/newvalue). The
+	// event feed reads it to surface account changes (sys_user) and audited
+	// deletes (fieldname=="DELETED") on the access tables in near real time.
+	AuditBaseUrl = TableAPIBaseURL + "/sys_audit"
+
 	RolesBaseUrl           = TableAPIBaseURL + "/sys_user_role"
 	UserRolesBaseUrl       = TableAPIBaseURL + "/sys_user_has_role"
 	UserRoleDetailBaseUrl  = UserRolesBaseUrl + "/%s"
@@ -69,6 +79,23 @@ const (
 	ChoiceBaseUrl = TableAPIBaseURL + "/sys_choice"
 
 	InstanceURLTemplate = `{{.Deployment}}.service-now.com`
+
+	// DictionaryBaseUrl is the sys_dictionary table: the data dictionary. Each row
+	// describes a table (when its `element` is empty — the table-level collection
+	// record) or a column. Its `audit` flag is the connector-readable signal for
+	// whether field-change auditing is enabled (drives sys_audit), used by the
+	// event-feed audit-config preflight.
+	DictionaryBaseUrl = TableAPIBaseURL + "/sys_dictionary"
+
+	// PropertyBaseUrl is the sys_properties table (system properties). The
+	// event-feed revoke-detection preflight reads the glide.ui.audit_deleted_tables
+	// row from it: the comma-separated list of tables whose hard deletes are
+	// captured to sys_audit_delete (the grant-REVOKE source).
+	PropertyBaseUrl = TableAPIBaseURL + "/sys_properties"
+
+	// AuditDeletedTablesProperty is the sys_properties name whose value lists the
+	// tables whose deletes are recorded in sys_audit_delete.
+	AuditDeletedTablesProperty = "glide.ui.audit_deleted_tables"
 
 	// Variable sets & variables (Table API).
 	VariableSetM2MBaseUrl = TableAPIBaseURL + "/io_set_item"
@@ -163,6 +190,278 @@ func (c *Client) GetBaseURL() string {
 	return c.baseURL
 }
 
+// AuditDeletePayloadFields is the field set fetched from sys_audit_delete for
+// the event feed. It adds `payload` (the full XML dump of the deleted row) on
+// top of AuditDeleteFields so the feed can resolve a deleted join row back to
+// its (principal, target) pair and emit a revoke event.
+var AuditDeletePayloadFields = []string{"tablename", fieldDocumentKey, "sys_created_on", "payload"}
+
+// GetDeletedSincePayload lists sys_audit_delete rows for one or more tables
+// whose delete was logged at or after createdSince ("YYYY-MM-DD HH:MM:SS",
+// UTC), INCLUDING the `payload` column and ordered by sys_created_on ascending
+// so the event feed advances its cursor monotonically. An empty createdSince
+// fetches from the beginning of the delete history. The returned next-page
+// token is the Table API offset for the following page ("" when exhausted).
+//
+// This is the event-feed delete source (it mirrors GetAuditSince's ordering and
+// GetDeletedSince's filtering, but additionally fetches the payload so deletes
+// of join rows become resolvable revoke events). Errors are surfaced to the
+// caller; the feed degrades gracefully and the periodic full sync remains the
+// source of truth.
+func (c *Client) GetDeletedSincePayload(ctx context.Context, tableNames []string, createdSince string, paginationVars PaginationVars) ([]AuditDeleteRecord, string, error) {
+	var resp AuditDeleteResponse
+
+	var query string
+	switch {
+	case len(tableNames) == 1:
+		query = fmt.Sprintf("tablename=%s", tableNames[0])
+	case len(tableNames) > 1:
+		query = "tablenameIN" + strings.Join(tableNames, ",")
+	}
+	if createdSince != "" {
+		clause := fmt.Sprintf("sys_created_on>=%s", createdSince)
+		if query != "" {
+			query += "^" + clause
+		} else {
+			query = clause
+		}
+	}
+	// Order ascending so paging walks forward in time from the cursor.
+	if query != "" {
+		query += "^ORDERBYsys_created_on"
+	} else {
+		query = "ORDERBYsys_created_on"
+	}
+
+	reqOpts := []ReqOpt{
+		WithQuery(query),
+		WithFields(AuditDeletePayloadFields...),
+	}
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
+
+	nextPage, err := c.get(ctx, c.apiURL(AuditDeleteBaseUrl, c.deployment), &resp, reqOpts...)
+	if err != nil {
+		return nil, "", err
+	}
+	return resp.Result, nextPage, nil
+}
+
+// fieldSysID/fieldUser are ServiceNow columns requested in the sysparm_fields
+// of the event-feed list calls.
+const (
+	fieldSysID       = "sys_id"
+	fieldUser        = "user"
+	fieldDocumentKey = "documentkey"
+)
+
+// AuditFields is the field set fetched from sys_audit for the event feed.
+var AuditFields = []string{fieldSysID, "tablename", fieldDocumentKey, "fieldname", "oldvalue", "newvalue", "sys_created_on", fieldUser}
+
+// GetAuditSince lists sys_audit rows for one or more tables whose change was
+// logged at or after createdSince ("YYYY-MM-DD HH:MM:SS", UTC), ordered by
+// sys_created_on ascending so the event feed advances its cursor monotonically.
+// An empty createdSince fetches from the beginning of the audit history. The
+// returned next-page token is the Table API offset for the following page (""
+// when exhausted).
+//
+// Note: an error here (e.g. auditing disabled, or the caller lacks read access
+// to sys_audit) is surfaced to the caller; the event feed degrades gracefully
+// and the periodic full sync remains the source of truth.
+func (c *Client) GetAuditSince(ctx context.Context, tableNames []string, createdSince string, paginationVars PaginationVars) ([]AuditRecord, string, error) {
+	var resp AuditResponse
+
+	var query string
+	switch {
+	case len(tableNames) == 1:
+		query = fmt.Sprintf("tablename=%s", tableNames[0])
+	case len(tableNames) > 1:
+		query = "tablenameIN" + strings.Join(tableNames, ",")
+	}
+	if createdSince != "" {
+		clause := fmt.Sprintf("sys_created_on>=%s", createdSince)
+		if query != "" {
+			query += "^" + clause
+		} else {
+			query = clause
+		}
+	}
+	// Order ascending so paging walks forward in time from the cursor.
+	if query != "" {
+		query += "^ORDERBYsys_created_on"
+	} else {
+		query = "ORDERBYsys_created_on"
+	}
+
+	reqOpts := []ReqOpt{
+		WithQuery(query),
+		WithFields(AuditFields...),
+	}
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
+
+	nextPage, err := c.get(ctx, c.apiURL(AuditBaseUrl, c.deployment), &resp, reqOpts...)
+	if err != nil {
+		return nil, "", err
+	}
+	return resp.Result, nextPage, nil
+}
+
+// GetTableAuditFlags reports, for each of the given table names, whether
+// field-change auditing is enabled on that table. It reads the table-level
+// collection record from sys_dictionary (the row where `element` is empty) and
+// returns a map tableName -> auditEnabled.
+//
+// The flag reflects sys_dictionary's `audit` column ("true"/"false"); a table
+// absent from the result (no table-level record returned, or unreadable) is
+// reported as false. This signals whether sys_audit field-change rows will be
+// produced — it does NOT reflect delete-recovery (sys_audit_delete), which is a
+// separate, independently-configured capability. Callers must treat this as
+// advisory only.
+func (c *Client) GetTableAuditFlags(ctx context.Context, tableNames []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(tableNames))
+	if len(tableNames) == 0 {
+		return out, nil
+	}
+
+	var resp DictionaryResponse
+	// Only the table-level record carries the table's audit flag: name IN (...)
+	// AND element is empty.
+	query := "nameIN" + strings.Join(tableNames, ",") + "^elementISEMPTY"
+	reqOpts := []ReqOpt{
+		WithQuery(query),
+		WithFields("name", "element", "audit"),
+	}
+	pv := PaginationVars{Limit: len(tableNames) + 1}
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&pv)...)
+
+	_, err := c.get(ctx, c.apiURL(DictionaryBaseUrl, c.deployment), &resp, reqOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("baton-servicenow: failed to read sys_dictionary audit flags: %w", err)
+	}
+
+	for i := range resp.Result {
+		r := &resp.Result[i]
+		if r.Element != "" {
+			continue
+		}
+		out[r.Name] = boolStr(r.Audit)
+	}
+	return out, nil
+}
+
+// GetAuditDeletedTables reads the glide.ui.audit_deleted_tables system property
+// (sys_properties) and returns the list of table names whose hard deletes are
+// captured to sys_audit_delete. That capture is the source of near-real-time
+// grant-REVOKE events, so a join table's PRESENCE in this list means its revokes
+// are reliably captured.
+//
+// Caveat (do NOT treat absence as definitive): some tables can have their
+// deletes captured to sys_audit_delete by their own mechanism without appearing
+// in this property. So presence => reliably captured; absence => not reliably
+// captured via this property (but may still be captured by other means).
+// Callers must treat this as advisory only.
+//
+// An empty / unset property yields an empty list (no error). Errors (e.g. lack
+// of read access to sys_properties) are surfaced to the caller, which degrades
+// gracefully.
+func (c *Client) GetAuditDeletedTables(ctx context.Context) ([]string, error) {
+	var resp PropertyResponse
+	reqOpts := []ReqOpt{
+		WithQuery("name=" + AuditDeletedTablesProperty),
+		WithFields("name", "value"),
+	}
+	pv := PaginationVars{Limit: 1}
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&pv)...)
+
+	_, err := c.get(ctx, c.apiURL(PropertyBaseUrl, c.deployment), &resp, reqOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("baton-servicenow: failed to read %s system property: %w", AuditDeletedTablesProperty, err)
+	}
+
+	var tables []string
+	for i := range resp.Result {
+		if resp.Result[i].Name != AuditDeletedTablesProperty {
+			continue
+		}
+		for _, t := range strings.Split(resp.Result[i].Value, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				tables = append(tables, t)
+			}
+		}
+	}
+	return tables, nil
+}
+
+// CreatedSinceField is the ServiceNow column used as the event-feed cursor for
+// immutable join/assignment rows (which have no meaningful sys_updated_on).
+const CreatedSinceField = "sys_created_on"
+
+// appendCreatedSince ANDs a "sys_created_on>=<ts>^ORDERBYsys_created_on" clause
+// onto an existing query, ordering ascending so paging walks forward in time.
+// An empty ts orders without a lower bound (full pull).
+func appendCreatedSince(query string, ts string) string {
+	if ts != "" {
+		clause := fmt.Sprintf("%s>=%s", CreatedSinceField, ts)
+		if query != "" {
+			query += "^" + clause
+		} else {
+			query = clause
+		}
+	}
+	if query != "" {
+		return query + "^ORDERBY" + CreatedSinceField
+	}
+	return "ORDERBY" + CreatedSinceField
+}
+
+// GetGroupMembersCreatedSince lists sys_user_grmember rows created at or after
+// createdSince, ordered ascending. Each row's user/group are the principal and
+// target of a group-membership grant.
+func (c *Client) GetGroupMembersCreatedSince(ctx context.Context, createdSince string, paginationVars PaginationVars) ([]GroupMember, string, error) {
+	var resp GroupMembersResponse
+	reqOpts := []ReqOpt{
+		WithQuery(appendCreatedSince("", createdSince)),
+		WithFields(fieldSysID, fieldUser, "group", "sys_created_on"),
+	}
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
+	next, err := c.get(ctx, c.apiURL(GroupMembersBaseUrl, c.deployment), &resp, reqOpts...)
+	if err != nil {
+		return nil, "", err
+	}
+	return resp.Result, next, nil
+}
+
+// GetUserRolesCreatedSince lists sys_user_has_role rows created at or after
+// createdSince, ordered ascending (user/role = principal/target of a grant).
+func (c *Client) GetUserRolesCreatedSince(ctx context.Context, createdSince string, paginationVars PaginationVars) ([]UserToRole, string, error) {
+	var resp ListResponse[UserToRole]
+	reqOpts := []ReqOpt{
+		WithQuery(appendCreatedSince("", createdSince)),
+		WithFields(fieldSysID, fieldUser, "role", "inherited", "sys_created_on"),
+	}
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
+	next, err := c.get(ctx, c.apiURL(UserRolesBaseUrl, c.deployment), &resp, reqOpts...)
+	if err != nil {
+		return nil, "", err
+	}
+	return resp.Result, next, nil
+}
+
+// GetGroupRolesCreatedSince lists sys_group_has_role rows created at or after
+// createdSince, ordered ascending (group/role = principal/target of a grant).
+func (c *Client) GetGroupRolesCreatedSince(ctx context.Context, createdSince string, paginationVars PaginationVars) ([]GroupToRole, string, error) {
+	var resp ListResponse[GroupToRole]
+	reqOpts := []ReqOpt{
+		WithQuery(appendCreatedSince("", createdSince)),
+		WithFields(fieldSysID, "group", "role", "inherits", "sys_created_on"),
+	}
+	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
+	next, err := c.get(ctx, c.apiURL(GroupRolesBaseUrl, c.deployment), &resp, reqOpts...)
+	if err != nil {
+		return nil, "", err
+	}
+	return resp.Result, next, nil
+}
+
 // apiURL builds an API URL from a constant pattern like UsersBaseUrl.
 // When a base URL override is set, it replaces the default
 // https://DEPLOYMENT.service-now.com/api prefix with the override.
@@ -177,9 +476,19 @@ func (c *Client) apiURL(pattern string, args ...any) string {
 
 // Table `sys_user` (Users).
 func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars) ([]User, string, error) {
+	return c.GetUsersUpdatedSince(ctx, paginationVars, "")
+}
+
+// GetUsersUpdatedSince lists users optionally restricted to those whose
+// sys_updated_on is at or after updatedSince. When updatedSince is empty it
+// behaves identically to GetUsers (full pull). The event feed's account-change
+// phase passes the cursor watermark to surface created/modified/disabled accounts.
+func (c *Client) GetUsersUpdatedSince(ctx context.Context, paginationVars PaginationVars, updatedSince string) ([]User, string, error) {
 	var usersResponse UsersResponse
 
-	reqOpts := filterToReqOptions(prepareUserFilters(c.AllowedDomains, c.CustomUserFields))
+	filters := prepareUserFilters(c.AllowedDomains, c.CustomUserFields)
+	filters.Query = appendUpdatedSince(filters.Query, updatedSince)
+	reqOpts := filterToReqOptions(filters)
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 
 	nextPage, err := c.get(
@@ -215,9 +524,17 @@ func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 
 // Table `sys_user_group` (Groups).
 func (c *Client) GetGroups(ctx context.Context, paginationVars PaginationVars, groupIDs []string) ([]Group, string, error) {
+	return c.GetGroupsUpdatedSince(ctx, paginationVars, groupIDs, "")
+}
+
+// GetGroupsUpdatedSince lists groups optionally restricted to those updated at
+// or after updatedSince. Empty updatedSince == full pull.
+func (c *Client) GetGroupsUpdatedSince(ctx context.Context, paginationVars PaginationVars, groupIDs []string, updatedSince string) ([]Group, string, error) {
 	var groupsResponse GroupsResponse
 
-	reqOpts := filterToReqOptions(prepareGroupFilters(groupIDs))
+	filters := prepareGroupFilters(groupIDs)
+	filters.Query = appendUpdatedSince(filters.Query, updatedSince)
+	reqOpts := filterToReqOptions(filters)
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 	nextPageToken, err := c.get(
 		ctx,
@@ -252,9 +569,17 @@ func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
 
 // Table `sys_user_grmember` (Group Members).
 func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId string, paginationVars PaginationVars) ([]GroupMember, string, error) {
+	return c.GetUserToGroupUpdatedSince(ctx, userId, groupId, paginationVars, "")
+}
+
+// GetUserToGroupUpdatedSince lists group-membership rows optionally restricted
+// to those updated at or after updatedSince. Empty updatedSince == full pull.
+func (c *Client) GetUserToGroupUpdatedSince(ctx context.Context, userId string, groupId string, paginationVars PaginationVars, updatedSince string) ([]GroupMember, string, error) {
 	var groupMembersResponse GroupMembersResponse
 
-	reqOpts := filterToReqOptions(prepareUserToGroupFilter(userId, groupId))
+	filters := prepareUserToGroupFilter(userId, groupId)
+	filters.Query = appendUpdatedSince(filters.Query, updatedSince)
+	reqOpts := filterToReqOptions(filters)
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 
 	nextPageToken, err := c.get(
@@ -291,10 +616,18 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, id string) error {
 
 // Table `sys_user_role` (Roles).
 func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([]Role, string, error) {
+	return c.GetRolesUpdatedSince(ctx, paginationVars, "")
+}
+
+// GetRolesUpdatedSince lists roles optionally restricted to those updated at or
+// after updatedSince. Empty updatedSince == full pull.
+func (c *Client) GetRolesUpdatedSince(ctx context.Context, paginationVars PaginationVars, updatedSince string) ([]Role, string, error) {
 	var rolesResponse RolesResponse
 
 	paginationVars.Limit++
-	reqOpts := filterToReqOptions(prepareRoleFilters())
+	filters := prepareRoleFilters()
+	filters.Query = appendUpdatedSince(filters.Query, updatedSince)
+	reqOpts := filterToReqOptions(filters)
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 
 	nextPageToken, err := c.get(
@@ -313,9 +646,17 @@ func (c *Client) GetRoles(ctx context.Context, paginationVars PaginationVars) ([
 
 // Table `sys_user_has_role` (User to Role).
 func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string, paginationVars PaginationVars) ([]UserToRole, string, error) {
+	return c.GetUserToRoleUpdatedSince(ctx, userId, roleId, paginationVars, "")
+}
+
+// GetUserToRoleUpdatedSince lists user-role rows optionally restricted to those
+// updated at or after updatedSince. Empty updatedSince == full pull.
+func (c *Client) GetUserToRoleUpdatedSince(ctx context.Context, userId string, roleId string, paginationVars PaginationVars, updatedSince string) ([]UserToRole, string, error) {
 	var userToRoleResponse UserToRoleResponse
 
-	reqOpts := filterToReqOptions(prepareUserToRoleFilter(userId, roleId))
+	filters := prepareUserToRoleFilter(userId, roleId)
+	filters.Query = appendUpdatedSince(filters.Query, updatedSince)
+	reqOpts := filterToReqOptions(filters)
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 
 	nextPageToken, err := c.get(
@@ -352,9 +693,17 @@ func (c *Client) RevokeRoleFromUser(ctx context.Context, id string) error {
 
 // Table `sys_group_has_role` (Group to Role).
 func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId string, paginationVars PaginationVars) ([]GroupToRole, string, error) {
+	return c.GetGroupToRoleUpdatedSince(ctx, groupId, roleId, paginationVars, "")
+}
+
+// GetGroupToRoleUpdatedSince lists group-role rows optionally restricted to
+// those updated at or after updatedSince. Empty updatedSince == full pull.
+func (c *Client) GetGroupToRoleUpdatedSince(ctx context.Context, groupId string, roleId string, paginationVars PaginationVars, updatedSince string) ([]GroupToRole, string, error) {
 	var groupToRoleResponse GroupToRoleResponse
 
-	reqOpts := filterToReqOptions(prepareGroupToRoleFilter(groupId, roleId))
+	filters := prepareGroupToRoleFilter(groupId, roleId)
+	filters.Query = appendUpdatedSince(filters.Query, updatedSince)
+	reqOpts := filterToReqOptions(filters)
 	reqOpts = append(reqOpts, paginationVarsToReqOptions(&paginationVars)...)
 	nextPageToken, err := c.get(
 		ctx,

@@ -15,6 +15,30 @@ import (
 
 const SystemAdminUserId = "6816f79cc0a8016401c5a33be04be441"
 
+// Table names backing the connector's resources/grants, used as the
+// sys_audit_delete `tablename` filter for deletion capture. The join tables
+// (TableUserGroupMember, TableUserHasRole, TableGroupHasRole) carry the
+// membership/assignment row sys_id in sys_audit_delete.documentkey.
+const (
+	TableUser            = "sys_user"
+	TableUserGroup       = "sys_user_group"
+	TableUserRole        = "sys_user_role"
+	TableUserGroupMember = "sys_user_grmember"
+	TableUserHasRole     = "sys_user_has_role"
+	TableGroupHasRole    = "sys_group_has_role"
+)
+
+// AuditedTables is every connector table the event feed scans in sys_audit for
+// near-real-time changes (today only sys_user changes/deletes map to events).
+var AuditedTables = []string{
+	TableUser,
+	TableUserGroup,
+	TableUserRole,
+	TableUserGroupMember,
+	TableUserHasRole,
+	TableGroupHasRole,
+}
+
 type BaseResource struct {
 	Id string `json:"sys_id"`
 }
@@ -27,6 +51,7 @@ type User struct {
 	UserName     string            `json:"user_name"`
 	Roles        string            `json:"roles"`
 	Active       string            `json:"active"`
+	SysUpdatedOn string            `json:"sys_updated_on"`
 	CustomFields map[string]string `json:"-"`
 }
 
@@ -64,21 +89,26 @@ func (u *User) UnmarshalJSON(data []byte) error {
 
 type Role struct {
 	BaseResource
-	Name      string `json:"name"`
-	Grantable string `json:"grantable"`
+	Name         string `json:"name"`
+	Grantable    string `json:"grantable"`
+	SysUpdatedOn string `json:"sys_updated_on"`
 }
 
 type Group struct {
 	BaseResource
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Roles       string `json:"roles"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Roles        string `json:"roles"`
+	Manager      string `json:"manager"`
+	SysUpdatedOn string `json:"sys_updated_on"`
 }
 
 type GroupMember struct {
 	BaseResource
-	User  string `json:"user"`
-	Group string `json:"group"`
+	User         string `json:"user"`
+	Group        string `json:"group"`
+	SysUpdatedOn string `json:"sys_updated_on"`
+	SysCreatedOn string `json:"sys_created_on"`
 }
 
 type GroupMemberPayload struct {
@@ -88,9 +118,11 @@ type GroupMemberPayload struct {
 
 type UserToRole struct {
 	BaseResource
-	Inherited string `json:"inherited"`
-	User      string `json:"user"`
-	Role      string `json:"role"`
+	Inherited    string `json:"inherited"`
+	User         string `json:"user"`
+	Role         string `json:"role"`
+	SysUpdatedOn string `json:"sys_updated_on"`
+	SysCreatedOn string `json:"sys_created_on"`
 }
 
 type UserToRolePayload struct {
@@ -100,9 +132,11 @@ type UserToRolePayload struct {
 
 type GroupToRole struct {
 	BaseResource
-	Inherits string `json:"inherits"`
-	Group    string `json:"group"`
-	Role     string `json:"role"`
+	Inherits     string `json:"inherits"`
+	Group        string `json:"group"`
+	Role         string `json:"role"`
+	SysUpdatedOn string `json:"sys_updated_on"`
+	SysCreatedOn string `json:"sys_created_on"`
 }
 
 type GroupToRolePayload struct {
@@ -115,6 +149,95 @@ type UserRoles struct {
 	FromRole  []string `json:"from_role"`
 	FromGroup []string `json:"from_group"`
 }
+
+// AuditDeleteRecord is a row from the sys_audit_delete table. ServiceNow logs a
+// row here for every HARD delete of an audited record. The event feed reads it
+// to emit near-real-time grant-revoke events for deleted membership/assignment
+// rows.
+//
+//   - Tablename:    the table the deleted row belonged to (e.g. "sys_user").
+//   - DocumentKey:  the sys_id of the DELETED row. For a join table
+//     (sys_user_grmember / sys_user_has_role / sys_group_has_role) this is the
+//     membership/assignment row's sys_id, NOT the user/group/role sys_id.
+//   - SysCreatedOn: when the delete was logged ("YYYY-MM-DD HH:MM:SS", UTC). Used
+//     to advance the per-deployment delete watermark.
+type AuditDeleteRecord struct {
+	Tablename    string `json:"tablename"`
+	DocumentKey  string `json:"documentkey"`
+	SysCreatedOn string `json:"sys_created_on"`
+
+	// Payload is the full XML serialization of the DELETED row, present when
+	// ServiceNow's delete-recovery/audit-delete capture is enabled (the default
+	// on most instances). It contains every column of the deleted row, including
+	// reference fields as elements whose text is the referenced sys_id. The
+	// event feed parses it to resolve a deleted join row back to its
+	// (principal, target) pair so it can emit a near-real-time revoke event.
+	//
+	// Only populated when the row is fetched via GetDeletedSincePayload. May be
+	// empty if delete-recovery is disabled for the table.
+	Payload string `json:"payload"`
+}
+
+type AuditDeleteResponse = ListResponse[AuditDeleteRecord]
+
+// AuditRecord is a row from the sys_audit table. ServiceNow logs a row here for
+// every field-level change of an audited record (and a synthetic row with
+// Fieldname=="DELETED" when an audited record is hard-deleted). The event feed
+// reads this table as its near-real-time change source, mirroring how the Okta
+// connector reads the Okta System Log.
+//
+//   - Tablename:    the table the changed row belongs to (e.g. "sys_user").
+//   - DocumentKey:  the sys_id of the changed row. For a join table this is the
+//     membership/assignment row's sys_id, NOT the user/group/role sys_id.
+//   - Fieldname:    the column that changed, or "DELETED" for a hard delete.
+//   - OldValue / NewValue: the before/after values of the changed field.
+//   - SysCreatedOn: when the change was logged ("YYYY-MM-DD HH:MM:SS", UTC).
+//     Used as the event-feed cursor (sys_created_on>=earliestEvent).
+//   - User:         the user who made the change (sys_created_by login name).
+//   - SysID:        the sys_audit row's own sys_id; used as the event Id.
+type AuditRecord struct {
+	SysID        string `json:"sys_id"`
+	Tablename    string `json:"tablename"`
+	DocumentKey  string `json:"documentkey"`
+	Fieldname    string `json:"fieldname"`
+	OldValue     string `json:"oldvalue"`
+	NewValue     string `json:"newvalue"`
+	SysCreatedOn string `json:"sys_created_on"`
+	User         string `json:"user"`
+}
+
+type AuditResponse = ListResponse[AuditRecord]
+
+// DictionaryRecord is a row from the sys_dictionary (data dictionary) table.
+// The event-feed preflight reads only the table-level collection record for each
+// table (the row whose Element is empty) to learn its Audit flag.
+//
+//   - Name:    the table the row describes (e.g. "sys_user").
+//   - Element: the column the row describes; EMPTY for the table-level record.
+//   - Audit:   ServiceNow stores booleans as the strings "true"/"false". On the
+//     table-level record this is the table's field-change auditing flag (drives
+//     sys_audit). NOTE: it does NOT report delete-recovery (sys_audit_delete),
+//     which is governed separately, so a table can have Audit=="false" yet still
+//     log deletes to sys_audit_delete.
+type DictionaryRecord struct {
+	Name    string `json:"name"`
+	Element string `json:"element"`
+	Audit   string `json:"audit"`
+}
+
+type DictionaryResponse = ListResponse[DictionaryRecord]
+
+// PropertyRecord is a row from the sys_properties (system properties) table. The
+// event-feed revoke-detection preflight reads the single row named
+// glide.ui.audit_deleted_tables, whose Value is the comma-separated list of
+// tables whose hard deletes are captured to sys_audit_delete (the grant-REVOKE
+// source).
+type PropertyRecord struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+type PropertyResponse = ListResponse[PropertyRecord]
 
 // TODO(lauren) remove unecessary fields.
 // Service Catalog request models.
