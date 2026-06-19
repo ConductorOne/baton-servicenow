@@ -14,7 +14,7 @@ func TestEntitlementSlug(t *testing.T) {
 	}{
 		{"member", &v2.Entitlement{Id: "schedule:c8dff571:member"}, "member"},
 		{"on-call", &v2.Entitlement{Id: "schedule:c8dff571:on-call"}, "on-call"},
-		{"owner", &v2.Entitlement{Id: "schedule:c8dff571:owner"}, "owner"},
+		{"manager", &v2.Entitlement{Id: "schedule:c8dff571:manager"}, "manager"},
 		{"falls back to Slug when id has no colon", &v2.Entitlement{Id: "member", Slug: "member"}, "member"},
 	}
 	for _, tt := range tests {

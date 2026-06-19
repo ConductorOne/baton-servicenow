@@ -88,7 +88,7 @@ type GroupMemberPayload struct {
 }
 
 // Table `cmn_rota` (On-Call Rotation/Shift). A rota belongs to a group;
-// the group's manager is treated as the schedule's owner.
+// the group's manager is treated as the schedule's manager.
 type Rota struct {
 	BaseResource
 	Name  string `json:"name"`
@@ -129,20 +129,20 @@ type OnCallMember struct {
 // read-only roster field set. The user must already belong to the rota's
 // assignment group.
 type OnCallAddMemberPayload struct {
-	Member   string `json:"member"`            // sys_user
-	Rosters  string `json:"rosters"`           // glide_list of cmn_rota_roster sys_ids
-	Rota     string `json:"rota,omitempty"`    // cmn_rota
-	FromDate string `json:"from_date"`         // YYYY-MM-DD
+	Member   string `json:"member"`         // sys_user
+	Rosters  string `json:"rosters"`        // glide_list of cmn_rota_roster sys_ids
+	Rota     string `json:"rota,omitempty"` // cmn_rota
+	FromDate string `json:"from_date"`      // YYYY-MM-DD
 }
 
 // OnCallRemoveMemberPayload is posted to the `on_call_remove_member` action
 // table to remove a user from one or more rosters.
 type OnCallRemoveMemberPayload struct {
-	User         string `json:"user"`             // sys_user
-	Rosters      string `json:"rosters"`          // glide_list of cmn_rota_roster sys_ids
-	Rota         string `json:"rota,omitempty"`   // cmn_rota
-	FromDate     string `json:"from_date"`        // YYYY-MM-DD
-	DeleteMember string `json:"delete_member"`    // "true" to delete the membership
+	User         string `json:"user"`           // sys_user
+	Rosters      string `json:"rosters"`        // glide_list of cmn_rota_roster sys_ids
+	Rota         string `json:"rota,omitempty"` // cmn_rota
+	FromDate     string `json:"from_date"`      // YYYY-MM-DD
+	DeleteMember string `json:"delete_member"`  // "true" to delete the membership
 }
 
 type UserToRole struct {

@@ -55,9 +55,9 @@ func (s *scheduleResourceType) ResourceType(_ context.Context) *v2.ResourceType 
 }
 
 const (
-	scheduleMember = "member"  // anyone on the schedule's roster (provisionable)
-	scheduleOnCall = "on-call" // the user currently on call (whoisoncall order==1); read-only
-	scheduleOwner  = "owner"   // the assignment group's manager (sys_user_group.manager); read-only
+	scheduleMember  = "member"  // anyone on the schedule's roster (provisionable)
+	scheduleOnCall  = "on-call" // the user currently on call (whoisoncall order==1); read-only
+	scheduleManager = "manager" // the assignment group's manager (sys_user_group.manager); read-only
 )
 
 // Create a new connector resource for a ServiceNow on-call schedule (roster).
@@ -140,7 +140,7 @@ func (s *scheduleResourceType) Entitlements(ctx context.Context, resource *v2.Re
 		ent.WithDescription(fmt.Sprintf("%s ServiceNow schedule %s", resource.DisplayName, scheduleMember)),
 	}
 
-	// on-call and owner are derived (current rotation / group manager), not
+	// on-call and manager are derived (current rotation / group manager), not
 	// granted through this connector — mark them immutable (read-only in C1).
 	onCallOptions := []ent.EntitlementOption{
 		ent.WithGrantableTo(resourceTypeUser),
@@ -149,17 +149,17 @@ func (s *scheduleResourceType) Entitlements(ctx context.Context, resource *v2.Re
 		ent.WithAnnotation(&v2.EntitlementImmutable{}),
 	}
 
-	ownerOptions := []ent.EntitlementOption{
+	managerOptions := []ent.EntitlementOption{
 		ent.WithGrantableTo(resourceTypeUser),
-		ent.WithDisplayName(fmt.Sprintf("%s schedule %s", resource.DisplayName, scheduleOwner)),
-		ent.WithDescription(fmt.Sprintf("%s ServiceNow schedule %s (assignment group manager)", resource.DisplayName, scheduleOwner)),
+		ent.WithDisplayName(fmt.Sprintf("%s schedule %s", resource.DisplayName, scheduleManager)),
+		ent.WithDescription(fmt.Sprintf("%s ServiceNow schedule %s (assignment group manager)", resource.DisplayName, scheduleManager)),
 		ent.WithAnnotation(&v2.EntitlementImmutable{}),
 	}
 
 	rv = append(rv,
 		ent.NewAssignmentEntitlement(resource, scheduleMember, memberOptions...),
 		ent.NewAssignmentEntitlement(resource, scheduleOnCall, onCallOptions...),
-		ent.NewAssignmentEntitlement(resource, scheduleOwner, ownerOptions...),
+		ent.NewAssignmentEntitlement(resource, scheduleManager, managerOptions...),
 	)
 
 	return rv, "", nil, nil
@@ -224,26 +224,26 @@ func (s *scheduleResourceType) Grants(ctx context.Context, resource *v2.Resource
 			rv = append(rv, grant.NewGrant(resource, scheduleOnCall, rID))
 		}
 
-		// owner = the assignment group's manager (schedule -> rota -> group).
-		ownerID, err := s.scheduleOwnerUserID(ctx, resource.Id.Resource)
+		// manager = the assignment group's manager (schedule -> rota -> group).
+		managerID, err := s.scheduleManagerUserID(ctx, resource.Id.Resource)
 		if err != nil {
 			return nil, "", nil, err
 		}
-		if ownerID != "" {
-			rID, err := rs.NewResourceID(resourceTypeUser, ownerID)
+		if managerID != "" {
+			rID, err := rs.NewResourceID(resourceTypeUser, managerID)
 			if err != nil {
-				return nil, "", nil, fmt.Errorf("baton-servicenow: error creating owner principal id: %w", err)
+				return nil, "", nil, fmt.Errorf("baton-servicenow: error creating manager principal id: %w", err)
 			}
-			rv = append(rv, grant.NewGrant(resource, scheduleOwner, rID))
+			rv = append(rv, grant.NewGrant(resource, scheduleManager, rID))
 		}
 	}
 
 	return rv, nextPage, nil, nil
 }
 
-// scheduleOwnerUserID resolves the schedule's owner (the assignment group's
+// scheduleManagerUserID resolves the schedule's manager (the assignment group's
 // manager) via roster -> rota -> group. Returns "" if no manager is set.
-func (s *scheduleResourceType) scheduleOwnerUserID(ctx context.Context, rosterId string) (string, error) {
+func (s *scheduleResourceType) scheduleManagerUserID(ctx context.Context, rosterId string) (string, error) {
 	roster, err := s.client.GetRoster(ctx, rosterId)
 	if err != nil {
 		return "", fmt.Errorf("baton-servicenow: failed to get roster %s: %w", rosterId, err)
@@ -267,7 +267,7 @@ func (s *scheduleResourceType) scheduleOwnerUserID(ctx context.Context, rosterId
 
 // Grant adds a user to a schedule's roster via the on_call_add_member action
 // table (the supported path that the engine processes server-side). Only the
-// "member" entitlement is provisionable; on-call and owner are read-only.
+// "member" entitlement is provisionable; on-call and manager are read-only.
 // Because the on-call engine only includes roster members who also belong to
 // the assignment group, the user is added to that group first if needed.
 func (s *scheduleResourceType) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
@@ -284,7 +284,7 @@ func (s *scheduleResourceType) Grant(ctx context.Context, principal *v2.Resource
 
 	if entitlementSlug(entitlement) != scheduleMember {
 		l.Warn(
-			"baton-servicenow: only the schedule member entitlement is provisionable (on-call and owner are read-only)",
+			"baton-servicenow: only the schedule member entitlement is provisionable (on-call and manager are read-only)",
 			zap.String("entitlement", entitlement.Id),
 		)
 		return nil, nil
@@ -362,7 +362,7 @@ func (s *scheduleResourceType) Revoke(ctx context.Context, grant *v2.Grant) (ann
 
 	if entitlementSlug(entitlement) != scheduleMember {
 		l.Warn(
-			"baton-servicenow: only the schedule member entitlement is provisionable (on-call and owner are read-only)",
+			"baton-servicenow: only the schedule member entitlement is provisionable (on-call and manager are read-only)",
 			zap.String("entitlement", entitlement.Id),
 		)
 		return nil, nil
