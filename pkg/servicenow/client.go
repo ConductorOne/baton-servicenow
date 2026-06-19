@@ -43,9 +43,17 @@ const (
 	UserRoleInheritanceBaseUrl = GlobalApiBaseURL + "/user_role_inheritance"
 
 	// On-Call Scheduling.
+	RotasBaseUrl            = TableAPIBaseURL + "/cmn_rota"
+	RotaDetailBaseUrl       = RotasBaseUrl + "/%s"
 	RostersBaseUrl          = TableAPIBaseURL + "/cmn_rota_roster"
+	RosterDetailBaseUrl     = RostersBaseUrl + "/%s"
 	RotaMembersBaseUrl      = TableAPIBaseURL + "/cmn_rota_member"
 	RotaMemberDetailBaseUrl = RotaMembersBaseUrl + "/%s"
+
+	// On-Call member provisioning action tables (the engine processes these
+	// server-side and sets the read-only cmn_rota_member.roster field).
+	OnCallAddMemberUrl    = TableAPIBaseURL + "/on_call_add_member"
+	OnCallRemoveMemberUrl = TableAPIBaseURL + "/on_call_remove_member"
 
 	// On-Call REST API (not the Table API): returns who is on call now.
 	WhoIsOnCallUrl = BaseURL + "/now/on_call_rota/whoisoncall"
@@ -99,6 +107,8 @@ type RolesResponse = ListResponse[Role]
 type GroupsResponse = ListResponse[Group]
 type GroupResponse = SingleResponse[Group]
 type GroupMembersResponse = ListResponse[GroupMember]
+type RotaResponse = SingleResponse[Rota]
+type RosterResponse = SingleResponse[Roster]
 type RostersResponse = ListResponse[Roster]
 type RotaMembersResponse = ListResponse[RotaMember]
 type WhoIsOnCallResponse = ListResponse[OnCallMember]
@@ -340,24 +350,6 @@ func (c *Client) GetRotaMembers(ctx context.Context, rosterId string, memberId s
 	return rotaMembersResponse.Result, nextPageToken, nil
 }
 
-func (c *Client) AddUserToRoster(ctx context.Context, record RotaMemberPayload) error {
-	return c.post(
-		ctx,
-		c.apiURL(RotaMembersBaseUrl, c.deployment),
-		nil,
-		&record,
-		WithIncludeResponseBody(),
-	)
-}
-
-func (c *Client) RemoveRotaMember(ctx context.Context, id string) error {
-	return c.delete(
-		ctx,
-		c.apiURL(RotaMemberDetailBaseUrl, c.deployment, id),
-		nil,
-	)
-}
-
 // WhoIsOnCall returns the on-call lineup for a roster as of now, via the
 // On-Call REST API. The result is ordered (Order==1 is the user currently
 // on call; higher orders are the escalation chain). Note: roster members
@@ -377,6 +369,62 @@ func (c *Client) WhoIsOnCall(ctx context.Context, rosterId string) ([]OnCallMemb
 	}
 
 	return resp.Result, nil
+}
+
+// GetRoster fetches a single on-call roster (cmn_rota_roster) by sys_id.
+func (c *Client) GetRoster(ctx context.Context, rosterId string) (*Roster, error) {
+	var resp RosterResponse
+	_, err := c.get(
+		ctx,
+		c.apiURL(RosterDetailBaseUrl, c.deployment, rosterId),
+		&resp,
+		WithFields("sys_id", "name", "rota"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &resp.Result, nil
+}
+
+// GetRota fetches a single on-call rota (cmn_rota) by sys_id.
+func (c *Client) GetRota(ctx context.Context, rotaId string) (*Rota, error) {
+	var resp RotaResponse
+	_, err := c.get(
+		ctx,
+		c.apiURL(RotaDetailBaseUrl, c.deployment, rotaId),
+		&resp,
+		WithFields("sys_id", "name", "group"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &resp.Result, nil
+}
+
+// AddOnCallMember adds a user to roster(s) via the on_call_add_member action
+// table. The on-call engine processes the record and creates the underlying
+// cmn_rota_member row (setting the read-only roster field). The user must
+// already belong to the rota's assignment group.
+func (c *Client) AddOnCallMember(ctx context.Context, payload OnCallAddMemberPayload) error {
+	return c.post(
+		ctx,
+		c.apiURL(OnCallAddMemberUrl, c.deployment),
+		nil,
+		&payload,
+		WithIncludeResponseBody(),
+	)
+}
+
+// RemoveOnCallMember removes a user from roster(s) via the on_call_remove_member
+// action table.
+func (c *Client) RemoveOnCallMember(ctx context.Context, payload OnCallRemoveMemberPayload) error {
+	return c.post(
+		ctx,
+		c.apiURL(OnCallRemoveMemberUrl, c.deployment),
+		nil,
+		&payload,
+		WithIncludeResponseBody(),
+	)
 }
 
 // Table `sys_user_role` (Roles).

@@ -10,7 +10,7 @@ import (
 var (
 	UserFields  = []string{"sys_id", "name", "roles", "user_name", "email", "first_name", "last_name", "active"}
 	RoleFields  = []string{"sys_id", "grantable", "name"}
-	GroupFields = []string{"sys_id", "description", "name"}
+	GroupFields = []string{"sys_id", "description", "name", "manager"}
 )
 
 func queryMultipleIDs(ids []string) string {

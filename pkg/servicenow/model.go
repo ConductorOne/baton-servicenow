@@ -73,6 +73,7 @@ type Group struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Roles       string `json:"roles"`
+	Manager     string `json:"manager"`
 }
 
 type GroupMember struct {
@@ -83,6 +84,14 @@ type GroupMember struct {
 
 type GroupMemberPayload struct {
 	User  string `json:"user"`
+	Group string `json:"group"`
+}
+
+// Table `cmn_rota` (On-Call Rotation/Shift). A rota belongs to a group;
+// the group's manager is treated as the schedule's owner.
+type Rota struct {
+	BaseResource
+	Name  string `json:"name"`
 	Group string `json:"group"`
 }
 
@@ -101,11 +110,6 @@ type RotaMember struct {
 	Order  string `json:"order"`
 }
 
-type RotaMemberPayload struct {
-	Roster string `json:"roster"`
-	Member string `json:"member"`
-}
-
 // OnCallMember is one entry returned by the On-Call REST API
 // (/api/now/on_call_rota/whoisoncall). For a roster at a given time the API
 // returns the on-call lineup ranked by Order: Order==1 is the user actively
@@ -117,6 +121,28 @@ type OnCallMember struct {
 	Group      string `json:"group"`
 	Order      int    `json:"order"`
 	IsOverride bool   `json:"isOverride"`
+}
+
+// OnCallAddMemberPayload is posted to the `on_call_add_member` action table to
+// add a user to one or more rosters. The on-call engine processes the record
+// (after-insert business rule) and creates the cmn_rota_member row with the
+// read-only roster field set. The user must already belong to the rota's
+// assignment group.
+type OnCallAddMemberPayload struct {
+	Member   string `json:"member"`            // sys_user
+	Rosters  string `json:"rosters"`           // glide_list of cmn_rota_roster sys_ids
+	Rota     string `json:"rota,omitempty"`    // cmn_rota
+	FromDate string `json:"from_date"`         // YYYY-MM-DD
+}
+
+// OnCallRemoveMemberPayload is posted to the `on_call_remove_member` action
+// table to remove a user from one or more rosters.
+type OnCallRemoveMemberPayload struct {
+	User         string `json:"user"`             // sys_user
+	Rosters      string `json:"rosters"`          // glide_list of cmn_rota_roster sys_ids
+	Rota         string `json:"rota,omitempty"`   // cmn_rota
+	FromDate     string `json:"from_date"`        // YYYY-MM-DD
+	DeleteMember string `json:"delete_member"`    // "true" to delete the membership
 }
 
 type UserToRole struct {
