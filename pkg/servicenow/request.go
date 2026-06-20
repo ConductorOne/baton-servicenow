@@ -7,10 +7,12 @@ import (
 	"strings"
 )
 
+const fieldName = "name"
+
 var (
-	UserFields  = []string{"sys_id", "name", "roles", "user_name", "email", "first_name", "last_name", "active", "sys_updated_on"}
-	RoleFields  = []string{"sys_id", "grantable", "name", "sys_updated_on"}
-	GroupFields = []string{"sys_id", "description", "name", "manager", "sys_updated_on"}
+	UserFields  = []string{fieldSysID, fieldName, "roles", "user_name", "email", "first_name", "last_name", "active", UpdatedSinceField}
+	RoleFields  = []string{fieldSysID, "grantable", fieldName, UpdatedSinceField}
+	GroupFields = []string{fieldSysID, "description", fieldName, "manager", UpdatedSinceField}
 )
 
 // UpdatedSinceField is the ServiceNow column used to filter rows by last-change
@@ -171,7 +173,7 @@ func prepareUserToGroupFilter(userId string, groupId string) *FilterVars {
 
 	return &FilterVars{
 		Fields: []string{
-			"sys_id", "user", "group", "sys_updated_on",
+			fieldSysID, "user", "group", UpdatedSinceField,
 		},
 		Query: query,
 	}
@@ -193,7 +195,7 @@ func prepareUserToRoleFilter(userId string, roleId string) *FilterVars {
 
 	return &FilterVars{
 		Fields: []string{
-			"sys_id", "user", "role", "inherited", "sys_updated_on",
+			fieldSysID, "user", "role", "inherited", UpdatedSinceField,
 		},
 		Query: query,
 	}
@@ -215,7 +217,7 @@ func prepareGroupToRoleFilter(groupId string, roleId string) *FilterVars {
 
 	return &FilterVars{
 		Fields: []string{
-			"sys_id", "role", "group", "inherits", "sys_updated_on",
+			fieldSysID, "role", "group", "inherits", UpdatedSinceField,
 		},
 		Query: query,
 	}
