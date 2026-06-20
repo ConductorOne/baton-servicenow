@@ -50,6 +50,10 @@ const (
 	scheduleManager = "manager" // the assignment group's manager (sys_user_group.manager); read-only
 )
 
+// onCallDeleteMember is the on_call_remove_member payload flag that deletes the
+// roster member record; ServiceNow expects the string "true".
+const onCallDeleteMember = "true"
+
 func scheduleResource(roster *servicenow.Roster) (*v2.Resource, error) {
 	profile := map[string]interface{}{
 		"schedule_name": roster.Name,
@@ -368,7 +372,7 @@ func (s *scheduleResourceType) Revoke(ctx context.Context, grant *v2.Grant) (ann
 		Rosters:      rosterId,
 		Rota:         roster.Rota,
 		FromDate:     onCallActionDate(),
-		DeleteMember: "true",
+		DeleteMember: onCallDeleteMember,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("baton-servicenow: failed to remove user %s from schedule %s: %w", principal.Id.Resource, rosterId, err)
