@@ -52,10 +52,8 @@ func (s *ServiceNow) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 	}
 }
 
-// Close persists the incremental-sync snapshot. The connectorbuilder invokes
-// Close after a successful sync, which is the only safe moment to advance the
-// watermark (persisting on a partial/failed run could skip rows). It is a
-// no-op when incremental mode is disabled.
+// Close persists the incremental-sync snapshot (best-effort final flush; no-op
+// when incremental is disabled).
 func (s *ServiceNow) Close(ctx context.Context) error {
 	if s.state == nil {
 		return nil
@@ -131,13 +129,10 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 	return nil, nil
 }
 
-// New returns the ServiceNow connector.
-//
-// When incremental is true, syncs after the first only fetch records whose
-// sys_updated_on is at or after the watermark stored in the connector-managed
-// state file under stateDir (keyed by deployment), merging the deltas over the
-// cached snapshot so the c1z stays complete. When false, every sync is a full
-// pull and no state is read or written.
+// New returns the ServiceNow connector. When incremental is true, syncs after
+// the first fetch only rows changed since the stored watermark and merge them
+// over the cached snapshot (state file under stateDir, keyed by deployment);
+// when false, every sync is a full pull.
 func New(
 	ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string,
 	allowedDomains []string, customUserFields []string, baseURL string, insecure bool,

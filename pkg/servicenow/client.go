@@ -167,16 +167,13 @@ func (c *Client) GetBaseURL() string {
 	return c.baseURL
 }
 
-// incrementalPageSize is the page size used when draining all delta rows in a
-// single incremental List/Grants call. ServiceNow Table API caps practical
-// page sizes well below this; the value just bounds round-trips.
+// incrementalPageSize bounds round-trips when draining all delta rows in one
+// incremental call.
 const incrementalPageSize = 1000
 
-// drainAll repeatedly calls fetch (a paginated list method) starting at offset
-// 0 until the returned next-page token is empty, accumulating every row. It is
-// used for incremental syncs, where the connector fetches the full changed set
-// in one shot, merges it over its cached snapshot, and emits the union as a
-// single page (the SDK does not merge across paginated responses).
+// drainAll pages through fetch until exhausted, accumulating every row, so an
+// incremental sync can emit the full changed set as a single page (the SDK does
+// not merge across paginated responses).
 func drainAll[T any](
 	ctx context.Context,
 	fetch func(ctx context.Context, pv PaginationVars) ([]T, string, error),
@@ -252,15 +249,11 @@ func (c *Client) GetAllGroupToRoleUpdatedSince(ctx context.Context, roleId strin
 // AuditDeleteFields is the minimal field set fetched from sys_audit_delete.
 var AuditDeleteFields = []string{"tablename", "documentkey", "sys_created_on"}
 
-// GetDeletedSince lists sys_audit_delete rows for one or more tables whose
-// delete was logged at or after createdSince ("YYYY-MM-DD HH:MM:SS", UTC). An
-// empty createdSince fetches the full audit history for those tables. Each
-// returned record's DocumentKey is the sys_id of the deleted row (a join-row
-// sys_id for the membership/assignment tables).
-//
-// Note: an error here (e.g. auditing disabled, or the caller lacks read access
-// to sys_audit_delete) must be handled gracefully by callers — deletions simply
-// won't be captured that run; the periodic full-sync backstop reconciles them.
+// GetDeletedSince lists sys_audit_delete rows for the given tables logged at or
+// after createdSince (empty = full history). Each record's DocumentKey is the
+// deleted row's sys_id (a join-row sys_id for the membership/assignment tables).
+// Callers must handle errors gracefully (auditing disabled / no read access):
+// the full-sync backstop reconciles deletions.
 func (c *Client) GetDeletedSince(ctx context.Context, tableNames []string, createdSince string, paginationVars PaginationVars) ([]AuditDeleteRecord, string, error) {
 	var resp AuditDeleteResponse
 
@@ -318,10 +311,8 @@ func (c *Client) GetUsers(ctx context.Context, paginationVars PaginationVars) ([
 	return c.GetUsersUpdatedSince(ctx, paginationVars, "")
 }
 
-// GetUsersUpdatedSince lists users optionally restricted to those whose
-// sys_updated_on is at or after updatedSince. When updatedSince is empty it
-// behaves identically to GetUsers (full pull). This is the incremental-sync
-// entry point: callers pass the watermark from the previous successful sync.
+// GetUsersUpdatedSince lists users with sys_updated_on at or after updatedSince
+// (empty = full pull); the incremental-sync entry point.
 func (c *Client) GetUsersUpdatedSince(ctx context.Context, paginationVars PaginationVars, updatedSince string) ([]User, string, error) {
 	var usersResponse UsersResponse
 

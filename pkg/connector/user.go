@@ -71,14 +71,11 @@ func userResource(user *servicenow.User) (*v2.Resource, error) {
 }
 
 func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	// Incremental path: drain only users changed since the watermark, merge
-	// them over the cached snapshot, and emit the full union as a single page.
-	// The SDK does a full replace per sync and does not merge across pages, so
-	// the union must be complete in one response to keep the c1z whole.
+	// Incremental: drain users changed since the watermark, merge over the
+	// snapshot, and emit the full union as one page (the SDK does a full replace
+	// and does not merge across pages).
 	if u.state.Enabled() {
-		// Capture hard deletes once per run (prunes the snapshot) before building
-		// the merged union, so deleted rows do not reappear in the c1z.
-		u.state.Reconcile(ctx)
+		u.state.Reconcile(ctx) // capture hard deletes once per run before building the union
 		changed, err := u.client.GetAllUsersUpdatedSince(ctx, u.state.Watermark(incremental.StreamUsers))
 		if err != nil {
 			u.state.MarkFailed()
