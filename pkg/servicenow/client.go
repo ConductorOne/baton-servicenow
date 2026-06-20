@@ -76,9 +76,6 @@ const (
 
 	InstanceURLTemplate = `{{.Deployment}}.service-now.com`
 
-	// sys_dictionary: data dictionary; table-level `audit` flag drives sys_audit.
-	DictionaryBaseUrl = TableAPIBaseURL + "/sys_dictionary"
-
 	// sys_properties: system properties (read for glide.ui.audit_deleted_tables).
 	PropertyBaseUrl = TableAPIBaseURL + "/sys_properties"
 
@@ -271,40 +268,6 @@ func (c *Client) GetAuditSince(ctx context.Context, tableNames []string, created
 		return nil, "", err
 	}
 	return resp.Result, nextPage, nil
-}
-
-// GetTableAuditFlags returns tableName -> field-change-auditing-enabled, read
-// from each table's sys_dictionary collection record (advisory only; a table
-// absent from the result is reported false).
-func (c *Client) GetTableAuditFlags(ctx context.Context, tableNames []string) (map[string]bool, error) {
-	out := make(map[string]bool, len(tableNames))
-	if len(tableNames) == 0 {
-		return out, nil
-	}
-
-	var resp DictionaryResponse
-	// Only the table-level record (element empty) carries the table's audit flag.
-	query := "nameIN" + strings.Join(tableNames, ",") + "^elementISEMPTY"
-	reqOpts := []ReqOpt{
-		WithQuery(query),
-		WithFields("name", "element", "audit"),
-	}
-	pv := PaginationVars{Limit: len(tableNames) + 1}
-	reqOpts = append(reqOpts, paginationVarsToReqOptions(&pv)...)
-
-	_, err := c.get(ctx, c.apiURL(DictionaryBaseUrl, c.deployment), &resp, reqOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("baton-servicenow: failed to read sys_dictionary audit flags: %w", err)
-	}
-
-	for i := range resp.Result {
-		r := &resp.Result[i]
-		if r.Element != "" {
-			continue
-		}
-		out[r.Name] = boolStr(r.Audit)
-	}
-	return out, nil
 }
 
 // GetAuditDeletedTables returns the tables listed in glide.ui.audit_deleted_tables

@@ -178,16 +178,6 @@ type AuditRecord struct {
 
 type AuditResponse = ListResponse[AuditRecord]
 
-// DictionaryRecord is a sys_dictionary row. The table-level record (Element
-// empty) carries the table's field-change Audit flag ("true"/"false").
-type DictionaryRecord struct {
-	Name    string `json:"name"`
-	Element string `json:"element"`
-	Audit   string `json:"audit"`
-}
-
-type DictionaryResponse = ListResponse[DictionaryRecord]
-
 // PropertyRecord is a sys_properties row (name/value system property).
 type PropertyRecord struct {
 	Name  string `json:"name"`
