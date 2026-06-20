@@ -16,9 +16,7 @@ import (
 const SystemAdminUserId = "6816f79cc0a8016401c5a33be04be441"
 
 // Table names backing the connector's resources/grants, used as the
-// sys_audit_delete `tablename` filter for deletion capture. The join tables
-// (TableUserGroupMember, TableUserHasRole, TableGroupHasRole) carry the
-// membership/assignment row sys_id in sys_audit_delete.documentkey.
+// sys_audit_delete `tablename` filter for deletion capture.
 const (
 	TableUser            = "sys_user"
 	TableUserGroup       = "sys_user_group"
@@ -150,51 +148,23 @@ type UserRoles struct {
 	FromGroup []string `json:"from_group"`
 }
 
-// AuditDeleteRecord is a row from the sys_audit_delete table. ServiceNow logs a
-// row here for every HARD delete of an audited record. The event feed reads it
-// to emit near-real-time grant-revoke events for deleted membership/assignment
-// rows.
-//
-//   - Tablename:    the table the deleted row belonged to (e.g. "sys_user").
-//   - DocumentKey:  the sys_id of the DELETED row. For a join table
-//     (sys_user_grmember / sys_user_has_role / sys_group_has_role) this is the
-//     membership/assignment row's sys_id, NOT the user/group/role sys_id.
-//   - SysCreatedOn: when the delete was logged ("YYYY-MM-DD HH:MM:SS", UTC). Used
-//     to advance the per-deployment delete watermark.
+// AuditDeleteRecord is a sys_audit_delete row (one per hard delete). DocumentKey
+// is the deleted row's sys_id (for a join table, the membership/assignment row).
 type AuditDeleteRecord struct {
 	Tablename    string `json:"tablename"`
 	DocumentKey  string `json:"documentkey"`
 	SysCreatedOn string `json:"sys_created_on"`
 
-	// Payload is the full XML serialization of the DELETED row, present when
-	// ServiceNow's delete-recovery/audit-delete capture is enabled (the default
-	// on most instances). It contains every column of the deleted row, including
-	// reference fields as elements whose text is the referenced sys_id. The
-	// event feed parses it to resolve a deleted join row back to its
-	// (principal, target) pair so it can emit a near-real-time revoke event.
-	//
-	// Only populated when the row is fetched via GetDeletedSincePayload. May be
-	// empty if delete-recovery is disabled for the table.
+	// Payload is the deleted row's full XML (reference fields as elements holding
+	// the referenced sys_id); the feed parses it to resolve a revoke. Only set via
+	// GetDeletedSincePayload, and empty if delete-recovery is disabled.
 	Payload string `json:"payload"`
 }
 
 type AuditDeleteResponse = ListResponse[AuditDeleteRecord]
 
-// AuditRecord is a row from the sys_audit table. ServiceNow logs a row here for
-// every field-level change of an audited record (and a synthetic row with
-// Fieldname=="DELETED" when an audited record is hard-deleted). The event feed
-// reads this table as its near-real-time change source, mirroring how the Okta
-// connector reads the Okta System Log.
-//
-//   - Tablename:    the table the changed row belongs to (e.g. "sys_user").
-//   - DocumentKey:  the sys_id of the changed row. For a join table this is the
-//     membership/assignment row's sys_id, NOT the user/group/role sys_id.
-//   - Fieldname:    the column that changed, or "DELETED" for a hard delete.
-//   - OldValue / NewValue: the before/after values of the changed field.
-//   - SysCreatedOn: when the change was logged ("YYYY-MM-DD HH:MM:SS", UTC).
-//     Used as the event-feed cursor (sys_created_on>=earliestEvent).
-//   - User:         the user who made the change (sys_created_by login name).
-//   - SysID:        the sys_audit row's own sys_id; used as the event Id.
+// AuditRecord is a sys_audit row: one per field change, plus a synthetic
+// Fieldname=="DELETED" row on hard delete. DocumentKey is the changed row's sys_id.
 type AuditRecord struct {
 	SysID        string `json:"sys_id"`
 	Tablename    string `json:"tablename"`
@@ -208,17 +178,8 @@ type AuditRecord struct {
 
 type AuditResponse = ListResponse[AuditRecord]
 
-// DictionaryRecord is a row from the sys_dictionary (data dictionary) table.
-// The event-feed preflight reads only the table-level collection record for each
-// table (the row whose Element is empty) to learn its Audit flag.
-//
-//   - Name:    the table the row describes (e.g. "sys_user").
-//   - Element: the column the row describes; EMPTY for the table-level record.
-//   - Audit:   ServiceNow stores booleans as the strings "true"/"false". On the
-//     table-level record this is the table's field-change auditing flag (drives
-//     sys_audit). NOTE: it does NOT report delete-recovery (sys_audit_delete),
-//     which is governed separately, so a table can have Audit=="false" yet still
-//     log deletes to sys_audit_delete.
+// DictionaryRecord is a sys_dictionary row. The table-level record (Element
+// empty) carries the table's field-change Audit flag ("true"/"false").
 type DictionaryRecord struct {
 	Name    string `json:"name"`
 	Element string `json:"element"`
@@ -227,11 +188,7 @@ type DictionaryRecord struct {
 
 type DictionaryResponse = ListResponse[DictionaryRecord]
 
-// PropertyRecord is a row from the sys_properties (system properties) table. The
-// event-feed revoke-detection preflight reads the single row named
-// glide.ui.audit_deleted_tables, whose Value is the comma-separated list of
-// tables whose hard deletes are captured to sys_audit_delete (the grant-REVOKE
-// source).
+// PropertyRecord is a sys_properties row (name/value system property).
 type PropertyRecord struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`

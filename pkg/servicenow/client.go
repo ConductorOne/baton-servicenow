@@ -34,14 +34,10 @@ const (
 	GroupMembersBaseUrl      = TableAPIBaseURL + "/sys_user_grmember"
 	GroupMemberDetailBaseUrl = GroupMembersBaseUrl + "/%s"
 
-	// AuditDeleteBaseUrl is the sys_audit_delete table: one row per hard delete
-	// of an audited record. The event feed reads it to emit grant-revoke events.
+	// sys_audit_delete: one row per hard delete (event-feed revoke source).
 	AuditDeleteBaseUrl = TableAPIBaseURL + "/sys_audit_delete"
 
-	// AuditBaseUrl is the sys_audit table: one row per field-level change of an
-	// audited record (tablename/documentkey/fieldname/oldvalue/newvalue). The
-	// event feed reads it to surface account changes (sys_user) and audited
-	// deletes (fieldname=="DELETED") on the access tables in near real time.
+	// sys_audit: one row per field change / audited delete (event-feed source).
 	AuditBaseUrl = TableAPIBaseURL + "/sys_audit"
 
 	RolesBaseUrl           = TableAPIBaseURL + "/sys_user_role"
@@ -80,21 +76,13 @@ const (
 
 	InstanceURLTemplate = `{{.Deployment}}.service-now.com`
 
-	// DictionaryBaseUrl is the sys_dictionary table: the data dictionary. Each row
-	// describes a table (when its `element` is empty — the table-level collection
-	// record) or a column. Its `audit` flag is the connector-readable signal for
-	// whether field-change auditing is enabled (drives sys_audit), used by the
-	// event-feed audit-config preflight.
+	// sys_dictionary: data dictionary; table-level `audit` flag drives sys_audit.
 	DictionaryBaseUrl = TableAPIBaseURL + "/sys_dictionary"
 
-	// PropertyBaseUrl is the sys_properties table (system properties). The
-	// event-feed revoke-detection preflight reads the glide.ui.audit_deleted_tables
-	// row from it: the comma-separated list of tables whose hard deletes are
-	// captured to sys_audit_delete (the grant-REVOKE source).
+	// sys_properties: system properties (read for glide.ui.audit_deleted_tables).
 	PropertyBaseUrl = TableAPIBaseURL + "/sys_properties"
 
-	// AuditDeletedTablesProperty is the sys_properties name whose value lists the
-	// tables whose deletes are recorded in sys_audit_delete.
+	// AuditDeletedTablesProperty lists tables whose deletes go to sys_audit_delete.
 	AuditDeletedTablesProperty = "glide.ui.audit_deleted_tables"
 
 	// Variable sets & variables (Table API).
@@ -190,24 +178,13 @@ func (c *Client) GetBaseURL() string {
 	return c.baseURL
 }
 
-// AuditDeletePayloadFields is the field set fetched from sys_audit_delete for
-// the event feed. It adds `payload` (the full XML dump of the deleted row) on
-// top of AuditDeleteFields so the feed can resolve a deleted join row back to
-// its (principal, target) pair and emit a revoke event.
+// AuditDeletePayloadFields adds `payload` (the deleted row's XML) to
+// AuditDeleteFields so the feed can resolve a deleted join row to a revoke.
 var AuditDeletePayloadFields = []string{"tablename", fieldDocumentKey, "sys_created_on", "payload"}
 
-// GetDeletedSincePayload lists sys_audit_delete rows for one or more tables
-// whose delete was logged at or after createdSince ("YYYY-MM-DD HH:MM:SS",
-// UTC), INCLUDING the `payload` column and ordered by sys_created_on ascending
-// so the event feed advances its cursor monotonically. An empty createdSince
-// fetches from the beginning of the delete history. The returned next-page
-// token is the Table API offset for the following page ("" when exhausted).
-//
-// This is the event-feed delete source (it mirrors GetAuditSince's ordering and
-// GetDeletedSince's filtering, but additionally fetches the payload so deletes
-// of join rows become resolvable revoke events). Errors are surfaced to the
-// caller; the feed degrades gracefully and the periodic full sync remains the
-// source of truth.
+// GetDeletedSincePayload lists sys_audit_delete rows (with payload) for the given
+// tables at/after createdSince, ordered by sys_created_on ascending; this is the
+// event feed's revoke source. Empty createdSince fetches from the start.
 func (c *Client) GetDeletedSincePayload(ctx context.Context, tableNames []string, createdSince string, paginationVars PaginationVars) ([]AuditDeleteRecord, string, error) {
 	var resp AuditDeleteResponse
 
@@ -246,8 +223,7 @@ func (c *Client) GetDeletedSincePayload(ctx context.Context, tableNames []string
 	return resp.Result, nextPage, nil
 }
 
-// fieldSysID/fieldUser are ServiceNow columns requested in the sysparm_fields
-// of the event-feed list calls.
+// Column names requested in the event-feed list calls.
 const (
 	fieldSysID       = "sys_id"
 	fieldUser        = "user"
@@ -257,16 +233,8 @@ const (
 // AuditFields is the field set fetched from sys_audit for the event feed.
 var AuditFields = []string{fieldSysID, "tablename", fieldDocumentKey, "fieldname", "oldvalue", "newvalue", "sys_created_on", fieldUser}
 
-// GetAuditSince lists sys_audit rows for one or more tables whose change was
-// logged at or after createdSince ("YYYY-MM-DD HH:MM:SS", UTC), ordered by
-// sys_created_on ascending so the event feed advances its cursor monotonically.
-// An empty createdSince fetches from the beginning of the audit history. The
-// returned next-page token is the Table API offset for the following page (""
-// when exhausted).
-//
-// Note: an error here (e.g. auditing disabled, or the caller lacks read access
-// to sys_audit) is surfaced to the caller; the event feed degrades gracefully
-// and the periodic full sync remains the source of truth.
+// GetAuditSince lists sys_audit rows for the given tables at/after createdSince,
+// ordered by sys_created_on ascending. Empty createdSince fetches from the start.
 func (c *Client) GetAuditSince(ctx context.Context, tableNames []string, createdSince string, paginationVars PaginationVars) ([]AuditRecord, string, error) {
 	var resp AuditResponse
 
@@ -305,17 +273,9 @@ func (c *Client) GetAuditSince(ctx context.Context, tableNames []string, created
 	return resp.Result, nextPage, nil
 }
 
-// GetTableAuditFlags reports, for each of the given table names, whether
-// field-change auditing is enabled on that table. It reads the table-level
-// collection record from sys_dictionary (the row where `element` is empty) and
-// returns a map tableName -> auditEnabled.
-//
-// The flag reflects sys_dictionary's `audit` column ("true"/"false"); a table
-// absent from the result (no table-level record returned, or unreadable) is
-// reported as false. This signals whether sys_audit field-change rows will be
-// produced — it does NOT reflect delete-recovery (sys_audit_delete), which is a
-// separate, independently-configured capability. Callers must treat this as
-// advisory only.
+// GetTableAuditFlags returns tableName -> field-change-auditing-enabled, read
+// from each table's sys_dictionary collection record (advisory only; a table
+// absent from the result is reported false).
 func (c *Client) GetTableAuditFlags(ctx context.Context, tableNames []string) (map[string]bool, error) {
 	out := make(map[string]bool, len(tableNames))
 	if len(tableNames) == 0 {
@@ -323,8 +283,7 @@ func (c *Client) GetTableAuditFlags(ctx context.Context, tableNames []string) (m
 	}
 
 	var resp DictionaryResponse
-	// Only the table-level record carries the table's audit flag: name IN (...)
-	// AND element is empty.
+	// Only the table-level record (element empty) carries the table's audit flag.
 	query := "nameIN" + strings.Join(tableNames, ",") + "^elementISEMPTY"
 	reqOpts := []ReqOpt{
 		WithQuery(query),
@@ -348,21 +307,10 @@ func (c *Client) GetTableAuditFlags(ctx context.Context, tableNames []string) (m
 	return out, nil
 }
 
-// GetAuditDeletedTables reads the glide.ui.audit_deleted_tables system property
-// (sys_properties) and returns the list of table names whose hard deletes are
-// captured to sys_audit_delete. That capture is the source of near-real-time
-// grant-REVOKE events, so a join table's PRESENCE in this list means its revokes
-// are reliably captured.
-//
-// Caveat (do NOT treat absence as definitive): some tables can have their
-// deletes captured to sys_audit_delete by their own mechanism without appearing
-// in this property. So presence => reliably captured; absence => not reliably
-// captured via this property (but may still be captured by other means).
-// Callers must treat this as advisory only.
-//
-// An empty / unset property yields an empty list (no error). Errors (e.g. lack
-// of read access to sys_properties) are surfaced to the caller, which degrades
-// gracefully.
+// GetAuditDeletedTables returns the tables listed in glide.ui.audit_deleted_tables
+// (those whose deletes are captured to sys_audit_delete, the revoke source).
+// Advisory: presence => reliably captured; absence is not definitive (some tables
+// capture deletes by other means). Unset property yields an empty list, no error.
 func (c *Client) GetAuditDeletedTables(ctx context.Context) ([]string, error) {
 	var resp PropertyResponse
 	reqOpts := []ReqOpt{
