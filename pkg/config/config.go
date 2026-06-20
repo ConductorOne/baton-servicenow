@@ -53,7 +53,8 @@ var (
 	)
 	stateDirField = field.StringField("state-dir",
 		field.WithDisplayName("Incremental state directory"),
-		field.WithDescription("Directory where the incremental-sync watermark and snapshot are stored (one file per deployment). Defaults to the working directory. Only used when incremental is enabled."),
+		field.WithDescription("Directory where the incremental-sync watermark and snapshot are stored (one file per deployment). "+
+			"Defaults to the working directory. Only used when incremental is enabled."),
 		field.WithExportTarget(field.ExportTargetCLIOnly),
 	)
 )

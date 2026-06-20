@@ -140,7 +140,7 @@ func Load(dir string, deployment string, enabled bool, deleter Deleter) (*State,
 
 	var snap Snapshot
 	if jErr := json.Unmarshal(data, &snap); jErr != nil || snap.Version != stateVersion || snap.Deployment != deployment {
-		return s, nil // corrupt/incompatible/wrong-deployment: discard, full pull
+		return s, nil //nolint:nilerr // corrupt/incompatible/wrong-deployment snapshot is non-fatal: discard and do a full pull
 	}
 	ensureMaps(&snap)
 	s.snapshot = &snap
