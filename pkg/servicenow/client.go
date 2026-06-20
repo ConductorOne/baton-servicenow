@@ -50,8 +50,7 @@ const (
 	RotaMembersBaseUrl      = TableAPIBaseURL + "/cmn_rota_member"
 	RotaMemberDetailBaseUrl = RotaMembersBaseUrl + "/%s"
 
-	// On-Call member provisioning action tables (the engine processes these
-	// server-side and sets the read-only cmn_rota_member.roster field).
+	// On-Call member provisioning action tables (engine-processed server-side).
 	OnCallAddMemberUrl    = TableAPIBaseURL + "/on_call_add_member"
 	OnCallRemoveMemberUrl = TableAPIBaseURL + "/on_call_remove_member"
 
@@ -350,11 +349,8 @@ func (c *Client) GetRotaMembers(ctx context.Context, rosterId string, memberId s
 	return rotaMembersResponse.Result, nextPageToken, nil
 }
 
-// WhoIsOnCall returns the on-call lineup for a roster as of now, via the
-// On-Call REST API. The result is ordered (Order==1 is the user currently
-// on call; higher orders are the escalation chain). Note: roster members
-// must also belong to the underlying assignment group for the on-call
-// engine to include them.
+// WhoIsOnCall returns the on-call lineup for a roster now, ordered (Order==1 is
+// currently on call). Members must also be in the assignment group to appear.
 func (c *Client) WhoIsOnCall(ctx context.Context, rosterId string) ([]OnCallMember, error) {
 	var resp WhoIsOnCallResponse
 
@@ -402,9 +398,7 @@ func (c *Client) GetRota(ctx context.Context, rotaId string) (*Rota, error) {
 }
 
 // AddOnCallMember adds a user to roster(s) via the on_call_add_member action
-// table. The on-call engine processes the record and creates the underlying
-// cmn_rota_member row (setting the read-only roster field). The user must
-// already belong to the rota's assignment group.
+// table; the engine creates the cmn_rota_member row. User must be in the group.
 func (c *Client) AddOnCallMember(ctx context.Context, payload OnCallAddMemberPayload) error {
 	return c.post(
 		ctx,
@@ -593,14 +587,10 @@ func (c *Client) delete(
 	return err
 }
 
-// IsInvalidTableError reports whether err is a ServiceNow "Invalid table" error.
-// ServiceNow returns HTTP 400 with body message "Invalid table <name>" when a
-// queried table does not exist on the instance — e.g. the on-call scheduling
-// tables (cmn_rota_roster, cmn_rota_member) when the On-Call Scheduling plugin
-// (com.snc.on_call_rotation) is not installed. The connector uses this to skip
-// optional-module resources gracefully instead of failing the whole sync. The
-// error message carries the raw response body (see the >=300 path in
-// doRequestWithRetry), so a substring match is reliable.
+// IsInvalidTableError reports whether err is ServiceNow's HTTP 400 "Invalid
+// table" error, returned when a queried table doesn't exist — e.g. the on-call
+// tables when the On-Call Scheduling plugin isn't installed. Used to skip
+// optional-module resources instead of failing the sync.
 func IsInvalidTableError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "Invalid table")
 }

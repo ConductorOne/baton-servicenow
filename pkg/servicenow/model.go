@@ -87,8 +87,8 @@ type GroupMemberPayload struct {
 	Group string `json:"group"`
 }
 
-// Table `cmn_rota` (On-Call Rotation/Shift). A rota belongs to a group;
-// the group's manager is treated as the schedule's manager.
+// Table `cmn_rota` (On-Call Rotation). Belongs to a group; the group's manager
+// is the schedule's manager.
 type Rota struct {
 	BaseResource
 	Name  string `json:"name"`
@@ -110,10 +110,8 @@ type RotaMember struct {
 	Order  string `json:"order"`
 }
 
-// OnCallMember is one entry returned by the On-Call REST API
-// (/api/now/on_call_rota/whoisoncall). For a roster at a given time the API
-// returns the on-call lineup ranked by Order: Order==1 is the user actively
-// on call now; higher orders are the escalation/next-up chain.
+// OnCallMember is one whoisoncall lineup entry, ranked by Order (Order==1 is
+// currently on call).
 type OnCallMember struct {
 	UserId     string `json:"userId"`
 	Roster     string `json:"roster"`
@@ -123,11 +121,7 @@ type OnCallMember struct {
 	IsOverride bool   `json:"isOverride"`
 }
 
-// OnCallAddMemberPayload is posted to the `on_call_add_member` action table to
-// add a user to one or more rosters. The on-call engine processes the record
-// (after-insert business rule) and creates the cmn_rota_member row with the
-// read-only roster field set. The user must already belong to the rota's
-// assignment group.
+// OnCallAddMemberPayload is posted to the `on_call_add_member` action table.
 type OnCallAddMemberPayload struct {
 	Member   string `json:"member"`         // sys_user
 	Rosters  string `json:"rosters"`        // glide_list of cmn_rota_roster sys_ids
@@ -135,8 +129,7 @@ type OnCallAddMemberPayload struct {
 	FromDate string `json:"from_date"`      // YYYY-MM-DD
 }
 
-// OnCallRemoveMemberPayload is posted to the `on_call_remove_member` action
-// table to remove a user from one or more rosters.
+// OnCallRemoveMemberPayload is posted to the `on_call_remove_member` action table.
 type OnCallRemoveMemberPayload struct {
 	User         string `json:"user"`           // sys_user
 	Rosters      string `json:"rosters"`        // glide_list of cmn_rota_roster sys_ids

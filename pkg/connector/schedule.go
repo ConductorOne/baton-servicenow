@@ -19,26 +19,16 @@ import (
 )
 
 // The connector's "schedule" resource maps to ServiceNow's on-call roster
-// (cmn_rota_roster) — the level at which on-call membership (cmn_rota_member)
-// is defined. The "schedule" naming aligns with the other on-call connectors
-// (PagerDuty, OpsGenie, Rootly); the ServiceNow API layer keeps the native
-// roster/rota terminology that matches the underlying tables.
+// (cmn_rota_roster), named to match the other on-call connectors (PagerDuty,
+// OpsGenie, Rootly).
 type scheduleResourceType struct {
-	resourceType *v2.ResourceType
-	client       *servicenow.Client
-
-	// moduleAbsentOnce guards a single advisory warning when the On-Call
-	// Scheduling plugin is not installed (see warnModuleAbsent).
+	resourceType     *v2.ResourceType
+	client           *servicenow.Client
 	moduleAbsentOnce sync.Once
 }
 
-// warnModuleAbsent logs, at most once per process, that the On-Call Scheduling
-// plugin is not installed, so schedule resources are being skipped. It is called
-// when a schedule read hits a ServiceNow "Invalid table" error on the on-call
-// tables (cmn_rota_roster / cmn_rota_member), which means the optional plugin
-// (com.snc.on_call_rotation) is absent. Skipping schedules must NOT fail the
-// sync of users, groups, and roles (separate resource types), so callers return
-// empty rather than propagating the error.
+// warnModuleAbsent warns once that the On-Call Scheduling plugin
+// (com.snc.on_call_rotation) is absent, so schedules are skipped.
 func (s *scheduleResourceType) warnModuleAbsent(ctx context.Context) {
 	s.moduleAbsentOnce.Do(func() {
 		ctxzap.Extract(ctx).Warn(
@@ -60,7 +50,6 @@ const (
 	scheduleManager = "manager" // the assignment group's manager (sys_user_group.manager); read-only
 )
 
-// Create a new connector resource for a ServiceNow on-call schedule (roster).
 func scheduleResource(roster *servicenow.Roster) (*v2.Resource, error) {
 	profile := map[string]interface{}{
 		"schedule_name": roster.Name,
@@ -104,8 +93,7 @@ func (s *scheduleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *p
 		},
 	)
 	if err != nil {
-		// On-Call Scheduling plugin not installed: skip schedules instead of
-		// failing the whole sync (users/groups/roles are independent).
+		// On-Call Scheduling plugin absent: skip schedules, don't fail the sync.
 		if servicenow.IsInvalidTableError(err) {
 			s.warnModuleAbsent(ctx)
 			return nil, "", nil, nil
@@ -140,8 +128,7 @@ func (s *scheduleResourceType) Entitlements(ctx context.Context, resource *v2.Re
 		ent.WithDescription(fmt.Sprintf("%s ServiceNow schedule %s", resource.DisplayName, scheduleMember)),
 	}
 
-	// on-call and manager are derived (current rotation / group manager), not
-	// granted through this connector — mark them immutable (read-only in C1).
+	// on-call and manager are derived (rotation / group manager); read-only.
 	onCallOptions := []ent.EntitlementOption{
 		ent.WithGrantableTo(resourceTypeUser),
 		ent.WithDisplayName(fmt.Sprintf("%s schedule %s", resource.DisplayName, scheduleOnCall)),
@@ -181,8 +168,7 @@ func (s *scheduleResourceType) Grants(ctx context.Context, resource *v2.Resource
 		},
 	)
 	if err != nil {
-		// Defensive: if the on-call plugin was uninstalled after List ran, skip
-		// rather than fail the sync.
+		// On-Call Scheduling plugin absent: skip schedules, don't fail the sync.
 		if servicenow.IsInvalidTableError(err) {
 			s.warnModuleAbsent(ctx)
 			return nil, "", nil, nil
@@ -205,9 +191,7 @@ func (s *scheduleResourceType) Grants(ctx context.Context, resource *v2.Resource
 		rv = append(rv, grant.NewGrant(resource, scheduleMember, rID))
 	}
 
-	// On the first page only, emit the on-call grant for whoever is currently
-	// on call (whoisoncall Order==1). This is a single computation independent
-	// of member pagination, so it must not be repeated on subsequent pages.
+	// First page only: emit the on-call grant (whoisoncall Order==1) and manager.
 	if offset == 0 {
 		onCall, err := s.client.WhoIsOnCall(ctx, resource.Id.Resource)
 		if err != nil {
@@ -224,7 +208,6 @@ func (s *scheduleResourceType) Grants(ctx context.Context, resource *v2.Resource
 			rv = append(rv, grant.NewGrant(resource, scheduleOnCall, rID))
 		}
 
-		// manager = the assignment group's manager (schedule -> rota -> group).
 		managerID, err := s.scheduleManagerUserID(ctx, resource.Id.Resource)
 		if err != nil {
 			return nil, "", nil, err
@@ -241,8 +224,8 @@ func (s *scheduleResourceType) Grants(ctx context.Context, resource *v2.Resource
 	return rv, nextPage, nil, nil
 }
 
-// scheduleManagerUserID resolves the schedule's manager (the assignment group's
-// manager) via roster -> rota -> group. Returns "" if no manager is set.
+// scheduleManagerUserID resolves the assignment group's manager via
+// roster -> rota -> group. Returns "" if no manager is set.
 func (s *scheduleResourceType) scheduleManagerUserID(ctx context.Context, rosterId string) (string, error) {
 	roster, err := s.client.GetRoster(ctx, rosterId)
 	if err != nil {
@@ -266,10 +249,9 @@ func (s *scheduleResourceType) scheduleManagerUserID(ctx context.Context, roster
 }
 
 // Grant adds a user to a schedule's roster via the on_call_add_member action
-// table (the supported path that the engine processes server-side). Only the
-// "member" entitlement is provisionable; on-call and manager are read-only.
-// Because the on-call engine only includes roster members who also belong to
-// the assignment group, the user is added to that group first if needed.
+// table. Only "member" is provisionable. The on-call engine only includes
+// roster members who are also in the assignment group, so the user is added
+// to that group first if needed.
 func (s *scheduleResourceType) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -292,7 +274,6 @@ func (s *scheduleResourceType) Grant(ctx context.Context, principal *v2.Resource
 
 	rosterId := entitlement.Resource.Id.Resource
 
-	// idempotency: already on the roster?
 	existing, _, err := s.client.GetRotaMembers(ctx, rosterId, principal.Id.Resource, servicenow.PaginationVars{Limit: 1})
 	if err != nil {
 		return nil, fmt.Errorf("baton-servicenow: failed to get schedule members for %s: %w", entitlement.Id, err)
@@ -301,7 +282,6 @@ func (s *scheduleResourceType) Grant(ctx context.Context, principal *v2.Resource
 		return annotations.New(&v2.GrantAlreadyExists{}), nil
 	}
 
-	// resolve the rota + assignment group for this roster
 	roster, err := s.client.GetRoster(ctx, rosterId)
 	if err != nil {
 		return nil, fmt.Errorf("baton-servicenow: failed to get roster %s: %w", rosterId, err)
@@ -344,7 +324,7 @@ func (s *scheduleResourceType) Grant(ctx context.Context, principal *v2.Resource
 }
 
 // Revoke removes a user from a schedule's roster via the on_call_remove_member
-// action table. Assignment group membership is intentionally left intact.
+// action table; assignment group membership is left intact.
 func (s *scheduleResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -370,7 +350,6 @@ func (s *scheduleResourceType) Revoke(ctx context.Context, grant *v2.Grant) (ann
 
 	rosterId := entitlement.Resource.Id.Resource
 
-	// idempotency: is the user on the roster at all?
 	existing, _, err := s.client.GetRotaMembers(ctx, rosterId, principal.Id.Resource, servicenow.PaginationVars{Limit: 1})
 	if err != nil {
 		return nil, fmt.Errorf("baton-servicenow: failed to get schedule members for %s: %w", grant.Principal.Id.Resource, err)
