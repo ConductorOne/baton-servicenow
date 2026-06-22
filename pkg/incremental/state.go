@@ -68,8 +68,8 @@ type Snapshot struct {
 	Groups map[string]servicenow.Group `json:"groups"`
 
 	GroupMembers map[string]map[string]servicenow.GroupMember `json:"group_members"` // group sys_id -> row sys_id -> row
-	UserRoles    map[string]map[string]servicenow.UserToRole  `json:"user_roles"`    // user sys_id -> row sys_id -> row
-	GroupRoles   map[string]map[string]servicenow.GroupToRole `json:"group_roles"`   // group sys_id -> row sys_id -> row
+	UserRoles    map[string]map[string]servicenow.UserToRole  `json:"user_roles"`    // role sys_id -> row sys_id -> row
+	GroupRoles   map[string]map[string]servicenow.GroupToRole `json:"group_roles"`   // role sys_id -> row sys_id -> row
 }
 
 func newSnapshot(deployment string) *Snapshot {
