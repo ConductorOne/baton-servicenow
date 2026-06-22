@@ -195,11 +195,19 @@ func (s *scheduleResourceType) Grants(ctx context.Context, resource *v2.Resource
 		rv = append(rv, grant.NewGrant(resource, scheduleMember, rID))
 	}
 
-	// First page only: emit the on-call grant (whoisoncall Order==1) and manager.
+	// First page only: enrich with the on-call (whoisoncall Order==1) and manager
+	// grants. These are best-effort. The whoisoncall REST API and the manager
+	// lookup (roster->rota->group) can be independently blocked by ACLs on a
+	// partially-provisioned instance, even when roster membership is readable. A
+	// failure there degrades to a warning and skips just that grant, rather than
+	// discarding the roster's member grants and aborting the sync.
 	if offset == 0 {
+		l := ctxzap.Extract(ctx)
+
 		onCall, err := s.client.WhoIsOnCall(ctx, resource.Id.Resource)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("baton-servicenow: failed to get on-call user for schedule %s: %w", resource.Id.Resource, err)
+			l.Warn("baton-servicenow: could not resolve on-call user; skipping on-call grant for this schedule",
+				zap.String("schedule", resource.Id.Resource), zap.Error(err))
 		}
 		for _, oc := range onCall {
 			if oc.Order != 1 || oc.UserId == "" {
@@ -214,7 +222,9 @@ func (s *scheduleResourceType) Grants(ctx context.Context, resource *v2.Resource
 
 		managerID, err := s.scheduleManagerUserID(ctx, resource.Id.Resource)
 		if err != nil {
-			return nil, "", nil, err
+			l.Warn("baton-servicenow: could not resolve schedule manager; skipping manager grant for this schedule",
+				zap.String("schedule", resource.Id.Resource), zap.Error(err))
+			managerID = ""
 		}
 		if managerID != "" {
 			rID, err := rs.NewResourceID(resourceTypeUser, managerID)
