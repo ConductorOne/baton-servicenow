@@ -594,7 +594,7 @@ func TestRevokeDetectionPreflight_JoinTableMissing_Warns(t *testing.T) {
 	}
 }
 
-func TestRevokeDetectionPreflight_CheckFailureSwallowed(t *testing.T) {
+func TestRevokeDetectionPreflight_CheckFailureWarns(t *testing.T) {
 	ctx, logs := ctxWithObservedLogs(t)
 
 	f := emptyFetchersFeed()
@@ -602,10 +602,12 @@ func TestRevokeDetectionPreflight_CheckFailureSwallowed(t *testing.T) {
 		return nil, errors.New("sys_properties unreadable")
 	}
 
+	// A failed check must not fail the sync, but it must warn so the operator
+	// is not left blind to unverified revoke capture.
 	f.revokeDetectionPreflight(ctx)
 
-	if n := logs.FilterLevelExact(zapcore.WarnLevel).Len(); n != 0 {
-		t.Fatalf("a failed revoke-detection check must not warn, got %d warnings", n)
+	if n := logs.FilterLevelExact(zapcore.WarnLevel).Len(); n != 1 {
+		t.Fatalf("a failed revoke-detection check must warn exactly once, got %d warnings", n)
 	}
 }
 

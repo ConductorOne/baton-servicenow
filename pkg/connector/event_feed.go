@@ -111,7 +111,7 @@ func (f *serviceNowEventFeed) revokeDetectionPreflight(ctx context.Context) {
 
 	deletedTables, err := f.fetchAuditDeletedTables(ctx)
 	if err != nil {
-		l.Debug("baton-servicenow: event-feed revoke-detection preflight skipped (check failed)",
+		l.Warn("baton-servicenow: event-feed revoke-detection preflight could not verify revoke capture (sys_properties unreadable); revoke events may be silently missing",
 			zap.Error(err),
 		)
 		return
@@ -376,8 +376,8 @@ func (f *serviceNowEventFeed) fetchPhase(
 
 // occurredAt parses a ServiceNow datetime literal, falling back to now.
 func occurredAt(snDatetime string) *timestamppb.Timestamp {
-	if t, err := time.Parse(snDatetimeLayout, snDatetime); err == nil {
-		return timestamppb.New(t.UTC())
+	if t, err := time.ParseInLocation(snDatetimeLayout, snDatetime, time.UTC); err == nil {
+		return timestamppb.New(t)
 	}
 	return timestamppb.Now()
 }
