@@ -97,7 +97,13 @@ func (s *scheduleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *p
 		},
 	)
 	if err != nil {
-		// On-Call Scheduling plugin absent: skip schedules, don't fail the sync.
+		// Only "Invalid table" is treated as authoritative absence (the On-Call
+		// Scheduling plugin is not installed): skip schedules with no error so
+		// the rest of the sync proceeds and C1 reconciles away any now-stale
+		// schedules. Any OTHER error (e.g. 403/ACL — the account can't read the
+		// table, which may still exist) is returned so the sync fails and the
+		// existing schedule data is PRESERVED rather than deleted by an empty
+		// result we can't confirm is correct.
 		if servicenow.IsInvalidTableError(err) {
 			s.warnModuleAbsent(ctx)
 			return nil, "", nil, nil
@@ -172,7 +178,9 @@ func (s *scheduleResourceType) Grants(ctx context.Context, resource *v2.Resource
 		},
 	)
 	if err != nil {
-		// On-Call Scheduling plugin absent: skip schedules, don't fail the sync.
+		// Authoritative absence (plugin not installed) -> skip; any other error
+		// (e.g. 403/ACL) -> return it so the sync fails and the roster's member
+		// grants are PRESERVED rather than deleted by an empty result. See List.
 		if servicenow.IsInvalidTableError(err) {
 			s.warnModuleAbsent(ctx)
 			return nil, "", nil, nil

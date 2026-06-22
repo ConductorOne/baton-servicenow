@@ -94,6 +94,45 @@ func newClient(t *testing.T, srv *httptest.Server) *servicenow.Client {
 	return c
 }
 
+// TestScheduleList_AccessDenied_ErrorsToPreserve verifies that a 403/ACL error
+// (the table may still exist; the account just can't read it) is RETURNED, not
+// swallowed into an empty result. Erroring fails the sync so C1 keeps the prior
+// schedule data instead of deleting it from an unconfirmed empty snapshot.
+// (Contrast with "Invalid table", which is authoritative absence and skips.)
+func TestScheduleList_AccessDenied_ErrorsToPreserve(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"message":"User Not Authorized"},"status":"failure"}`))
+	}))
+	defer srv.Close()
+
+	resources, _, _, err := scheduleBuilder(newClient(t, srv)).
+		List(context.Background(), nil, &pagination.Token{})
+	if err == nil {
+		t.Fatal("List must ERROR on 403 (preserve existing schedules), not return an empty success")
+	}
+	if len(resources) != 0 {
+		t.Fatalf("expected no resources alongside the error, got %d", len(resources))
+	}
+}
+
+// TestScheduleGrants_MemberAccessDenied_ErrorsToPreserve verifies the same for
+// the roster member list: a 403 on cmn_rota_member errors (preserve) rather than
+// emitting zero member grants (which C1 would reconcile as a mass revoke).
+func TestScheduleGrants_MemberAccessDenied_ErrorsToPreserve(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"message":"User Not Authorized"},"status":"failure"}`))
+	}))
+	defer srv.Close()
+
+	_, _, _, err := scheduleBuilder(newClient(t, srv)).
+		Grants(context.Background(), scheduleResourceFor("roster1"), &pagination.Token{})
+	if err == nil {
+		t.Fatal("Grants must ERROR on a 403 reading roster members (preserve), not emit zero grants")
+	}
+}
+
 // TestScheduleGrants_OnCallModuleAbsent_DegradesGracefully verifies that when
 // the plugin is absent (cmn_rota_member returns "Invalid table"), Grants emits
 // no grants and NO error — the rest of the sync is unaffected.
