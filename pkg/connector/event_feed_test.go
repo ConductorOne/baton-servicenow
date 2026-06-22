@@ -195,9 +195,9 @@ func TestAuditChangeEvent_NonUserSkipped(t *testing.T) {
 	}
 }
 
-// Real sys_audit_delete.payload XML samples verified on dev289997. Each
-// reference field is an element whose TEXT is the referenced sys_id (with a
-// display_value attribute we ignore).
+// Representative sys_audit_delete.payload XML samples. Each reference field is
+// an element whose TEXT is the referenced sys_id (with a display_value
+// attribute we ignore).
 const (
 	grmemberDeletePayload = `<sys_user_grmember><group display_value="G">5338c33d83290f5442cb56d6feaad3d9</group>` +
 		`<user display_value="U">0738c33d83290f5442cb56d6feaad3d1</user></sys_user_grmember>`
@@ -527,8 +527,8 @@ func TestListEvents_SkippedPhaseCursorAdvances(t *testing.T) {
 
 // --- Check 1: revoke detection (glide.ui.audit_deleted_tables) ---
 
-// joinTablesPresent is the real dev289997 property value (the three grant join
-// tables ARE present, so no revoke warning should fire).
+// joinTablesPresent returns the property value where all three grant join
+// tables ARE present, so no revoke warning should fire.
 func joinTablesPresent() []string {
 	return []string{
 		servicenow.TableUserGroupMember,
