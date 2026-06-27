@@ -216,7 +216,7 @@ func TestJoinDeleteRevokeEvent_GroupMember(t *testing.T) {
 		SysCreatedOn: "2026-06-18 16:00:00",
 		Payload:      grmemberDeletePayload,
 	}
-	ev := joinDeleteRevokeEvent(context.Background(), d)
+	ev, _ := joinDeleteRevokeEvent(d)
 	if ev == nil {
 		t.Fatal("expected a revoke event")
 	}
@@ -248,7 +248,7 @@ func TestJoinDeleteRevokeEvent_UserHasRole(t *testing.T) {
 		DocumentKey: "join2",
 		Payload:     userHasRoleDeletePayload,
 	}
-	ev := joinDeleteRevokeEvent(context.Background(), d)
+	ev, _ := joinDeleteRevokeEvent(d)
 	if ev == nil {
 		t.Fatal("expected a revoke event")
 	}
@@ -271,7 +271,7 @@ func TestJoinDeleteRevokeEvent_GroupHasRole(t *testing.T) {
 		DocumentKey: "join3",
 		Payload:     groupHasRoleDeletePayload,
 	}
-	ev := joinDeleteRevokeEvent(context.Background(), d)
+	ev, _ := joinDeleteRevokeEvent(d)
 	if ev == nil {
 		t.Fatal("expected a revoke event")
 	}
@@ -295,7 +295,7 @@ func TestJoinDeleteRevokeEvent_EmptyPayloadSkipped(t *testing.T) {
 		DocumentKey: "join5",
 		Payload:     "",
 	}
-	if ev := joinDeleteRevokeEvent(context.Background(), d); ev != nil {
+	if ev, _ := joinDeleteRevokeEvent(d); ev != nil {
 		t.Fatalf("expected nil for empty payload, got %v", ev)
 	}
 }
@@ -306,7 +306,7 @@ func TestJoinDeleteRevokeEvent_UnparseablePayloadSkipped(t *testing.T) {
 		DocumentKey: "join6",
 		Payload:     "<not-valid-xml<<<",
 	}
-	if ev := joinDeleteRevokeEvent(context.Background(), d); ev != nil {
+	if ev, _ := joinDeleteRevokeEvent(d); ev != nil {
 		t.Fatalf("expected nil for unparseable payload, got %v", ev)
 	}
 }
@@ -318,7 +318,7 @@ func TestJoinDeleteRevokeEvent_IncompletePayloadSkipped(t *testing.T) {
 		DocumentKey: "join7",
 		Payload:     `<sys_user_grmember><user>u1</user></sys_user_grmember>`,
 	}
-	if ev := joinDeleteRevokeEvent(context.Background(), d); ev != nil {
+	if ev, _ := joinDeleteRevokeEvent(d); ev != nil {
 		t.Fatalf("expected nil for incomplete payload, got %v", ev)
 	}
 }
@@ -329,8 +329,58 @@ func TestJoinDeleteRevokeEvent_UnknownTableSkipped(t *testing.T) {
 		DocumentKey: "u1",
 		Payload:     `<sys_user><user_name>jdoe</user_name></sys_user>`,
 	}
-	if ev := joinDeleteRevokeEvent(context.Background(), d); ev != nil {
+	if ev, _ := joinDeleteRevokeEvent(d); ev != nil {
 		t.Fatalf("expected nil for non-join table, got %v", ev)
+	}
+}
+
+// TestEventFeed_DeleteSkipsAggregatedPerPage verifies that a page full of
+// unmappable sys_audit_delete rows (e.g. delete-recovery disabled, so every
+// payload is empty) produces a single aggregated Warn with a count, not one
+// Warn per row.
+func TestEventFeed_DeleteSkipsAggregatedPerPage(t *testing.T) {
+	ctx, logs := ctxWithObservedLogs(t)
+	f := emptyFetchersFeed()
+	f.fetchJoinDeletes = func(_ context.Context, _ []string, _ string, _ servicenow.PaginationVars) ([]servicenow.AuditDeleteRecord, string, error) {
+		rows := make([]servicenow.AuditDeleteRecord, 5)
+		for i := range rows {
+			rows[i] = servicenow.AuditDeleteRecord{Tablename: servicenow.TableUserGroupMember, DocumentKey: "k", Payload: ""}
+		}
+		return rows, "", nil
+	}
+
+	events, _, err := f.fetchPhase(ctx, phaseJoinDeletes, "", servicenow.PaginationVars{Limit: 100})
+	if err != nil {
+		t.Fatalf("fetchPhase: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected 0 events (all rows unmappable), got %d", len(events))
+	}
+	warns := logs.FilterLevelExact(zapcore.WarnLevel).
+		FilterMessageSnippet("skipped unmappable deleted-grant rows").All()
+	if len(warns) != 1 {
+		t.Fatalf("expected exactly 1 aggregated warn for 5 skipped rows, got %d", len(warns))
+	}
+	if c := warns[0].ContextMap()["count"]; c != int64(5) {
+		t.Fatalf("expected aggregated count=5, got %v", c)
+	}
+}
+
+// TestEventFeed_AuditPhaseQueriesOnlySysUser verifies the audit phase queries
+// only sys_user (the sole table that maps to an event) rather than all of
+// AuditedTables.
+func TestEventFeed_AuditPhaseQueriesOnlySysUser(t *testing.T) {
+	var gotTables []string
+	f := emptyFetchersFeed()
+	f.fetchAudit = func(_ context.Context, tableNames []string, _ string, _ servicenow.PaginationVars) ([]servicenow.AuditRecord, string, error) {
+		gotTables = tableNames
+		return nil, "", nil
+	}
+	if _, _, err := f.fetchPhase(context.Background(), phaseAudit, "", servicenow.PaginationVars{Limit: 100}); err != nil {
+		t.Fatalf("fetchPhase: %v", err)
+	}
+	if len(gotTables) != 1 || gotTables[0] != servicenow.TableUser {
+		t.Fatalf("audit phase must query only sys_user, got %v", gotTables)
 	}
 }
 

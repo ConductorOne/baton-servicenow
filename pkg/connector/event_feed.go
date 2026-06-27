@@ -349,15 +349,20 @@ func (f *serviceNowEventFeed) fetchPhase(
 			return nil, "", fmt.Errorf("baton-servicenow: failed to list deleted grants: %w", err)
 		}
 		evs := make([]*v2.Event, 0, len(rows))
+		skips := map[string]int{}
 		for i := range rows {
-			if ev := joinDeleteRevokeEvent(ctx, &rows[i]); ev != nil {
+			ev, skipReason := joinDeleteRevokeEvent(&rows[i])
+			if ev != nil {
 				evs = append(evs, ev)
+			} else if skipReason != "" {
+				skips[skipReason]++
 			}
 		}
+		logSkippedDeletes(ctx, skips)
 		return evs, next, nil
 
 	case phaseAudit:
-		rows, next, err := f.fetchAudit(ctx, servicenow.AuditedTables, since, pv)
+		rows, next, err := f.fetchAudit(ctx, auditChangeTables, since, pv)
 		if err != nil {
 			return nil, "", fmt.Errorf("baton-servicenow: failed to list audit changes: %w", err)
 		}
@@ -437,6 +442,11 @@ var joinDeleteTables = []string{
 	servicenow.TableGroupHasRole,
 }
 
+// auditChangeTables scopes the sys_audit phase to sys_user. Only account
+// hard-deletes map to an event (auditChangeEvent); audit rows for the other
+// tables would be paged through and discarded, so we never fetch them.
+var auditChangeTables = []string{servicenow.TableUser}
+
 // deletedRowPayload holds the reference fields parsed from a
 // sys_audit_delete.payload XML dump of a deleted join row.
 type deletedRowPayload struct {
@@ -455,26 +465,18 @@ func parseDeletedRowPayload(payload string) (*deletedRowPayload, error) {
 
 // joinDeleteRevokeEvent maps a sys_audit_delete row to a grant-revoke event,
 // resolving principal+entitlement from the deleted row's XML payload (the bare
-// sys_audit row can't). Returns nil + warns for any row it cannot map.
-func joinDeleteRevokeEvent(ctx context.Context, d *servicenow.AuditDeleteRecord) *v2.Event {
-	l := ctxzap.Extract(ctx)
-
+// sys_audit row can't). Returns (nil, reason) for any row it cannot map; the
+// caller aggregates the reasons so a drain full of unmappable rows logs a few
+// summary lines instead of one warning per row. A reason of "" means the row
+// was for an unrelated table and is silently ignored.
+func joinDeleteRevokeEvent(d *servicenow.AuditDeleteRecord) (*v2.Event, string) {
 	if d.Payload == "" {
-		l.Warn("baton-servicenow: skipping deleted grant with empty payload (delete-recovery may be disabled)",
-			zap.String("table", d.Tablename),
-			zap.String("documentkey", d.DocumentKey),
-		)
-		return nil
+		return nil, "empty payload (delete-recovery may be disabled)"
 	}
 
 	p, err := parseDeletedRowPayload(d.Payload)
 	if err != nil {
-		l.Warn("baton-servicenow: skipping deleted grant with unparseable payload",
-			zap.String("table", d.Tablename),
-			zap.String("documentkey", d.DocumentKey),
-			zap.Error(err),
-		)
-		return nil
+		return nil, "unparseable payload"
 	}
 
 	var principal *v2.Resource
@@ -500,15 +502,11 @@ func joinDeleteRevokeEvent(ctx context.Context, d *servicenow.AuditDeleteRecord)
 		principal = minimalResource(resourceTypeGroup, p.Group)
 		entitlement = ent.NewAssignmentEntitlement(minimalResource(resourceTypeRole, p.Role), roleMembership)
 	default:
-		return nil
+		return nil, ""
 	}
 
 	if principal == nil || entitlement == nil {
-		l.Warn("baton-servicenow: skipping deleted grant with incomplete payload references",
-			zap.String("table", d.Tablename),
-			zap.String("documentkey", d.DocumentKey),
-		)
-		return nil
+		return nil, "incomplete payload references"
 	}
 
 	return &v2.Event{
@@ -520,6 +518,23 @@ func joinDeleteRevokeEvent(ctx context.Context, d *servicenow.AuditDeleteRecord)
 				Principal:   principal,
 			},
 		},
+	}, ""
+}
+
+// logSkippedDeletes emits one Warn per distinct skip reason for a page of
+// sys_audit_delete rows, with the count, so a drain where delete-recovery is
+// off (every row has an empty payload) logs a handful of lines instead of one
+// per row.
+func logSkippedDeletes(ctx context.Context, skips map[string]int) {
+	if len(skips) == 0 {
+		return
+	}
+	l := ctxzap.Extract(ctx)
+	for reason, n := range skips {
+		l.Warn("baton-servicenow: skipped unmappable deleted-grant rows in event feed",
+			zap.String("reason", reason),
+			zap.Int("count", n),
+		)
 	}
 }
 
