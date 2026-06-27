@@ -106,6 +106,13 @@ type State struct {
 	// it, a far-future row (e.g. demo data) merged early would advance the
 	// watermark past groups/roles processed later, dropping their rows.
 	readWatermarks map[Stream]string
+
+	// runStart is the moment this run began (frozen at the first read), used as
+	// the next-run watermark so changes made mid-sync are never skipped. See
+	// advance.
+	runStart string
+	// nowFn overrides the wall clock for runStart (tests only); nil = real time.
+	nowFn func() string
 }
 
 // Load opens (or initializes) the incremental state for a deployment. When
@@ -170,6 +177,9 @@ func (s *State) Watermark(stream Stream) string {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Anchor the run start at the first read (before any fetch) so it precedes
+	// every mutation observed this run.
+	s.runStartWatermark()
 	if s.readWatermarks == nil {
 		s.readWatermarks = map[Stream]string{}
 	}
@@ -181,16 +191,35 @@ func (s *State) Watermark(stream Stream) string {
 	return wm
 }
 
-// advance bumps a stream's watermark to ts if greater, but never past now():
-// a future-dated sys_updated_on (clock skew, demo data) would otherwise push the
-// watermark beyond real changes and stall detection until a full sync. Lexical
-// compare is valid for the fixed-width UTC string. Caller must hold s.mu.
-func (s *State) advance(stream Stream, ts string) {
-	if ts == "" || ts > nowWatermark() {
-		return
+// runStartWatermark returns the moment this run began, frozen on first use, as a
+// ServiceNow UTC "YYYY-MM-DD HH:MM:SS" string. Caller must hold s.mu.
+func (s *State) runStartWatermark() string {
+	if s.runStart == "" {
+		if s.nowFn != nil {
+			s.runStart = s.nowFn()
+		} else {
+			s.runStart = nowWatermark()
+		}
 	}
-	if ts > s.snapshot.Watermarks[stream] {
-		s.snapshot.Watermarks[stream] = ts
+	return s.runStart
+}
+
+// advance marks a stream as caught up through the run's start time. It stores
+// runStart (the moment this sync began) rather than the max sys_updated_on
+// observed, for two reasons: (1) the join streams (group_members, user_roles,
+// group_roles) share one watermark across many groups/roles drained
+// sequentially, so a max-observed watermark could skip a row changed mid-sync on
+// an entity drained early, since its timestamp can fall below a later entity's
+// max; (2) it subsumes the future-dated-row cap (runStart is always <= now), so
+// demo/clock-skew rows can't push the watermark past real changes. Reads always
+// begin at/after runStart with the frozen lower bound, so everything before
+// runStart was captured; anything at/after is re-fetched next run (idempotent
+// upsert by sys_id). Lexical compare is valid for the fixed-width UTC string.
+// Caller must hold s.mu.
+func (s *State) advance(stream Stream) {
+	rs := s.runStartWatermark()
+	if rs > s.snapshot.Watermarks[stream] {
+		s.snapshot.Watermarks[stream] = rs
 	}
 }
 
@@ -352,7 +381,9 @@ func (s *State) MergeUsers(changed []servicenow.User) ([]servicenow.User, error)
 	defer s.mu.Unlock()
 	for _, u := range changed {
 		s.snapshot.Users[u.Id] = u
-		s.advance(StreamUsers, u.SysUpdatedOn)
+	}
+	if len(changed) > 0 {
+		s.advance(StreamUsers)
 	}
 	out := make([]servicenow.User, 0, len(s.snapshot.Users))
 	for _, u := range s.snapshot.Users {
@@ -370,7 +401,9 @@ func (s *State) MergeRoles(changed []servicenow.Role) ([]servicenow.Role, error)
 	defer s.mu.Unlock()
 	for _, r := range changed {
 		s.snapshot.Roles[r.Id] = r
-		s.advance(StreamRoles, r.SysUpdatedOn)
+	}
+	if len(changed) > 0 {
+		s.advance(StreamRoles)
 	}
 	out := make([]servicenow.Role, 0, len(s.snapshot.Roles))
 	for _, r := range s.snapshot.Roles {
@@ -388,7 +421,9 @@ func (s *State) MergeGroups(changed []servicenow.Group) ([]servicenow.Group, err
 	defer s.mu.Unlock()
 	for _, g := range changed {
 		s.snapshot.Groups[g.Id] = g
-		s.advance(StreamGroups, g.SysUpdatedOn)
+	}
+	if len(changed) > 0 {
+		s.advance(StreamGroups)
 	}
 	out := make([]servicenow.Group, 0, len(s.snapshot.Groups))
 	for _, g := range s.snapshot.Groups {
@@ -412,7 +447,9 @@ func (s *State) MergeGroupMembers(groupID string, changed []servicenow.GroupMemb
 	}
 	for _, m := range changed {
 		cur[m.Id] = m
-		s.advance(StreamGroupMembers, m.SysUpdatedOn)
+	}
+	if len(changed) > 0 {
+		s.advance(StreamGroupMembers)
 	}
 	out := make([]servicenow.GroupMember, 0, len(cur))
 	for _, m := range cur {
@@ -435,7 +472,9 @@ func (s *State) MergeUserRoles(roleID string, changed []servicenow.UserToRole) (
 	}
 	for _, r := range changed {
 		cur[r.Id] = r
-		s.advance(StreamUserRoles, r.SysUpdatedOn)
+	}
+	if len(changed) > 0 {
+		s.advance(StreamUserRoles)
 	}
 	out := make([]servicenow.UserToRole, 0, len(cur))
 	for _, r := range cur {
@@ -458,7 +497,9 @@ func (s *State) MergeGroupRoles(roleID string, changed []servicenow.GroupToRole)
 	}
 	for _, r := range changed {
 		cur[r.Id] = r
-		s.advance(StreamGroupRoles, r.SysUpdatedOn)
+	}
+	if len(changed) > 0 {
+		s.advance(StreamGroupRoles)
 	}
 	out := make([]servicenow.GroupToRole, 0, len(cur))
 	for _, r := range cur {

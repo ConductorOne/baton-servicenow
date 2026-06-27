@@ -65,11 +65,14 @@ func TestDisabledIsNoOp(t *testing.T) {
 func TestFirstSyncThenIncrementalMergeAndWatermark(t *testing.T) {
 	dir := t.TempDir()
 
+	const run1, run2 = "2026-06-26 12:00:00", "2026-06-26 13:00:00"
+
 	// First sync: no state file -> empty snapshot, watermark empty (full pull).
 	s, err := Load(dir, "dev1", true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.nowFn = func() string { return run1 } // deterministic run-start clock
 	if !s.Enabled() {
 		t.Fatal("expected enabled")
 	}
@@ -89,14 +92,16 @@ func TestFirstSyncThenIncrementalMergeAndWatermark(t *testing.T) {
 		t.Fatalf("expected 2 merged users, got %d", len(merged))
 	}
 
-	// Second run: reload, watermark should be the max sys_updated_on seen.
-	// Merge persists inline, so no explicit Save is required.
+	// Second run: reload. The persisted watermark is run 1's start time — we store
+	// run-start, not the max row timestamp, so a change made mid-sync is re-fetched
+	// next run rather than skipped. Merge persists inline (no explicit Save).
 	s2, err := Load(dir, "dev1", true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := s2.Watermark(StreamUsers); got != "2026-01-02 11:00:00" {
-		t.Fatalf("watermark not advanced to max, got %q", got)
+	s2.nowFn = func() string { return run2 }
+	if got := s2.Watermark(StreamUsers); got != run1 {
+		t.Fatalf("watermark should be run 1 start %q, got %q", run1, got)
 	}
 
 	// Incremental delta: user "b" changed, plus a new user "c".
@@ -121,8 +126,8 @@ func TestFirstSyncThenIncrementalMergeAndWatermark(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := s3.Watermark(StreamUsers); got != "2026-01-06 08:00:00" {
-		t.Fatalf("watermark not advanced after delta, got %q", got)
+	if got := s3.Watermark(StreamUsers); got != run2 {
+		t.Fatalf("watermark should be run 2 start %q, got %q", run2, got)
 	}
 }
 
@@ -381,15 +386,22 @@ func TestReconcileNoOpWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestAdvanceIgnoresFutureTimestamps(t *testing.T) {
-	s := &State{enabled: true, snapshot: newSnapshot("dev")}
-	s.advance(StreamUsers, "2026-06-19 04:43:22") // real change
-	s.advance(StreamUsers, "2031-06-03 16:05:36") // future (demo/skew) — must NOT advance
-	if got := s.snapshot.Watermarks[StreamUsers]; got != "2026-06-19 04:43:22" {
-		t.Errorf("watermark = %q, want 2026-06-19 04:43:22 (future ts must not advance the watermark)", got)
+// TestAdvanceStoresRunStartNotRowTimestamp verifies the watermark advances to
+// the run's start time, not the merged rows' max sys_updated_on — so a
+// far-future row (demo data / clock skew) can't push the watermark past real
+// changes, and a change made mid-sync is re-fetched next run.
+func TestAdvanceStoresRunStartNotRowTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Load(dir, "dev1", true, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	s.advance(StreamUsers, "") // empty — no-op
-	if got := s.snapshot.Watermarks[StreamUsers]; got != "2026-06-19 04:43:22" {
-		t.Errorf("watermark = %q, empty ts must not change it", got)
+	s.nowFn = func() string { return "2026-06-26 12:00:00" }
+
+	if _, err := s.MergeUsers([]servicenow.User{user("a", "2031-06-03 16:05:36")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.snapshot.Watermarks[StreamUsers]; got != "2026-06-26 12:00:00" {
+		t.Fatalf("watermark = %q, want run-start 2026-06-26 12:00:00 (future row ts must not advance it)", got)
 	}
 }
