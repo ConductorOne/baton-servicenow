@@ -52,3 +52,13 @@ func mapGroupMembers(resources []servicenow.GroupMember) []string {
 
 	return members
 }
+
+func mapRotaMembers(resources []servicenow.RotaMember) []string {
+	members := make([]string, len(resources))
+
+	for i, r := range resources {
+		members[i] = r.Member
+	}
+
+	return members
+}
