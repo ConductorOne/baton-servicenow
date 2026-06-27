@@ -15,6 +15,28 @@ import (
 
 const SystemAdminUserId = "6816f79cc0a8016401c5a33be04be441"
 
+// Table names backing the connector's resources/grants, used as the
+// sys_audit_delete `tablename` filter for deletion capture.
+const (
+	TableUser            = "sys_user"
+	TableUserGroup       = "sys_user_group"
+	TableUserRole        = "sys_user_role"
+	TableUserGroupMember = "sys_user_grmember"
+	TableUserHasRole     = "sys_user_has_role"
+	TableGroupHasRole    = "sys_group_has_role"
+)
+
+// AuditedTables is every connector table the event feed scans in sys_audit for
+// near-real-time changes (today only sys_user changes/deletes map to events).
+var AuditedTables = []string{
+	TableUser,
+	TableUserGroup,
+	TableUserRole,
+	TableUserGroupMember,
+	TableUserHasRole,
+	TableGroupHasRole,
+}
+
 type BaseResource struct {
 	Id string `json:"sys_id"`
 }
@@ -27,6 +49,7 @@ type User struct {
 	UserName     string            `json:"user_name"`
 	Roles        string            `json:"roles"`
 	Active       string            `json:"active"`
+	SysUpdatedOn string            `json:"sys_updated_on"`
 	CustomFields map[string]string `json:"-"`
 }
 
@@ -64,21 +87,26 @@ func (u *User) UnmarshalJSON(data []byte) error {
 
 type Role struct {
 	BaseResource
-	Name      string `json:"name"`
-	Grantable string `json:"grantable"`
+	Name         string `json:"name"`
+	Grantable    string `json:"grantable"`
+	SysUpdatedOn string `json:"sys_updated_on"`
 }
 
 type Group struct {
 	BaseResource
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Roles       string `json:"roles"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Roles        string `json:"roles"`
+	Manager      string `json:"manager"`
+	SysUpdatedOn string `json:"sys_updated_on"`
 }
 
 type GroupMember struct {
 	BaseResource
-	User  string `json:"user"`
-	Group string `json:"group"`
+	User         string `json:"user"`
+	Group        string `json:"group"`
+	SysUpdatedOn string `json:"sys_updated_on"`
+	SysCreatedOn string `json:"sys_created_on"`
 }
 
 type GroupMemberPayload struct {
@@ -88,9 +116,11 @@ type GroupMemberPayload struct {
 
 type UserToRole struct {
 	BaseResource
-	Inherited string `json:"inherited"`
-	User      string `json:"user"`
-	Role      string `json:"role"`
+	Inherited    string `json:"inherited"`
+	User         string `json:"user"`
+	Role         string `json:"role"`
+	SysUpdatedOn string `json:"sys_updated_on"`
+	SysCreatedOn string `json:"sys_created_on"`
 }
 
 type UserToRolePayload struct {
@@ -100,9 +130,11 @@ type UserToRolePayload struct {
 
 type GroupToRole struct {
 	BaseResource
-	Inherits string `json:"inherits"`
-	Group    string `json:"group"`
-	Role     string `json:"role"`
+	Inherits     string `json:"inherits"`
+	Group        string `json:"group"`
+	Role         string `json:"role"`
+	SysUpdatedOn string `json:"sys_updated_on"`
+	SysCreatedOn string `json:"sys_created_on"`
 }
 
 type GroupToRolePayload struct {
@@ -115,6 +147,44 @@ type UserRoles struct {
 	FromRole  []string `json:"from_role"`
 	FromGroup []string `json:"from_group"`
 }
+
+// AuditDeleteRecord is a sys_audit_delete row (one per hard delete). DocumentKey
+// is the deleted row's sys_id (for a join table, the membership/assignment row).
+type AuditDeleteRecord struct {
+	Tablename    string `json:"tablename"`
+	DocumentKey  string `json:"documentkey"`
+	SysCreatedOn string `json:"sys_created_on"`
+
+	// Payload is the deleted row's full XML (reference fields as elements holding
+	// the referenced sys_id); the feed parses it to resolve a revoke. Only set via
+	// GetDeletedSincePayload, and empty if delete-recovery is disabled.
+	Payload string `json:"payload"`
+}
+
+type AuditDeleteResponse = ListResponse[AuditDeleteRecord]
+
+// AuditRecord is a sys_audit row: one per field change, plus a synthetic
+// Fieldname=="DELETED" row on hard delete. DocumentKey is the changed row's sys_id.
+type AuditRecord struct {
+	SysID        string `json:"sys_id"`
+	Tablename    string `json:"tablename"`
+	DocumentKey  string `json:"documentkey"`
+	Fieldname    string `json:"fieldname"`
+	OldValue     string `json:"oldvalue"`
+	NewValue     string `json:"newvalue"`
+	SysCreatedOn string `json:"sys_created_on"`
+	User         string `json:"user"`
+}
+
+type AuditResponse = ListResponse[AuditRecord]
+
+// PropertyRecord is a sys_properties row (name/value system property).
+type PropertyRecord struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+type PropertyResponse = ListResponse[PropertyRecord]
 
 // TODO(lauren) remove unecessary fields.
 // Service Catalog request models.
