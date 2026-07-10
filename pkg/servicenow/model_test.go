@@ -58,8 +58,8 @@ func TestUser_UnmarshalJSON(t *testing.T) {
 			wantCustomFieldLen: 0,
 		},
 		{
-			name:  "with custom string fields",
-			input: `{"sys_id":"abc123","user_name":"jdoe","email":"jdoe@example.com","active":"true","u_type":"consultant","u_department":"engineering"}`,
+			name:         "with custom string fields",
+			input:        `{"sys_id":"abc123","user_name":"jdoe","email":"jdoe@example.com","active":"true","u_type":"consultant","u_department":"engineering"}`,
 			wantUserName: "jdoe",
 			wantEmail:    "jdoe@example.com",
 			wantCustomFields: map[string]string{
