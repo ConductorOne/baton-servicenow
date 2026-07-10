@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -19,25 +18,31 @@ import (
 )
 
 // The connector's "schedule" resource maps to ServiceNow's on-call roster
-// (cmn_rota_roster), named to match the other on-call connectors (PagerDuty,
-// OpsGenie, Rootly).
+// (cmn_rota_roster). The resource type is opt-in (see connector.go).
 type scheduleResourceType struct {
-	resourceType     *v2.ResourceType
-	client           *servicenow.Client
-	moduleAbsentOnce sync.Once
+	resourceType *v2.ResourceType
+	client       *servicenow.Client
 }
 
-// warnModuleAbsent warns once that the On-Call Scheduling plugin
-// (com.snc.on_call_rotation) is absent, so schedules are skipped.
-func (s *scheduleResourceType) warnModuleAbsent(ctx context.Context) {
-	s.moduleAbsentOnce.Do(func() {
-		ctxzap.Extract(ctx).Warn(
-			"baton-servicenow: ServiceNow On-Call Scheduling plugin (com.snc.on_call_rotation) " +
-				"appears not to be installed (cmn_rota_roster table is absent); skipping schedule " +
-				"resources, entitlements, and grants. User, group, and role sync are unaffected. " +
-				"Install the On-Call Scheduling plugin to enable schedule support.",
-		)
-	})
+// errOnCallModuleAbsent wraps err when the On-Call Scheduling plugin is absent.
+func errOnCallModuleAbsent(err error) error {
+	return fmt.Errorf(
+		"baton-servicenow: the ServiceNow On-Call Scheduling plugin (com.snc.on_call_rotation) does not "+
+			"appear to be installed (on-call tables are absent), but the schedule resource type is enabled. "+
+			"Install the On-Call Scheduling plugin, or disable the schedule resource type for this connector: %w",
+		err,
+	)
+}
+
+// errOnCallAccessDenied wraps a 403 when the on-call tables exist but the
+// account can't read them (typically missing the rota_admin role).
+func errOnCallAccessDenied(err error) error {
+	return fmt.Errorf(
+		"baton-servicenow: access denied reading ServiceNow on-call tables. Grant the connector account the "+
+			"rota_admin role (read access to cmn_rota_roster/cmn_rota_member), or disable the schedule "+
+			"resource type for this connector: %w",
+		err,
+	)
 }
 
 func (s *scheduleResourceType) ResourceType(_ context.Context) *v2.ResourceType {
@@ -97,16 +102,13 @@ func (s *scheduleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *p
 		},
 	)
 	if err != nil {
-		// Only "Invalid table" is treated as authoritative absence (the On-Call
-		// Scheduling plugin is not installed): skip schedules with no error so
-		// the rest of the sync proceeds and C1 reconciles away any now-stale
-		// schedules. Any OTHER error (e.g. 403/ACL — the account can't read the
-		// table, which may still exist) is returned so the sync fails and the
-		// existing schedule data is PRESERVED rather than deleted by an empty
-		// result we can't confirm is correct.
+		// Plugin absent or ACL missing -> actionable error; either way the sync
+		// fails so existing schedule data isn't reconciled away by an empty result.
 		if servicenow.IsInvalidTableError(err) {
-			s.warnModuleAbsent(ctx)
-			return nil, "", nil, nil
+			return nil, "", nil, errOnCallModuleAbsent(err)
+		}
+		if servicenow.IsAccessDeniedError(err) {
+			return nil, "", nil, errOnCallAccessDenied(err)
 		}
 		return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list schedules: %w", err)
 	}
@@ -178,12 +180,12 @@ func (s *scheduleResourceType) Grants(ctx context.Context, resource *v2.Resource
 		},
 	)
 	if err != nil {
-		// Authoritative absence (plugin not installed) -> skip; any other error
-		// (e.g. 403/ACL) -> return it so the sync fails and the roster's member
-		// grants are PRESERVED rather than deleted by an empty result. See List.
+		// See List: plugin absent or ACL missing -> actionable error; others fail too.
 		if servicenow.IsInvalidTableError(err) {
-			s.warnModuleAbsent(ctx)
-			return nil, "", nil, nil
+			return nil, "", nil, errOnCallModuleAbsent(err)
+		}
+		if servicenow.IsAccessDeniedError(err) {
+			return nil, "", nil, errOnCallAccessDenied(err)
 		}
 		return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list schedule members: %w", err)
 	}
@@ -203,12 +205,8 @@ func (s *scheduleResourceType) Grants(ctx context.Context, resource *v2.Resource
 		rv = append(rv, grant.NewGrant(resource, scheduleMember, rID))
 	}
 
-	// First page only: enrich with the on-call (whoisoncall Order==1) and manager
-	// grants. These are best-effort. The whoisoncall REST API and the manager
-	// lookup (roster->rota->group) can be independently blocked by ACLs on a
-	// partially-provisioned instance, even when roster membership is readable. A
-	// failure there degrades to a warning and skips just that grant, rather than
-	// discarding the roster's member grants and aborting the sync.
+	// First page only: enrich with on-call and manager grants (best-effort; a
+	// failure warns and skips just that grant rather than aborting the sync).
 	if offset == 0 {
 		l := ctxzap.Extract(ctx)
 

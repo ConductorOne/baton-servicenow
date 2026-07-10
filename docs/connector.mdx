@@ -13,6 +13,9 @@ sidebarTitle: ServiceNow
 | Accounts     | <Icon icon="square-check" iconType="solid"  color="#c937ae"/>   | <Icon icon="square-check" iconType="solid"  color="#c937ae"/>        |       
 | Groups       | <Icon icon="square-check" iconType="solid"  color="#c937ae"/>   | <Icon icon="square-check" iconType="solid"  color="#c937ae"/>        | 
 | Roles        | <Icon icon="square-check" iconType="solid"  color="#c937ae"/>   | <Icon icon="square-check" iconType="solid"  color="#c937ae"/>        |
+| Schedules    | <Icon icon="square-check" iconType="solid"  color="#c937ae"/>   | <Icon icon="square-check" iconType="solid"  color="#c937ae"/>        |
+
+Schedules are ServiceNow On-Call rosters (`cmn_rota_roster`) and require the **On-Call Scheduling** plugin (`com.snc.on_call_rotation`). The Schedule resource type is **opt-in**: it isn't synced by default, so connectors on instances without the plugin are unaffected. Enable it for the connector to sync schedules. Each schedule exposes three entitlements: `member` (roster membership — syncable and provisionable), `on-call` (the user currently on call), and `manager` (the assignment group's manager). The `on-call` and `manager` entitlements are read-only. If you enable the Schedule resource type but the On-Call Scheduling plugin isn't installed, the sync fails with a clear error prompting you to install the plugin or disable the resource type.
 
 The ServiceNow connector supports [automatic account provisioning](/product/admin/account-provisioning).
 
@@ -46,6 +49,12 @@ You'll also need the username and password for a user who has either the **Admin
       - `sys_user_grmember` - Group membership
       - `sys_user_has_role` - User roles
       - `sys_group_has_role` - Group roles
+
+<Note>
+**On-call schedule support (optional).** To sync and provision On-Call schedules, the account also needs read access to `cmn_rota_roster` and `cmn_rota_member`, plus provisioning of schedule members writes to the `on_call_add_member`/`on_call_remove_member` action tables and to `sys_user_grmember`. Assign the **`rota_admin`** role (in addition to the roles above) — the `admin` role also covers this.
+
+On-call table reads are row-level ACL-filtered, not table-level denied, so an account with only a partial on-call role (e.g. member/manager of some groups) returns a *silently partial* roster list rather than a permission error. Under full-sync reconciliation C1 can't distinguish that from genuine deletion and would deprovision the schedules the account can't see. Grant `rota_admin` (full visibility) rather than a lesser on-call role. This requirement also applies when upgrading an existing connector on an instance that has the On-Call Scheduling plugin installed.
+</Note>
 </Step>
 </Steps>
 
@@ -274,6 +283,8 @@ In the **Password** and **Username** fields, enter the credentials for your Serv
       - `sys_user_grmember` - Group membership
       - `sys_user_has_role` - User roles
       - `sys_group_has_role` - Group roles
+
+   To sync and provision On-Call schedules, the account also needs the **`rota_admin`** role, which grants read access to `cmn_rota_roster` and `cmn_rota_member`. See the on-call note in [Gather ServiceNow credentials](#gather-servicenow-credentials) above for why a partial on-call role isn't sufficient.
 </Step>
 <Step>
 **Optional.** If you want to automatically create ServiceNow tickets to track provisioning tasks, click to **Enable external ticket processing**. [Read more about external ticketing system integrations here.](/product/admin/external-ticketing) 

@@ -589,10 +589,15 @@ func (c *Client) delete(
 
 // IsInvalidTableError reports whether err is ServiceNow's HTTP 400 "Invalid
 // table" error, returned when a queried table doesn't exist — e.g. the on-call
-// tables when the On-Call Scheduling plugin isn't installed. Used to skip
-// optional-module resources instead of failing the sync.
+// tables when the On-Call Scheduling plugin isn't installed.
 func IsInvalidTableError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "Invalid table")
+}
+
+// IsAccessDeniedError reports whether err is a ServiceNow HTTP 403, returned
+// when the table exists but the account lacks the read ACL for it.
+func IsAccessDeniedError(err error) bool {
+	return status.Code(err) == codes.PermissionDenied
 }
 
 func handleStatusCode(statusCode int) codes.Code {

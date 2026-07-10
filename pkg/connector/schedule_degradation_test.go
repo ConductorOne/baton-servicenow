@@ -48,12 +48,10 @@ func countSlug(slugs []string, want string) int {
 	return n
 }
 
-// TestScheduleList_OnCallModuleAbsent_DegradesGracefully verifies that when the
-// On-Call Scheduling plugin is not installed — cmn_rota_roster returns
-// ServiceNow's HTTP 400 "Invalid table" error — schedule List returns no
-// resources and NO error, so the sync of users/groups/roles (separate resource
-// types) is unaffected rather than aborted.
-func TestScheduleList_OnCallModuleAbsent_DegradesGracefully(t *testing.T) {
+// TestScheduleList_OnCallModuleAbsent_ErrorsClearly verifies that when the
+// plugin is absent (cmn_rota_roster returns "Invalid table"), List returns a
+// clear, actionable error rather than silently skipping.
+func TestScheduleList_OnCallModuleAbsent_ErrorsClearly(t *testing.T) {
 	var rosterHits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "cmn_rota_roster") {
@@ -73,14 +71,17 @@ func TestScheduleList_OnCallModuleAbsent_DegradesGracefully(t *testing.T) {
 	}
 
 	resources, _, _, err := scheduleBuilder(client).List(context.Background(), nil, &pagination.Token{})
-	if err != nil {
-		t.Fatalf("List must NOT error when the on-call module is absent, got: %v", err)
+	if err == nil {
+		t.Fatal("List must ERROR when the on-call module is absent (opt-in resource type enabled), not skip silently")
 	}
 	if rosterHits == 0 {
 		t.Fatal("test did not exercise the cmn_rota_roster path")
 	}
+	if !strings.Contains(err.Error(), "On-Call Scheduling plugin") {
+		t.Fatalf("error should tell the customer to install the plugin / disable the resource type, got: %v", err)
+	}
 	if len(resources) != 0 {
-		t.Fatalf("expected 0 schedule resources when module absent, got %d", len(resources))
+		t.Fatalf("expected no resources alongside the error, got %d", len(resources))
 	}
 }
 
@@ -95,10 +96,8 @@ func newClient(t *testing.T, srv *httptest.Server) *servicenow.Client {
 }
 
 // TestScheduleList_AccessDenied_ErrorsToPreserve verifies that a 403/ACL error
-// (the table may still exist; the account just can't read it) is RETURNED, not
-// swallowed into an empty result. Erroring fails the sync so C1 keeps the prior
-// schedule data instead of deleting it from an unconfirmed empty snapshot.
-// (Contrast with "Invalid table", which is authoritative absence and skips.)
+// is RETURNED, not swallowed into an empty result, so the sync fails and C1
+// keeps the prior schedule data instead of reconciling it away.
 func TestScheduleList_AccessDenied_ErrorsToPreserve(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
@@ -110,6 +109,9 @@ func TestScheduleList_AccessDenied_ErrorsToPreserve(t *testing.T) {
 		List(context.Background(), nil, &pagination.Token{})
 	if err == nil {
 		t.Fatal("List must ERROR on 403 (preserve existing schedules), not return an empty success")
+	}
+	if !strings.Contains(err.Error(), "rota_admin") {
+		t.Fatalf("403 error should name the rota_admin requirement, got: %v", err)
 	}
 	if len(resources) != 0 {
 		t.Fatalf("expected no resources alongside the error, got %d", len(resources))
@@ -131,12 +133,15 @@ func TestScheduleGrants_MemberAccessDenied_ErrorsToPreserve(t *testing.T) {
 	if err == nil {
 		t.Fatal("Grants must ERROR on a 403 reading roster members (preserve), not emit zero grants")
 	}
+	if !strings.Contains(err.Error(), "rota_admin") {
+		t.Fatalf("403 error should name the rota_admin requirement, got: %v", err)
+	}
 }
 
-// TestScheduleGrants_OnCallModuleAbsent_DegradesGracefully verifies that when
-// the plugin is absent (cmn_rota_member returns "Invalid table"), Grants emits
-// no grants and NO error — the rest of the sync is unaffected.
-func TestScheduleGrants_OnCallModuleAbsent_DegradesGracefully(t *testing.T) {
+// TestScheduleGrants_OnCallModuleAbsent_ErrorsClearly verifies that when the
+// plugin is absent (cmn_rota_member returns "Invalid table"), Grants returns a
+// clear, actionable error rather than emitting zero grants.
+func TestScheduleGrants_OnCallModuleAbsent_ErrorsClearly(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "cmn_rota_member") {
 			w.WriteHeader(http.StatusBadRequest)
@@ -150,11 +155,14 @@ func TestScheduleGrants_OnCallModuleAbsent_DegradesGracefully(t *testing.T) {
 
 	grants, _, _, err := scheduleBuilder(newClient(t, srv)).
 		Grants(context.Background(), scheduleResourceFor("roster1"), &pagination.Token{})
-	if err != nil {
-		t.Fatalf("Grants must NOT error when the on-call module is absent, got: %v", err)
+	if err == nil {
+		t.Fatal("Grants must ERROR when the on-call module is absent (opt-in resource type enabled), not skip silently")
+	}
+	if !strings.Contains(err.Error(), "On-Call Scheduling plugin") {
+		t.Fatalf("error should tell the customer to install the plugin / disable the resource type, got: %v", err)
 	}
 	if len(grants) != 0 {
-		t.Fatalf("expected 0 grants when module absent, got %d", len(grants))
+		t.Fatalf("expected no grants alongside the error, got %d", len(grants))
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
 )
 
 func TestEntitlementSlug(t *testing.T) {
@@ -23,6 +24,15 @@ func TestEntitlementSlug(t *testing.T) {
 				t.Errorf("entitlementSlug(%q) = %q, want %q", tt.ent.Id, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestScheduleResourceType_OptInRequired locks in that the schedule resource
+// type carries the OptInRequired annotation.
+func TestScheduleResourceType_OptInRequired(t *testing.T) {
+	annos := annotations.Annotations(resourceTypeSchedule.Annotations)
+	if !annos.Contains(&v2.OptInRequired{}) {
+		t.Fatal("schedule resource type must carry the OptInRequired annotation")
 	}
 }
 

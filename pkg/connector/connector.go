@@ -42,6 +42,8 @@ var (
 		Traits: []v2.ResourceType_Trait{
 			v2.ResourceType_TRAIT_GROUP,
 		},
+		// Opt-in: backed by the optional On-Call Scheduling plugin.
+		Annotations: annotationsForScheduleResourceType(),
 	}
 )
 
