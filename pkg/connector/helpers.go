@@ -16,6 +16,13 @@ func annotationsForUserResourceType() annotations.Annotations {
 	return annos
 }
 
+// annotationsForScheduleResourceType marks the schedule resource type opt-in.
+func annotationsForScheduleResourceType() annotations.Annotations {
+	annos := annotations.Annotations{}
+	annos.Update(&v2.OptInRequired{})
+	return annos
+}
+
 func parsePageToken(i string, resourceID *v2.ResourceId) (*pagination.Bag, int, error) {
 	b := &pagination.Bag{}
 	err := b.Unmarshal(i)
@@ -48,6 +55,16 @@ func mapGroupMembers(resources []servicenow.GroupMember) []string {
 
 	for i, r := range resources {
 		members[i] = r.User
+	}
+
+	return members
+}
+
+func mapRotaMembers(resources []servicenow.RotaMember) []string {
+	members := make([]string, len(resources))
+
+	for i, r := range resources {
+		members[i] = r.Member
 	}
 
 	return members

@@ -36,6 +36,15 @@ var (
 			v2.ResourceType_TRAIT_GROUP,
 		},
 	}
+	resourceTypeSchedule = &v2.ResourceType{
+		Id:          "schedule",
+		DisplayName: "Schedule",
+		Traits: []v2.ResourceType_Trait{
+			v2.ResourceType_TRAIT_GROUP,
+		},
+		// Opt-in: backed by the optional On-Call Scheduling plugin.
+		Annotations: annotationsForScheduleResourceType(),
+	}
 )
 
 type ServiceNow struct {
@@ -47,6 +56,7 @@ func (s *ServiceNow) ResourceSyncers(ctx context.Context) []connectorbuilder.Res
 		userBuilder(s.client),
 		roleBuilder(s.client),
 		groupBuilder(s.client),
+		scheduleBuilder(s.client),
 	}
 }
 
