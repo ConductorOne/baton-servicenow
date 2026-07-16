@@ -9,6 +9,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	"github.com/conductorone/baton-servicenow/pkg/incremental"
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 )
@@ -40,14 +41,27 @@ var (
 
 type ServiceNow struct {
 	client *servicenow.Client
+	state  *incremental.State
 }
 
 func (s *ServiceNow) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
 	return []connectorbuilder.ResourceSyncer{
-		userBuilder(s.client),
-		roleBuilder(s.client),
-		groupBuilder(s.client),
+		userBuilder(s.client, s.state),
+		roleBuilder(s.client, s.state),
+		groupBuilder(s.client, s.state),
 	}
+}
+
+// Close persists the incremental-sync snapshot (best-effort final flush; no-op
+// when incremental is disabled).
+func (s *ServiceNow) Close(ctx context.Context) error {
+	if s.state == nil {
+		return nil
+	}
+	if err := s.state.Save(); err != nil {
+		return fmt.Errorf("baton-servicenow: failed to persist incremental state: %w", err)
+	}
+	return nil
 }
 
 func (s *ServiceNow) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error) {
@@ -115,10 +129,14 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 	return nil, nil
 }
 
-// New returns the ServiceNow connector.
+// New returns the ServiceNow connector. When incremental is true, syncs after
+// the first fetch only rows changed since the stored watermark and merge them
+// over the cached snapshot (state file under stateDir, keyed by deployment);
+// when false, every sync is a full pull.
 func New(
 	ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string,
 	allowedDomains []string, customUserFields []string, baseURL string, insecure bool,
+	incrementalEnabled bool, stateDir string,
 ) (*ServiceNow, error) {
 	uhttpOpts := []uhttp.Option{uhttp.WithLogger(true, ctxzap.Extract(ctx))}
 	if insecure {
@@ -134,7 +152,13 @@ func New(
 		return nil, err
 	}
 
+	state, err := incremental.Load(stateDir, deployment, incrementalEnabled, servicenowClient)
+	if err != nil {
+		return nil, fmt.Errorf("baton-servicenow: failed to load incremental state: %w", err)
+	}
+
 	return &ServiceNow{
 		client: servicenowClient,
+		state:  state,
 	}, nil
 }

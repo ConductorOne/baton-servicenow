@@ -15,6 +15,28 @@ import (
 
 const SystemAdminUserId = "6816f79cc0a8016401c5a33be04be441"
 
+// Table names backing the connector's resources/grants, used as the
+// sys_audit_delete `tablename` filter for deletion capture.
+const (
+	TableUser            = "sys_user"
+	TableUserGroup       = "sys_user_group"
+	TableUserRole        = "sys_user_role"
+	TableUserGroupMember = "sys_user_grmember"
+	TableUserHasRole     = "sys_user_has_role"
+	TableGroupHasRole    = "sys_group_has_role"
+)
+
+// AuditedTables is every connector table whose hard deletes incremental sync
+// reconciles from sys_audit_delete.
+var AuditedTables = []string{
+	TableUser,
+	TableUserGroup,
+	TableUserRole,
+	TableUserGroupMember,
+	TableUserHasRole,
+	TableGroupHasRole,
+}
+
 type BaseResource struct {
 	Id string `json:"sys_id"`
 }
@@ -27,6 +49,7 @@ type User struct {
 	UserName     string            `json:"user_name"`
 	Roles        string            `json:"roles"`
 	Active       string            `json:"active"`
+	SysUpdatedOn string            `json:"sys_updated_on"`
 	CustomFields map[string]string `json:"-"`
 }
 
@@ -64,21 +87,24 @@ func (u *User) UnmarshalJSON(data []byte) error {
 
 type Role struct {
 	BaseResource
-	Name      string `json:"name"`
-	Grantable string `json:"grantable"`
+	Name         string `json:"name"`
+	Grantable    string `json:"grantable"`
+	SysUpdatedOn string `json:"sys_updated_on"`
 }
 
 type Group struct {
 	BaseResource
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Roles       string `json:"roles"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Roles        string `json:"roles"`
+	SysUpdatedOn string `json:"sys_updated_on"`
 }
 
 type GroupMember struct {
 	BaseResource
-	User  string `json:"user"`
-	Group string `json:"group"`
+	User         string `json:"user"`
+	Group        string `json:"group"`
+	SysUpdatedOn string `json:"sys_updated_on"`
 }
 
 type GroupMemberPayload struct {
@@ -88,9 +114,10 @@ type GroupMemberPayload struct {
 
 type UserToRole struct {
 	BaseResource
-	Inherited string `json:"inherited"`
-	User      string `json:"user"`
-	Role      string `json:"role"`
+	Inherited    string `json:"inherited"`
+	User         string `json:"user"`
+	Role         string `json:"role"`
+	SysUpdatedOn string `json:"sys_updated_on"`
 }
 
 type UserToRolePayload struct {
@@ -100,9 +127,10 @@ type UserToRolePayload struct {
 
 type GroupToRole struct {
 	BaseResource
-	Inherits string `json:"inherits"`
-	Group    string `json:"group"`
-	Role     string `json:"role"`
+	Inherits     string `json:"inherits"`
+	Group        string `json:"group"`
+	Role         string `json:"role"`
+	SysUpdatedOn string `json:"sys_updated_on"`
 }
 
 type GroupToRolePayload struct {
@@ -115,6 +143,18 @@ type UserRoles struct {
 	FromRole  []string `json:"from_role"`
 	FromGroup []string `json:"from_group"`
 }
+
+// AuditDeleteRecord is a sys_audit_delete row (one per HARD delete of an audited
+// record) — the signal a sys_updated_on watermark can't provide, used to prune
+// deleted resources/grants. DocumentKey is the deleted row's sys_id (a join-row
+// sys_id for the membership/assignment tables).
+type AuditDeleteRecord struct {
+	Tablename    string `json:"tablename"`
+	DocumentKey  string `json:"documentkey"`
+	SysCreatedOn string `json:"sys_created_on"`
+}
+
+type AuditDeleteResponse = ListResponse[AuditDeleteRecord]
 
 // TODO(lauren) remove unecessary fields.
 // Service Catalog request models.

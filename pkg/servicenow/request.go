@@ -7,11 +7,40 @@ import (
 	"strings"
 )
 
-var (
-	UserFields  = []string{"sys_id", "name", "roles", "user_name", "email", "first_name", "last_name", "active"}
-	RoleFields  = []string{"sys_id", "grantable", "name"}
-	GroupFields = []string{"sys_id", "description", "name"}
+const (
+	fieldName  = "name"
+	fieldSysID = "sys_id"
 )
+
+var (
+	UserFields  = []string{fieldSysID, fieldName, "roles", "user_name", "email", "first_name", "last_name", "active", UpdatedSinceField}
+	RoleFields  = []string{fieldSysID, "grantable", fieldName, UpdatedSinceField}
+	GroupFields = []string{fieldSysID, "description", fieldName, UpdatedSinceField}
+)
+
+// UpdatedSinceField is the ServiceNow column used as the incremental-sync
+// watermark. Every Table API row carries it; comparisons in sysparm_query
+// are evaluated in the API caller's session timezone (UTC for typical
+// integration accounts), and the value is itself a UTC "YYYY-MM-DD HH:MM:SS".
+const UpdatedSinceField = "sys_updated_on"
+
+// appendUpdatedSince appends a "sys_updated_on>=<ts>^ORDERBYsys_updated_on"
+// clause to an existing FilterVars query. ts must be a ServiceNow datetime
+// literal ("YYYY-MM-DD HH:MM:SS"). An empty ts is a no-op (full pull, no
+// ordering imposed). When ts is set, the clause is ANDed (^) with any existing
+// query and an ascending sys_updated_on sort is appended so offset pagination
+// walks forward deterministically; without it the Table API may return rows in
+// an unstable order across pages, silently skipping or duplicating them.
+func appendUpdatedSince(query string, ts string) string {
+	if ts == "" {
+		return query
+	}
+	clause := fmt.Sprintf("%s>=%s", UpdatedSinceField, ts)
+	if query != "" {
+		clause = query + "^" + clause
+	}
+	return clause + "^ORDERBY" + UpdatedSinceField
+}
 
 func queryMultipleIDs(ids []string) string {
 	var preparedIDs []string
@@ -150,7 +179,7 @@ func prepareUserToGroupFilter(userId string, groupId string) *FilterVars {
 
 	return &FilterVars{
 		Fields: []string{
-			"sys_id", "user", "group",
+			fieldSysID, "user", "group", UpdatedSinceField,
 		},
 		Query: query,
 	}
@@ -172,7 +201,7 @@ func prepareUserToRoleFilter(userId string, roleId string) *FilterVars {
 
 	return &FilterVars{
 		Fields: []string{
-			"sys_id", "user", "role", "inherited",
+			fieldSysID, "user", "role", "inherited", UpdatedSinceField,
 		},
 		Query: query,
 	}
@@ -194,7 +223,7 @@ func prepareGroupToRoleFilter(groupId string, roleId string) *FilterVars {
 
 	return &FilterVars{
 		Fields: []string{
-			"sys_id", "role", "group", "inherits",
+			fieldSysID, "role", "group", "inherits", UpdatedSinceField,
 		},
 		Query: query,
 	}

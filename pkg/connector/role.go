@@ -10,6 +10,7 @@ import (
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/conductorone/baton-servicenow/pkg/incremental"
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -20,6 +21,7 @@ const roleMembership = "member"
 type roleResourceType struct {
 	resourceType *v2.ResourceType
 	client       *servicenow.Client
+	state        *incremental.State
 }
 
 func (r *roleResourceType) ResourceType(_ context.Context) *v2.ResourceType {
@@ -52,6 +54,28 @@ func roleResource(role *servicenow.Role) (*v2.Resource, error) {
 }
 
 func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+	// Incremental path: drain only roles changed since the watermark, merge over
+	// the cached snapshot, and emit the full union in one page.
+	if r.state.Enabled() {
+		r.state.Reconcile(ctx)
+		changed, err := r.client.GetAllRolesUpdatedSince(ctx, r.state.Watermark(incremental.StreamRoles))
+		if err != nil {
+			r.state.MarkFailed()
+			return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list roles (incremental): %w", err)
+		}
+		merged, err := r.state.MergeRoles(changed)
+		if err != nil {
+			r.state.MarkFailed()
+			return nil, "", nil, fmt.Errorf("baton-servicenow: failed to persist roles state: %w", err)
+		}
+		rv, err := rolesToResources(merged)
+		if err != nil {
+			r.state.MarkFailed()
+			return nil, "", nil, err
+		}
+		return rv, "", nil, nil
+	}
+
 	bag, offset, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeRole.Id})
 	if err != nil {
 		return nil, "", nil, err
@@ -73,19 +97,25 @@ func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		return nil, "", nil, err
 	}
 
+	rv, err := rolesToResources(roles)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	return rv, nextPage, nil, nil
+}
+
+func rolesToResources(roles []servicenow.Role) ([]*v2.Resource, error) {
 	var rv []*v2.Resource
 	for _, role := range roles {
 		roleCopy := role
 		rr, err := roleResource(&roleCopy)
-
 		if err != nil {
-			return nil, "", nil, err
+			return nil, err
 		}
-
 		rv = append(rv, rr)
 	}
-
-	return rv, nextPage, nil, nil
+	return rv, nil
 }
 
 func (r *roleResourceType) Entitlements(ctx context.Context, resource *v2.Resource, token *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
@@ -107,6 +137,19 @@ func (r *roleResourceType) Entitlements(ctx context.Context, resource *v2.Resour
 }
 
 func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
+	// Incremental path: drain only the user-role and group-role rows for this
+	// role changed since the watermark, merge each over the cached snapshot, and
+	// emit the full union (both principal kinds) in one page.
+	if r.state.Enabled() {
+		r.state.Reconcile(ctx)
+		rv, err := r.incrementalGrants(ctx, resource)
+		if err != nil {
+			r.state.MarkFailed()
+			return nil, "", nil, err
+		}
+		return rv, "", nil, nil
+	}
+
 	bag, offset, err := parsePageToken(pt.Token, resource.Id)
 	if err != nil {
 		return nil, "", nil, err
@@ -202,6 +245,47 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 	}
 
 	return rv, nextPage, nil, nil
+}
+
+// incrementalGrants builds the full set of role grants (users and groups) for a
+// role by merging the watermarked deltas of sys_user_has_role and
+// sys_group_has_role over the cached snapshot.
+func (r *roleResourceType) incrementalGrants(ctx context.Context, resource *v2.Resource) ([]*v2.Grant, error) {
+	changedUsers, err := r.client.GetAllUserToRoleUpdatedSince(ctx, resource.Id.Resource, r.state.Watermark(incremental.StreamUserRoles))
+	if err != nil {
+		return nil, fmt.Errorf("baton-servicenow: failed to list users under role %s (incremental): %w", resource.Id.Resource, err)
+	}
+	mergedUsers, err := r.state.MergeUserRoles(resource.Id.Resource, changedUsers)
+	if err != nil {
+		return nil, fmt.Errorf("baton-servicenow: failed to persist user-roles state: %w", err)
+	}
+
+	changedGroups, err := r.client.GetAllGroupToRoleUpdatedSince(ctx, resource.Id.Resource, r.state.Watermark(incremental.StreamGroupRoles))
+	if err != nil {
+		return nil, fmt.Errorf("baton-servicenow: failed to list groups under role %s (incremental): %w", resource.Id.Resource, err)
+	}
+	mergedGroups, err := r.state.MergeGroupRoles(resource.Id.Resource, changedGroups)
+	if err != nil {
+		return nil, fmt.Errorf("baton-servicenow: failed to persist group-roles state: %w", err)
+	}
+
+	var rv []*v2.Grant
+	for _, roleBinding := range mergedUsers {
+		rv = append(rv, grant.NewGrant(
+			resource,
+			roleMembership,
+			&v2.ResourceId{ResourceType: resourceTypeUser.Id, Resource: roleBinding.User},
+		))
+	}
+	for _, roleBinding := range mergedGroups {
+		rv = append(rv, grant.NewGrant(
+			resource,
+			roleMembership,
+			&v2.ResourceId{ResourceType: resourceTypeGroup.Id, Resource: roleBinding.Group},
+			r.helperGrantForGroup(roleBinding)...,
+		))
+	}
+	return rv, nil
 }
 
 // This is a helper function to add heritance.
@@ -428,9 +512,10 @@ func (r *roleResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annotat
 	return nil, nil
 }
 
-func roleBuilder(client *servicenow.Client) *roleResourceType {
+func roleBuilder(client *servicenow.Client, state *incremental.State) *roleResourceType {
 	return &roleResourceType{
 		resourceType: resourceTypeRole,
 		client:       client,
+		state:        state,
 	}
 }
