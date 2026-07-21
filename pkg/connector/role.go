@@ -33,15 +33,12 @@ func roleResource(role *servicenow.Role) (*v2.Resource, error) {
 		"role_id":   role.Id,
 	}
 
-	roleTraitOptions := []rs.RoleTraitOption{
-		rs.WithRoleProfile(profile),
-	}
-
 	resource, err := rs.NewRoleResource(
 		role.Name,
 		resourceTypeRole,
 		role.Id,
-		roleTraitOptions,
+		nil,
+		rs.WithResourceProfile(profile),
 	)
 
 	if err != nil {
@@ -52,16 +49,16 @@ func roleResource(role *servicenow.Role) (*v2.Resource, error) {
 }
 
 func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	bag, offset, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeRole.Id})
+	bag, lastID, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeRole.Id})
 	if err != nil {
 		return nil, "", nil, err
 	}
 
 	roles, nextPageToken, err := r.client.GetRoles(
 		ctx,
-		servicenow.PaginationVars{
+		servicenow.KeysetPaginationVars{
 			Limit:  ResourcesPageSize,
-			Offset: offset,
+			LastID: lastID,
 		},
 	)
 	if err != nil {
@@ -107,7 +104,7 @@ func (r *roleResourceType) Entitlements(ctx context.Context, resource *v2.Resour
 }
 
 func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	bag, offset, err := parsePageToken(pt.Token, resource.Id)
+	bag, lastID, err := parsePageToken(pt.Token, resource.Id)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -126,11 +123,11 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 	case resourceTypeUser.Id:
 		usersToRoles, nextPageToken, err := r.client.GetUserToRole(
 			ctx,
-			"", // all users
+			"", // all users, domain-filtered when allowed-domains is set
 			resource.Id.Resource,
-			servicenow.PaginationVars{
+			servicenow.KeysetPaginationVars{
 				Limit:  ResourcesPageSize,
-				Offset: offset,
+				LastID: lastID,
 			},
 		)
 		if err != nil {
@@ -162,9 +159,9 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			ctx,
 			"", // all groups
 			resource.Id.Resource,
-			servicenow.PaginationVars{
+			servicenow.KeysetPaginationVars{
 				Limit:  ResourcesPageSize,
-				Offset: offset,
+				LastID: lastID,
 			},
 		)
 		if err != nil {
@@ -221,7 +218,7 @@ func (r *roleResourceType) GrantToUser(ctx context.Context, l *zap.Logger, princ
 		ctx,
 		principal,
 		roleId,
-		servicenow.PaginationVars{Limit: 1},
+		servicenow.KeysetPaginationVars{Limit: 1},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("baton-servicenow: failed to get user roles for %s: %w", principal, err)
@@ -259,7 +256,7 @@ func (r *roleResourceType) GrantToGroup(ctx context.Context, l *zap.Logger, prin
 		ctx,
 		principal,
 		roleId,
-		servicenow.PaginationVars{Limit: 1},
+		servicenow.KeysetPaginationVars{Limit: 1},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("baton-servicenow: failed to get group roles for %s: %w", principal, err)
@@ -327,7 +324,7 @@ func (r *roleResourceType) RevokeFromUser(ctx context.Context, l *zap.Logger, pr
 		ctx,
 		principal.Id.Resource,
 		roleId,
-		servicenow.PaginationVars{Limit: 1},
+		servicenow.KeysetPaginationVars{Limit: 1},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("baton-servicenow: failed to get user roles for %s: %w", principal.Id.Resource, err)
@@ -365,7 +362,7 @@ func (r *roleResourceType) RevokeFromGroup(ctx context.Context, l *zap.Logger, p
 		ctx,
 		principal.Id.Resource,
 		roleId,
-		servicenow.PaginationVars{Limit: 1},
+		servicenow.KeysetPaginationVars{Limit: 1},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("baton-servicenow: failed to get group roles for %s: %w", principal.Id.Resource, err)

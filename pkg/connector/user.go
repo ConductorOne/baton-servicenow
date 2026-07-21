@@ -50,8 +50,6 @@ func userResource(user *servicenow.User) (*v2.Resource, error) {
 
 	userTraitOptions := []rs.UserTraitOption{
 		rs.WithEmail(user.Email, true),
-		rs.WithUserProfile(profile),
-		rs.WithStatus(userStatus),
 	}
 
 	resource, err := rs.NewUserResource(
@@ -59,6 +57,8 @@ func userResource(user *servicenow.User) (*v2.Resource, error) {
 		resourceTypeUser,
 		user.Id,
 		userTraitOptions,
+		rs.WithResourceProfile(profile),
+		rs.WithResourceStatus(v2.Status_ResourceStatus(userStatus), ""),
 	)
 
 	if err != nil {
@@ -69,16 +69,16 @@ func userResource(user *servicenow.User) (*v2.Resource, error) {
 }
 
 func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	bag, offset, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeUser.Id})
+	bag, lastID, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeUser.Id})
 	if err != nil {
 		return nil, "", nil, err
 	}
 
 	users, nextPageToken, err := u.client.GetUsers(
 		ctx,
-		servicenow.PaginationVars{
+		servicenow.KeysetPaginationVars{
 			Limit:  ResourcesPageSize,
-			Offset: offset,
+			LastID: lastID,
 		},
 	)
 	if err != nil {

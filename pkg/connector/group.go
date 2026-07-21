@@ -34,15 +34,12 @@ func groupResource(group *servicenow.Group) (*v2.Resource, error) {
 		"group_description": group.Description,
 	}
 
-	groupTraitOptions := []rs.GroupTraitOption{
-		rs.WithGroupProfile(profile),
-	}
-
 	resource, err := rs.NewGroupResource(
 		group.Name,
 		resourceTypeGroup,
 		group.Id,
-		groupTraitOptions,
+		nil,
+		rs.WithResourceProfile(profile),
 	)
 
 	if err != nil {
@@ -53,16 +50,16 @@ func groupResource(group *servicenow.Group) (*v2.Resource, error) {
 }
 
 func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	bag, offset, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeGroup.Id})
+	bag, lastID, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeGroup.Id})
 	if err != nil {
 		return nil, "", nil, err
 	}
 
 	groups, nextPageToken, err := g.client.GetGroups(
 		ctx,
-		servicenow.PaginationVars{
+		servicenow.KeysetPaginationVars{
 			Limit:  ResourcesPageSize,
-			Offset: offset,
+			LastID: lastID,
 		},
 		nil,
 	)
@@ -109,18 +106,18 @@ func (g *groupResourceType) Entitlements(ctx context.Context, resource *v2.Resou
 }
 
 func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, pt *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	bag, offset, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeGroup.Id})
+	bag, lastID, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeGroup.Id})
 	if err != nil {
 		return nil, "", nil, err
 	}
 
 	groupMembers, nextPageToken, err := g.client.GetUserToGroup(
 		ctx,
-		"", // all users
+		"", // all users, domain-filtered when allowed-domains is set
 		resource.Id.Resource,
-		servicenow.PaginationVars{
+		servicenow.KeysetPaginationVars{
 			Limit:  ResourcesPageSize,
-			Offset: offset,
+			LastID: lastID,
 		},
 	)
 	if err != nil {
@@ -134,14 +131,14 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 
 	memberIDs := mapGroupMembers(groupMembers)
 	if len(memberIDs) == 0 {
-		return []*v2.Grant{}, nextPageToken, nil, nil
+		return []*v2.Grant{}, nextPage, nil, nil
 	}
 
 	var rv []*v2.Grant
 	for _, member := range memberIDs {
 		rID, err := rs.NewResourceID(resourceTypeUser, member)
 		if err != nil {
-			return nil, "", nil, fmt.Errorf("baton-servicenow: error creating principal id")
+			return nil, "", nil, fmt.Errorf("baton-servicenow: error creating principal id for member %s: %w", member, err)
 		}
 
 		// grant group membership
@@ -176,7 +173,7 @@ func (r *groupResourceType) Grant(ctx context.Context, principal *v2.Resource, e
 		ctx,
 		principal.Id.Resource,
 		groupId,
-		servicenow.PaginationVars{Limit: 1},
+		servicenow.KeysetPaginationVars{Limit: 1},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("baton-servicenow: failed to get group members for %s: %w", entitlement.Id, err)
@@ -227,7 +224,7 @@ func (r *groupResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annota
 		ctx,
 		principal.Id.Resource,
 		groupId,
-		servicenow.PaginationVars{Limit: 1},
+		servicenow.KeysetPaginationVars{Limit: 1},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("baton-servicenow: failed to get user roles for %s: %w", grant.Principal.Id.Resource, err)

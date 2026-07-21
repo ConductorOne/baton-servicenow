@@ -103,7 +103,7 @@ func (s *ServiceNow) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error
 
 // Validates that we have credentials and an endpoint. Does not validate that the credentials have all of the correct permissions.
 func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, error) {
-	pagination := servicenow.PaginationVars{
+	pagination := servicenow.KeysetPaginationVars{
 		Limit: 1,
 	}
 
