@@ -232,6 +232,27 @@ func TestKeysetPaginationVarsToReqOptions_ComposesWithFilterQuery(t *testing.T) 
 	}
 }
 
+// TestKeysetPaginationVarsToReqOptions_ComposesWithMultiDomainFilterQuery is
+// the 2+ allowed-domains variant of the test above: the seek condition must
+// AND onto the *entire* filter query, including every OR'd domain branch,
+// not just the last one. Confirmed against a real ServiceNow instance: a
+// role/group scope combined with a 2-domain filter and an unsatisfiable seek
+// (sys_id greater than the max possible value) returned zero rows, proving
+// the seek constrains every branch rather than only the trailing one.
+func TestKeysetPaginationVarsToReqOptions_ComposesWithMultiDomainFilterQuery(t *testing.T) {
+	filterOpts := filterToReqOptions(prepareUserToRoleFilter("", "ROLE1", []string{"draftkings.com", "dk.com"}))
+	paginationOpts := keysetPaginationVarsToReqOptions(&KeysetPaginationVars{Limit: 50, LastID: "abc123"})
+
+	req := newTestRequest(t)
+	applyReqOpts(req, filterOpts...)
+	applyReqOpts(req, paginationOpts...)
+
+	wantQuery := "role=ROLE1^user.emailENDSWITH@draftkings.com^ORuser.emailENDSWITH@dk.com^sys_id>abc123^ORDERBYsys_id"
+	if got := req.URL.Query().Get("sysparm_query"); got != wantQuery {
+		t.Errorf("sysparm_query = %q, want %q", got, wantQuery)
+	}
+}
+
 func TestWithNoCount(t *testing.T) {
 	req := newTestRequest(t)
 	applyReqOpts(req, WithNoCount())
