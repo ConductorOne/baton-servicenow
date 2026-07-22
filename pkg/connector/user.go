@@ -36,16 +36,16 @@ func userResource(user *servicenow.User) (*v2.Resource, error) {
 		profile[k] = v
 	}
 
-	// Map ServiceNow active status to Baton user status
-	var userStatus v2.UserTrait_Status_Status
+	// Map ServiceNow active status to Baton resource status
+	var userStatus v2.Status_ResourceStatus
 	switch user.Active {
 	case "true", "True", "TRUE", "1":
-		userStatus = v2.UserTrait_Status_STATUS_ENABLED
+		userStatus = v2.Status_RESOURCE_STATUS_ENABLED
 	case "false", "False", "FALSE", "0":
-		userStatus = v2.UserTrait_Status_STATUS_DISABLED
+		userStatus = v2.Status_RESOURCE_STATUS_DISABLED
 	default:
 		// Default to disabled for unknown values to be safe
-		userStatus = v2.UserTrait_Status_STATUS_DISABLED
+		userStatus = v2.Status_RESOURCE_STATUS_DISABLED
 	}
 
 	userTraitOptions := []rs.UserTraitOption{
@@ -58,7 +58,7 @@ func userResource(user *servicenow.User) (*v2.Resource, error) {
 		user.Id,
 		userTraitOptions,
 		rs.WithResourceProfile(profile),
-		rs.WithResourceStatus(v2.Status_ResourceStatus(userStatus), ""),
+		rs.WithResourceStatus(userStatus, ""),
 	)
 
 	if err != nil {
