@@ -110,12 +110,6 @@ type GroupToRolePayload struct {
 	Role  string `json:"role"`
 }
 
-type UserRoles struct {
-	UserName  string   `json:"user_name"`
-	FromRole  []string `json:"from_role"`
-	FromGroup []string `json:"from_group"`
-}
-
 // TODO(lauren) remove unecessary fields.
 // Service Catalog request models.
 type ResourceRefLink struct {

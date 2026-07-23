@@ -36,22 +36,20 @@ func userResource(user *servicenow.User) (*v2.Resource, error) {
 		profile[k] = v
 	}
 
-	// Map ServiceNow active status to Baton user status
-	var userStatus v2.UserTrait_Status_Status
+	// Map ServiceNow active status to Baton resource status
+	var userStatus v2.Status_ResourceStatus
 	switch user.Active {
 	case "true", "True", "TRUE", "1":
-		userStatus = v2.UserTrait_Status_STATUS_ENABLED
+		userStatus = v2.Status_RESOURCE_STATUS_ENABLED
 	case "false", "False", "FALSE", "0":
-		userStatus = v2.UserTrait_Status_STATUS_DISABLED
+		userStatus = v2.Status_RESOURCE_STATUS_DISABLED
 	default:
 		// Default to disabled for unknown values to be safe
-		userStatus = v2.UserTrait_Status_STATUS_DISABLED
+		userStatus = v2.Status_RESOURCE_STATUS_DISABLED
 	}
 
 	userTraitOptions := []rs.UserTraitOption{
 		rs.WithEmail(user.Email, true),
-		rs.WithUserProfile(profile),
-		rs.WithStatus(userStatus),
 	}
 
 	resource, err := rs.NewUserResource(
@@ -59,6 +57,8 @@ func userResource(user *servicenow.User) (*v2.Resource, error) {
 		resourceTypeUser,
 		user.Id,
 		userTraitOptions,
+		rs.WithResourceProfile(profile),
+		rs.WithResourceStatus(userStatus, ""),
 	)
 
 	if err != nil {
@@ -69,16 +69,16 @@ func userResource(user *servicenow.User) (*v2.Resource, error) {
 }
 
 func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	bag, offset, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeUser.Id})
+	bag, lastID, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeUser.Id})
 	if err != nil {
 		return nil, "", nil, err
 	}
 
 	users, nextPageToken, err := u.client.GetUsers(
 		ctx,
-		servicenow.PaginationVars{
+		servicenow.KeysetPaginationVars{
 			Limit:  ResourcesPageSize,
-			Offset: offset,
+			LastID: lastID,
 		},
 	)
 	if err != nil {
