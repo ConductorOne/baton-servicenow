@@ -28,11 +28,6 @@ const TicketSchemasPageSize = 25
 // normalized to lowercase for a stable cursor.
 var sysIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
 
-// legacyOffsetPattern matches a pre-keyset sysparm_offset checkpoint token
-// (an all-digit string). Landing on one means a sync was in flight across
-// the keyset migration -- safe to restart that listing from scratch.
-var legacyOffsetPattern = regexp.MustCompile(`^[0-9]+$`)
-
 func annotationsForUserResourceType() annotations.Annotations {
 	annos := annotations.Annotations{}
 	annos.Update(&v2.SkipEntitlementsAndGrants{})
@@ -61,17 +56,14 @@ func parsePageToken(i string, resourceID *v2.ResourceId) (*pagination.Bag, strin
 		return b, "", nil
 	}
 
-	// A valid sys_id cursor normalizes to lowercase; a legacy numeric
-	// offset token restarts the listing; anything else fails loudly
-	// instead of silently restarting, to avoid a possible infinite loop.
-	switch {
-	case sysIDPattern.MatchString(token):
-		return b, strings.ToLower(token), nil
-	case legacyOffsetPattern.MatchString(token):
-		return b, "", nil
-	default:
+	// A valid sys_id cursor normalizes to lowercase; anything else --
+	// including a pre-keyset numeric offset token -- fails loudly rather
+	// than guessing, since a wrong guess here means silently wrong
+	// pagination results, not just a restart.
+	if !sysIDPattern.MatchString(token) {
 		return nil, "", fmt.Errorf("baton-servicenow: malformed page token %q", token)
 	}
+	return b, strings.ToLower(token), nil
 }
 
 // convertPageToken converts a string token into an int.

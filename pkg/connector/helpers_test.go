@@ -29,24 +29,21 @@ func marshalPageToken(t *testing.T, resourceID *v2.ResourceId, checkpointedToken
 	return marshaled
 }
 
-// TestParsePageToken_TokenValidation covers the three shapes a checkpointed
+// TestParsePageToken_TokenValidation covers the two shapes a checkpointed
 // page token can take: (1) a real sys_id passes through as the seek
-// cursor, normalized to lowercase; (2) a legacy numeric offset token
-// silently restarts the listing instead of being read as a literal sys_id
-// cursor; (3) anything else fails loudly instead of silently restarting,
-// to avoid a possible infinite loop.
+// cursor, normalized to lowercase; (2) anything else -- including a
+// pre-keyset numeric offset token -- fails loudly instead of guessing,
+// since a wrong guess here means silently wrong pagination results, not
+// just a restart.
 func TestParsePageToken_TokenValidation(t *testing.T) {
 	resourceID := &v2.ResourceId{ResourceType: "role"}
 
-	t.Run("legacy numeric offset token restarts the listing", func(t *testing.T) {
+	t.Run("legacy numeric offset token fails loudly", func(t *testing.T) {
 		legacyToken := marshalPageToken(t, resourceID, "150")
 
-		_, lastID, err := parsePageToken(legacyToken, resourceID)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if lastID != "" {
-			t.Errorf("lastID = %q, want empty (legacy offset token must restart, not be read as a sys_id cursor)", lastID)
+		_, _, err := parsePageToken(legacyToken, resourceID)
+		if err == nil {
+			t.Fatalf("expected an error for a pre-keyset offset token, got nil")
 		}
 	})
 
