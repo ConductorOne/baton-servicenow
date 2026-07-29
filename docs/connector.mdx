@@ -18,10 +18,11 @@ The ServiceNow connector supports [automatic account provisioning](/product/admi
 
 This connector does not support full account deprovisioning. You can disable accounts using a connector action, but you must deprovision accounts directly in ServiceNow.
 
-Two things to know about how ServiceNow roles appear in C1:
+<Note>
+C1 syncs only roles marked grantable in ServiceNow. Roles without that flag do not appear in C1, and you cannot grant or revoke them through it.
 
-- **Only roles marked grantable in ServiceNow are synced.** Roles without that flag are not visible in C1 and cannot be granted or revoked through it.
-- **Roles a user inherits from a group cannot be revoked individually.** ServiceNow maintains inherited role assignments automatically from group membership, so it re-creates the assignment while the group membership remains. To remove inherited access, revoke the user's group membership instead.
+C1 cannot revoke a role that a user inherits from a group. ServiceNow re-creates inherited role assignments from group membership, so the role returns on the next sync. Revoke the user's group membership instead.
+</Note>
 
 This connector can also be configured to automatically create and update ServiceNow tickets to track manual provisioning assignments. Go to [Configure ServiceNow as an external ticketing provider](/product/admin/external-ticketing#configure-servicenow-as-an-external-ticketing-provider) to learn more.
 
@@ -34,7 +35,7 @@ Connector actions are custom capabilities that extend C1 automations with app-sp
 | enable_user | `userId` (string, required) | Enables a disabled ServiceNow user account |
 | disable_user     | `userId` (string, required) | Disables an active ServiceNow user account |
 
-The `userId` value is the ServiceNow `sys_id` of the user record — a 32-character identifier, not the username or email address.
+Pass the user's ServiceNow `sys_id` as `userId` — a 32-character identifier, not the username or email address.
 
 ## Gather ServiceNow credentials 
 
@@ -258,7 +259,7 @@ Find the **Settings** area of the page and click **Edit**.
 
    To add multiple allowed domains, press **Enter** between each domain.
 
-   Accounts with no email address at all — which includes many ServiceNow service accounts — do not match any domain and are excluded along with their membership grants.
+   Accounts with no email address — including many ServiceNow service accounts — match no domain, so C1 excludes them and their membership grants.
 
    If you leave this field blank, C1 will sync all accounts and membership grants in your ServiceNow instance, regardless of the email domain associated with the account.
 </Step>
