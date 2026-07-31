@@ -1,5 +1,3 @@
-![Baton Logo](./docs/images/baton-logo.png)
-
 # `baton-servicenow` [![Go Reference](https://pkg.go.dev/badge/github.com/conductorone/baton-servicenow.svg)](https://pkg.go.dev/github.com/conductorone/baton-servicenow) ![verify](https://github.com/conductorone/baton-servicenow/actions/workflows/verify.yaml/badge.svg)
 
 `baton-servicenow` is a connector for ServiceNow built using the [Baton SDK](https://github.com/conductorone/baton-sdk). It works with the ServiceNow Table API to sync data about users, groups and roles.
@@ -63,6 +61,21 @@ baton resources
 - Users
 - Groups
 - Roles
+
+Only roles marked grantable in ServiceNow are synced.
+
+## Capabilities
+
+Beyond syncing, the connector supports:
+
+- **Account provisioning** — create a ServiceNow user account. Accounts are created without a password.
+- **Entitlement provisioning** — grant and revoke group membership (`sys_user_grmember`) and role membership (`sys_user_has_role`).
+- **Connector actions** — `enable_user` and `disable_user`, each taking a required `userId` argument (the user's `sys_id`).
+- **External ticketing** — create ServiceNow Service Catalog requests. Enabled with `--ticketing`.
+
+Full account deprovisioning is not supported. Accounts can be disabled via the `disable_user` action, but must be deleted directly in ServiceNow.
+
+See [`docs/connector.mdx`](./docs/connector.mdx) for the customer-facing setup walkthrough and the required ServiceNow permissions.
 
 ## Custom User Fields
 
