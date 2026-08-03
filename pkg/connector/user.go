@@ -74,7 +74,7 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		return nil, "", nil, err
 	}
 
-	users, nextPageToken, err := u.client.GetUsers(
+	users, nextPageToken, annos, err := u.client.GetUsers(
 		ctx,
 		servicenow.KeysetPaginationVars{
 			Limit:  ResourcesPageSize,
@@ -82,12 +82,12 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		},
 	)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list users: %w", err)
+		return nil, "", annos, fmt.Errorf("baton-servicenow: failed to list users: %w", err)
 	}
 
 	nextPage, err := bag.NextToken(nextPageToken)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", annos, err
 	}
 
 	var rv []*v2.Resource
@@ -96,7 +96,7 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		ur, err := userResource(&userCopy)
 
 		if err != nil {
-			return nil, "", nil, err
+			return nil, "", annos, err
 		}
 
 		rv = append(rv, ur)

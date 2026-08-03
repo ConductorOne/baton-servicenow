@@ -21,7 +21,7 @@ func WithCustomField(id string, value interface{}) FieldOption {
 
 func (c *Client) GetServiceCatalogRequest(ctx context.Context, requestId string) (*ServiceCatalogRequest, error) {
 	var serviceCatalogRequestResponse ServiceCatalogRequestResponse
-	_, err := c.get(
+	_, _, err := c.get(
 		ctx,
 		c.apiURL(ServiceCatalogRequestDetailsBaseUrl, c.deployment, requestId),
 		&serviceCatalogRequestResponse,
@@ -35,7 +35,7 @@ func (c *Client) GetServiceCatalogRequest(ctx context.Context, requestId string)
 
 func (c *Client) GetServiceCatalogRequestItem(ctx context.Context, requestItemId string) (*RequestedItem, error) {
 	var requestItemResponse RequestItemResponse
-	_, err := c.get(
+	_, _, err := c.get(
 		ctx,
 		c.apiURL(ServiceCatalogRequestedItemDetailsBaseUrl, c.deployment, requestItemId),
 		&requestItemResponse,
@@ -80,7 +80,7 @@ func (c *Client) UpdateServiceCatalogRequestItem(ctx context.Context, requestIte
 
 func (c *Client) GetServiceCatalogRequestItems(ctx context.Context, reqOptions ...ReqOpt) ([]RequestedItem, string, error) {
 	var requestItemsResponse RequestItemsResponse
-	nextPageToken, err := c.get(
+	nextPageToken, _, err := c.get(
 		ctx,
 		c.apiURL(ServiceCatalogRequestedItemBaseUrl, c.deployment),
 		&requestItemsResponse,
@@ -101,7 +101,7 @@ func (c *Client) GetCatalogItems(ctx context.Context, paginationVars *Pagination
 	for k, v := range c.TicketSchemaFilters {
 		reqOpts = append(reqOpts, WithQueryParam(k, v))
 	}
-	nextPageToken, err := c.get(
+	nextPageToken, _, err := c.get(
 		ctx,
 		c.apiURL(ServiceCatalogItemBaseUrl, c.deployment),
 		&catalogItemsResponse,
@@ -115,7 +115,7 @@ func (c *Client) GetCatalogItems(ctx context.Context, paginationVars *Pagination
 
 func (c *Client) GetCatalogItem(ctx context.Context, catalogItemId string) (*CatalogItem, error) {
 	var catalogItemResponse CatalogItemResponse
-	_, err := c.get(
+	_, _, err := c.get(
 		ctx,
 		c.apiURL(ServiceCatalogItemGetUrl, c.deployment, catalogItemId),
 		&catalogItemResponse,
@@ -128,7 +128,7 @@ func (c *Client) GetCatalogItem(ctx context.Context, catalogItemId string) (*Cat
 
 func (c *Client) GetCatalogItemVariables(ctx context.Context, catalogItemId string) ([]CatalogItemVariable, error) {
 	var catalogItemVariablesResponse CatalogItemVariablesResponse
-	_, err := c.get(
+	_, _, err := c.get(
 		ctx,
 		c.apiURL(ServiceCatalogItemVariablesUrl, c.deployment, catalogItemId),
 		&catalogItemVariablesResponse,
@@ -221,7 +221,7 @@ func (c *Client) CreateLabel(ctx context.Context, label string) (*Label, error) 
 
 func (c *Client) GetLabel(ctx context.Context, label string) (*Label, error) {
 	var labelsResponse LabelsResponse
-	_, err := c.get(
+	_, _, err := c.get(
 		ctx,
 		c.apiURL(LabelBaseUrl, c.deployment),
 		&labelsResponse,
@@ -256,7 +256,7 @@ func (c *Client) createLabel(ctx context.Context, label string) (*Label, error) 
 
 func (c *Client) GetLabelsForRequestedItem(ctx context.Context, requestedItemId string) ([]string, error) {
 	var labelResponse LabelEntriesLabelNameResponse
-	_, err := c.get(
+	_, _, err := c.get(
 		ctx,
 		c.apiURL(LabelEntryBaseUrl, c.deployment),
 		&labelResponse,
@@ -275,7 +275,7 @@ func (c *Client) GetLabelsForRequestedItem(ctx context.Context, requestedItemId 
 
 func (c *Client) GetServiceCatalogRequestedItemStates(ctx context.Context) ([]RequestItemState, error) {
 	var catalogsResponse RequestedItemStateResponse
-	_, err := c.get(
+	_, _, err := c.get(
 		ctx,
 		c.apiURL(ChoiceBaseUrl, c.deployment),
 		&catalogsResponse,
@@ -291,7 +291,7 @@ func (c *Client) GetServiceCatalogRequestedItemStates(ctx context.Context) ([]Re
 // Unused.
 func (c *Client) GetCatalogs(ctx context.Context, paginationVars PaginationVars) ([]Catalog, string, error) {
 	var catalogsResponse CatalogsResponse
-	nextPageToken, err := c.get(
+	nextPageToken, _, err := c.get(
 		ctx,
 		c.apiURL(ServiceCatalogListCatalogsUrl, c.deployment),
 		&catalogsResponse,

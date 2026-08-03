@@ -7,7 +7,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // TestGetRoles_DoesNotTruncateOnShortNonEmptyPage guards against treating a
@@ -48,12 +55,12 @@ func TestGetRoles_DoesNotTruncateOnShortNonEmptyPage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.Client(), "Basic dGVzdDp0ZXN0", "dev0", nil, nil, nil, server.URL)
+	client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, nil, nil, server.URL)
 	if err != nil {
 		t.Fatalf("unexpected error creating client: %v", err)
 	}
 
-	page1, next1, err := client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50})
+	page1, next1, _, err := client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50})
 	if err != nil {
 		t.Fatalf("unexpected error on page 1: %v", err)
 	}
@@ -64,7 +71,7 @@ func TestGetRoles_DoesNotTruncateOnShortNonEmptyPage(t *testing.T) {
 		t.Fatalf("expected a non-empty next token after a full page")
 	}
 
-	page2, next2, err := client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50, LastID: next1})
+	page2, next2, _, err := client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50, LastID: next1})
 	if err != nil {
 		t.Fatalf("unexpected error on page 2: %v", err)
 	}
@@ -75,7 +82,7 @@ func TestGetRoles_DoesNotTruncateOnShortNonEmptyPage(t *testing.T) {
 		t.Fatalf("pagination stopped after a short-but-nonempty page (3 rows) while more rows remained")
 	}
 
-	page3, next3, err := client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50, LastID: next2})
+	page3, next3, _, err := client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50, LastID: next2})
 	if err != nil {
 		t.Fatalf("unexpected error on page 3: %v", err)
 	}
@@ -105,12 +112,12 @@ func TestGetRoles_IgnoresMalformedLegacyPaginationHeaders(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.Client(), "Basic dGVzdDp0ZXN0", "dev0", nil, nil, nil, server.URL)
+	client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, nil, nil, server.URL)
 	if err != nil {
 		t.Fatalf("unexpected error creating client: %v", err)
 	}
 
-	roles, _, err := client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50})
+	roles, _, _, err := client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50})
 	if err != nil {
 		t.Fatalf("unexpected error: %v (a malformed legacy pagination header must not fail a keyset page fetch)", err)
 	}
@@ -134,12 +141,12 @@ func TestGetUsers_CapsPageSizeWhenDomainFilterApplies(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.Client(), "Basic dGVzdDp0ZXN0", "dev0", nil, []string{"draftkings.com"}, nil, server.URL)
+	client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, []string{"draftkings.com"}, nil, server.URL)
 	if err != nil {
 		t.Fatalf("unexpected error creating client: %v", err)
 	}
 
-	_, _, err = client.GetUsers(context.Background(), KeysetPaginationVars{Limit: 200})
+	_, _, _, err = client.GetUsers(context.Background(), KeysetPaginationVars{Limit: 200})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -147,5 +154,262 @@ func TestGetUsers_CapsPageSizeWhenDomainFilterApplies(t *testing.T) {
 	want := fmt.Sprintf("%d", domainFilteredPageSize)
 	if gotLimit != want {
 		t.Errorf("sysparm_limit sent = %q, want %q (AllowedDomains configured must cap the page size)", gotLimit, want)
+	}
+}
+
+// TestNewClientValidatesBaseURL covers both URL shapes the constructor
+// produces: the override is an absolute URL spliced in by apiURL, while the
+// deployment-derived value is a bare host that ticket.go composes into
+// url.URL{Scheme: "https", Host: ...}. Either being malformed used to surface
+// only as a confusing failure on the first request.
+func TestNewClientValidatesBaseURL(t *testing.T) {
+	cases := []struct {
+		name       string
+		deployment string
+		override   string
+		wantErr    bool
+	}{
+		{"valid override", "dev0", "https://example.service-now.com", false},
+		{"valid override with port", "dev0", "http://127.0.0.1:8080", false},
+		{"override missing scheme", "dev0", "example.service-now.com", true},
+		{"override missing host", "dev0", "https://", true},
+		{"valid deployment", "dev0", "", false},
+		{"deployment with a space", "dev 0", "", true},
+		{"deployment with a slash", "a/b", "", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewClient(nil, "Basic dGVzdDp0ZXN0", tc.deployment, nil, nil, nil, tc.override)
+			if tc.wantErr && err == nil {
+				t.Errorf("deployment=%q override=%q: want an error at construction, got nil", tc.deployment, tc.override)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("deployment=%q override=%q: unexpected error %v", tc.deployment, tc.override, err)
+			}
+		})
+	}
+}
+
+// TestAuthRetryRecoversFrom401 guards withAuthRetry against the error-plumbing
+// change underneath it: the retry only fires if status.Code() still resolves to
+// Unauthenticated, which now means resolving *through* uhttp's wrapped error and
+// the fmt.Errorf("%w") around it. A regression here is silent -- the sync would
+// simply fail on a transient 401 instead of retrying.
+func TestAuthRetryRecoversFrom401(t *testing.T) {
+	var calls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if atomic.AddInt32(&calls, 1) == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if err := json.NewEncoder(w).Encode(ListResponse[Role]{Result: []Role{{BaseResource: BaseResource{Id: "role-000"}}}}); err != nil {
+			t.Errorf("failed to encode test response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, nil, nil, server.URL)
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	roles, _, _, err := client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50})
+	if err != nil {
+		t.Fatalf("expected recovery after a transient 401, got %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Errorf("server saw %d call(s), want 2 (the 401 must be retried once)", got)
+	}
+	if len(roles) != 1 {
+		t.Errorf("roles len = %d, want 1", len(roles))
+	}
+}
+
+// TestSuccessfulResponseCarriesRateLimitAnnotations covers the half of the
+// contract that actually prevents a 429: rate-limit headers on a *successful*
+// response must reach the SDK as annotations, so its limiter can pace the
+// next request. Reacting only to 429s (the error path) is strictly worse --
+// by then the request has already been rejected.
+func TestSuccessfulResponseCarriesRateLimitAnnotations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Limit", "100")
+		w.Header().Set("X-RateLimit-Remaining", "7")
+		w.Header().Set("X-RateLimit-Reset", "30")
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(ListResponse[Role]{Result: []Role{{BaseResource: BaseResource{Id: "role-000"}}}}); err != nil {
+			t.Errorf("failed to encode test response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, nil, nil, server.URL)
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	roles, _, annos, err := client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(roles) != 1 {
+		t.Fatalf("roles len = %d, want 1", len(roles))
+	}
+
+	rl := &v2.RateLimitDescription{}
+	if ok, err := annos.Pick(rl); err != nil || !ok {
+		t.Fatalf("no RateLimitDescription annotation on a successful response (ok=%v, err=%v); the SDK limiter has nothing to pace with", ok, err)
+	}
+	if rl.GetLimit() != 100 {
+		t.Errorf("limit = %d, want 100", rl.GetLimit())
+	}
+	if rl.GetRemaining() != 7 {
+		t.Errorf("remaining = %d, want 7", rl.GetRemaining())
+	}
+}
+
+// TestRequestsOptOutOfUhttpCache pins a behavioural decision that is invisible
+// at the call site: uhttp.BaseHttpClient caches GET 200s in memory for an hour
+// by default. Identity and membership listings must be read fresh on every
+// sync -- a cached page would resurface grants that have since been revoked.
+func TestRequestsOptOutOfUhttpCache(t *testing.T) {
+	var gotCacheControl string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCacheControl = r.Header.Get("Cache-Control")
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(ListResponse[Role]{Result: nil}); err != nil {
+			t.Errorf("failed to encode test response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, nil, nil, server.URL)
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	if _, _, _, err = client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotCacheControl != "no-cache" {
+		t.Errorf("Cache-Control = %q, want %q (uhttp would otherwise serve hour-old sync data)", gotCacheControl, "no-cache")
+	}
+}
+
+// TestErrorCarriesRateLimitDescription guards the contract the SDK retryer
+// depends on: a throttled response must surface a v2.RateLimitDescription as
+// a gRPC status detail, and it must survive the caller-side fmt.Errorf("%w")
+// wrapping every builder applies. Without the detail the retryer falls back
+// to blind linear backoff and ignores ServiceNow's Retry-After entirely
+// (see baton-sdk pkg/retry/retry.go).
+func TestErrorCarriesRateLimitDescription(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "42")
+		w.Header().Set("X-RateLimit-Limit", "100")
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, nil, nil, server.URL)
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	_, _, _, err = client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50})
+	if err == nil {
+		t.Fatalf("expected an error on a 429 response")
+	}
+
+	// Mirror what the resource builders do to the client's error.
+	wrapped := fmt.Errorf("baton-servicenow: failed to list roles: %w", err)
+
+	if code := status.Code(wrapped); code != codes.Unavailable {
+		t.Errorf("status code = %v, want %v (the SDK retryer only retries Unavailable/DeadlineExceeded)", code, codes.Unavailable)
+	}
+
+	st, ok := status.FromError(wrapped)
+	if !ok {
+		t.Fatalf("wrapped error did not resolve to a gRPC status")
+	}
+
+	var rl *v2.RateLimitDescription
+	for _, detail := range st.Details() {
+		if d, ok := detail.(*v2.RateLimitDescription); ok {
+			rl = d
+			break
+		}
+	}
+	if rl == nil {
+		t.Fatalf("no RateLimitDescription detail on the error; the SDK retryer will use blind backoff")
+	}
+
+	if rl.GetStatus() != v2.RateLimitDescription_STATUS_OVERLIMIT {
+		t.Errorf("rate limit status = %v, want STATUS_OVERLIMIT", rl.GetStatus())
+	}
+	if rl.GetRemaining() != 0 {
+		t.Errorf("remaining = %d, want 0", rl.GetRemaining())
+	}
+	// Retry-After: 42 is a relative offset, so ResetAt lands ~42s out.
+	if wait := time.Until(rl.GetResetAt().AsTime()); wait < 30*time.Second || wait > 45*time.Second {
+		t.Errorf("ResetAt is %v out, want ~42s (Retry-After must drive the backoff)", wait)
+	}
+}
+
+// TestErrorCarriesRateLimitDescription_NoHeaders is the case the whole change
+// rests on: we have not confirmed that ServiceNow actually emits rate-limit
+// headers, and it doesn't matter. ExtractRateLimitData synthesizes
+// STATUS_OVERLIMIT + a 60s reset for any bare 429 (baton-sdk
+// pkg/ratelimit/http.go), which is what lets the retryer skip its 1s/2s/3s
+// ramp. If this stops holding, the change silently loses its value on an
+// instance that sends no headers.
+func TestErrorCarriesRateLimitDescription_NoHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests) // no rate-limit headers whatsoever
+	}))
+	defer server.Close()
+
+	client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, nil, nil, server.URL)
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	_, _, _, err = client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50})
+	if err == nil {
+		t.Fatalf("expected an error on a 429 response")
+	}
+
+	st, ok := status.FromError(fmt.Errorf("baton-servicenow: failed to list roles: %w", err))
+	if !ok {
+		t.Fatalf("wrapped error did not resolve to a gRPC status")
+	}
+
+	var rl *v2.RateLimitDescription
+	for _, detail := range st.Details() {
+		if d, ok := detail.(*v2.RateLimitDescription); ok {
+			rl = d
+			break
+		}
+	}
+	if rl == nil {
+		t.Fatalf("no RateLimitDescription detail on a header-less 429")
+	}
+
+	// STATUS_OVERLIMIT is also what flags the failure as rate limiting in
+	// baton-sdk pkg/metrics/instrumentor.go.
+	if rl.GetStatus() != v2.RateLimitDescription_STATUS_OVERLIMIT {
+		t.Errorf("status = %v, want STATUS_OVERLIMIT even with no headers", rl.GetStatus())
+	}
+	// remaining <= 0 and a future ResetAt are jointly what make the retryer
+	// take the rate-limit branch instead of linear backoff.
+	if rl.GetRemaining() > 0 {
+		t.Errorf("remaining = %d, want <= 0 so the retryer waits until reset", rl.GetRemaining())
+	}
+	if wait := time.Until(rl.GetResetAt().AsTime()); wait < 45*time.Second || wait > 65*time.Second {
+		t.Errorf("ResetAt is %v out, want the synthesized ~60s fallback", wait)
 	}
 }

@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"github.com/tomnomnom/linkheader"
 	"go.uber.org/zap"
@@ -105,7 +106,7 @@ type ItemOptionNewResponse = ListResponse[ItemOptionNew]
 type QuestionChoiceResponse = ListResponse[QuestionChoice]
 
 type Client struct {
-	httpClient          *http.Client
+	httpClient          *uhttp.BaseHttpClient
 	auth                string
 	deployment          string
 	baseURL             string
@@ -121,7 +122,7 @@ type Client struct {
 // https://developer.servicenow.com/dev.do#!/reference/api/yokohama/rest/c_TableAPI?navFilter=table .
 
 func NewClient(
-	httpClient *http.Client,
+	httpClient *uhttp.BaseHttpClient,
 	auth string,
 	deployment string,
 	ticketSchemaFilters map[string]string,
@@ -131,12 +132,30 @@ func NewClient(
 ) (*Client, error) {
 	var baseURL string
 	if baseURLOverride != "" {
+		// apiURL splices the override in as a URL prefix, so it has to be an
+		// absolute URL. url.Parse on its own accepts nearly any string, so the
+		// scheme/host check is what actually catches a misconfigured flag.
+		parsed, err := url.Parse(baseURLOverride)
+		if err != nil {
+			return nil, fmt.Errorf("invalid base URL %q: %w", baseURLOverride, err)
+		}
+		if parsed.Scheme == "" || parsed.Host == "" {
+			return nil, fmt.Errorf("invalid base URL %q: must include a scheme and host, e.g. https://example.service-now.com", baseURLOverride)
+		}
 		baseURL = baseURLOverride
 	} else {
 		var err error
 		baseURL, err = GenerateURL(InstanceURLTemplate, map[string]string{"Deployment": deployment})
 		if err != nil {
 			return nil, err
+		}
+		// Unlike the override, this one is a bare host (see
+		// InstanceURLTemplate) -- ticket.go composes it as
+		// url.URL{Scheme: "https", Host: baseURL}. Validate it as a host so a
+		// malformed deployment fails at startup instead of yielding a broken
+		// request URL mid-sync.
+		if parsed, err := url.Parse("https://" + baseURL); err != nil || parsed.Host != baseURL {
+			return nil, fmt.Errorf("invalid deployment %q: produced unusable instance host %q", deployment, baseURL)
 		}
 	}
 	return &Client{
@@ -171,19 +190,20 @@ func (c *Client) apiURL(pattern string, args ...any) string {
 // next seek token from the response. Uses c.getKeyset, not c.get: keyset
 // callers compute their own token via nextKeysetToken and don't need
 // doRequest's legacy Link-header token.
-func getKeysetPage[T any](ctx context.Context, c *Client, url string, reqOpts []ReqOpt, idFn func(T) string) ([]T, string, error) {
+func getKeysetPage[T any](ctx context.Context, c *Client, url string, reqOpts []ReqOpt, idFn func(T) string) ([]T, string, annotations.Annotations, error) {
 	var resp ListResponse[T]
-	if err := c.getKeyset(ctx, url, &resp, reqOpts...); err != nil {
-		return nil, "", err
+	annos, err := c.getKeyset(ctx, url, &resp, reqOpts...)
+	if err != nil {
+		return nil, "", annos, err
 	}
-	return resp.Result, nextKeysetToken(resp.Result, idFn), nil
+	return resp.Result, nextKeysetToken(resp.Result, idFn), annos, nil
 }
 
 // Table sys_user (Users). GetUsers always enumerates -- there's no
 // per-user provisioning variant -- so the domain filter and its page-size
 // cap (domainFilteredPageSize) always apply when AllowedDomains is
 // configured.
-func (c *Client) GetUsers(ctx context.Context, paginationVars KeysetPaginationVars) ([]User, string, error) {
+func (c *Client) GetUsers(ctx context.Context, paginationVars KeysetPaginationVars) ([]User, string, annotations.Annotations, error) {
 	paginationVars = cappedForDomainFilter("", c.AllowedDomains, paginationVars)
 	reqOpts := buildKeysetReqOptions(prepareUserFilters(c.AllowedDomains, c.CustomUserFields), &paginationVars)
 
@@ -193,7 +213,7 @@ func (c *Client) GetUsers(ctx context.Context, paginationVars KeysetPaginationVa
 func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 	var userResponse UserResponse
 
-	_, err := c.get(
+	_, _, err := c.get(
 		ctx,
 		c.apiURL(UserBaseUrl, c.deployment, userId),
 		&userResponse,
@@ -208,7 +228,7 @@ func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 }
 
 // Table sys_user_group (Groups).
-func (c *Client) GetGroups(ctx context.Context, paginationVars KeysetPaginationVars, groupIDs []string) ([]Group, string, error) {
+func (c *Client) GetGroups(ctx context.Context, paginationVars KeysetPaginationVars, groupIDs []string) ([]Group, string, annotations.Annotations, error) {
 	reqOpts := buildKeysetReqOptions(prepareGroupFilters(groupIDs), &paginationVars)
 
 	return getKeysetPage(ctx, c, c.apiURL(GroupsBaseUrl, c.deployment), reqOpts, func(g Group) string { return g.Id })
@@ -217,7 +237,7 @@ func (c *Client) GetGroups(ctx context.Context, paginationVars KeysetPaginationV
 func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
 	var groupResponse GroupResponse
 
-	_, err := c.get(
+	_, _, err := c.get(
 		ctx,
 		c.apiURL(GroupBaseUrl, c.deployment, groupId),
 		&groupResponse,
@@ -234,7 +254,7 @@ func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
 // Table sys_user_grmember (Group Members). When userId is empty
 // (enumeration), results are scoped to allowed-domains via user.email and
 // the page size is capped (see domainFilteredPageSize).
-func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId string, paginationVars KeysetPaginationVars) ([]GroupMember, string, error) {
+func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId string, paginationVars KeysetPaginationVars) ([]GroupMember, string, annotations.Annotations, error) {
 	paginationVars = cappedForDomainFilter(userId, c.AllowedDomains, paginationVars)
 	reqOpts := buildKeysetReqOptions(prepareUserToGroupFilter(userId, groupId, c.AllowedDomains), &paginationVars)
 
@@ -260,7 +280,7 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, id string) error {
 }
 
 // Table sys_user_role (Roles).
-func (c *Client) GetRoles(ctx context.Context, paginationVars KeysetPaginationVars) ([]Role, string, error) {
+func (c *Client) GetRoles(ctx context.Context, paginationVars KeysetPaginationVars) ([]Role, string, annotations.Annotations, error) {
 	reqOpts := buildKeysetReqOptions(prepareRoleFilters(), &paginationVars)
 
 	return getKeysetPage(ctx, c, c.apiURL(RolesBaseUrl, c.deployment), reqOpts, func(r Role) string { return r.Id })
@@ -269,7 +289,7 @@ func (c *Client) GetRoles(ctx context.Context, paginationVars KeysetPaginationVa
 // Table sys_user_has_role (User to Role). When userId is empty
 // (enumeration), results are scoped to allowed-domains via user.email and
 // the page size is capped (see domainFilteredPageSize).
-func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string, paginationVars KeysetPaginationVars) ([]UserToRole, string, error) {
+func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string, paginationVars KeysetPaginationVars) ([]UserToRole, string, annotations.Annotations, error) {
 	paginationVars = cappedForDomainFilter(userId, c.AllowedDomains, paginationVars)
 	reqOpts := buildKeysetReqOptions(prepareUserToRoleFilter(userId, roleId, c.AllowedDomains), &paginationVars)
 
@@ -296,7 +316,7 @@ func (c *Client) RevokeRoleFromUser(ctx context.Context, id string) error {
 
 // Table sys_group_has_role (Group to Role). No domain filter -- groups
 // don't have an email to scope by.
-func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId string, paginationVars KeysetPaginationVars) ([]GroupToRole, string, error) {
+func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId string, paginationVars KeysetPaginationVars) ([]GroupToRole, string, annotations.Annotations, error) {
 	reqOpts := buildKeysetReqOptions(prepareGroupToRoleFilter(groupId, roleId), &paginationVars)
 
 	return getKeysetPage(ctx, c, c.apiURL(GroupRolesBaseUrl, c.deployment), reqOpts, func(r GroupToRole) string { return r.Id })
@@ -320,7 +340,7 @@ func (c *Client) RevokeRoleFromGroup(ctx context.Context, id string) error {
 	)
 }
 
-func (c *Client) get(ctx context.Context, urlAddress string, resourceResponse interface{}, reqOptions ...ReqOpt) (string, error) {
+func (c *Client) get(ctx context.Context, urlAddress string, resourceResponse interface{}, reqOptions ...ReqOpt) (string, annotations.Annotations, error) {
 	return c.doRequestWithRetry(
 		ctx,
 		urlAddress,
@@ -333,7 +353,7 @@ func (c *Client) get(ctx context.Context, urlAddress string, resourceResponse in
 
 // getKeyset is like get but for keyset-paginated callers: it never computes
 // the legacy Link-header/X-Total-Count token, so it can't fail because of it.
-func (c *Client) getKeyset(ctx context.Context, urlAddress string, resourceResponse interface{}, reqOptions ...ReqOpt) error {
+func (c *Client) getKeyset(ctx context.Context, urlAddress string, resourceResponse interface{}, reqOptions ...ReqOpt) (annotations.Annotations, error) {
 	return c.doRequestWithRetryKeyset(
 		ctx,
 		urlAddress,
@@ -351,7 +371,7 @@ func (c *Client) post(
 	data interface{},
 	requestOptions ...ReqOpt,
 ) error {
-	_, err := c.doRequestWithRetry(
+	_, _, err := c.doRequestWithRetry(
 		ctx,
 		urlAddress,
 		http.MethodPost,
@@ -370,7 +390,7 @@ func (c *Client) patch(
 	data interface{},
 	requestOptions ...ReqOpt,
 ) error {
-	_, err := c.doRequestWithRetry(
+	_, _, err := c.doRequestWithRetry(
 		ctx,
 		urlAddress,
 		http.MethodPatch,
@@ -388,7 +408,7 @@ func (c *Client) delete(
 	resourceResponse interface{},
 	reqOptions ...ReqOpt,
 ) error {
-	_, err := c.doRequestWithRetry(
+	_, _, err := c.doRequestWithRetry(
 		ctx,
 		urlAddress,
 		http.MethodDelete,
@@ -400,66 +420,43 @@ func (c *Client) delete(
 	return err
 }
 
-func handleStatusCode(statusCode int) codes.Code {
-	switch statusCode {
-	case http.StatusRequestTimeout:
-		return codes.DeadlineExceeded
-	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-		return codes.Unavailable
-	case http.StatusNotFound:
-		return codes.NotFound
-	case http.StatusUnauthorized:
-		return codes.Unauthenticated
-	case http.StatusForbidden:
-		return codes.PermissionDenied
-	case http.StatusConflict:
-		return codes.AlreadyExists
-	case http.StatusNotImplemented:
-		return codes.Unimplemented
-	}
-
-	if statusCode >= 500 && statusCode <= 599 {
-		return codes.Unavailable
-	}
-
-	if statusCode < 200 || statusCode >= 300 {
-		return codes.Unknown
-	}
-
-	return codes.OK
-}
-
 // doRequest performs the request, decodes a successful JSON body into
 // resourceResponse, and returns the legacy Link-header/X-Total-Count
 // offset-pagination token used by Service Catalog/ticketing callers. Keyset
 // callers use doRequestKeyset instead.
-func (c *Client) doRequest(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) (string, error) {
-	header, err := c.doHTTPRequest(ctx, urlAddress, method, data, resourceResponse, reqOptions...)
+func (c *Client) doRequest(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) (string, annotations.Annotations, error) {
+	header, annos, err := c.doHTTPRequest(ctx, urlAddress, method, data, resourceResponse, reqOptions...)
 	if err != nil {
-		return "", err
+		return "", annos, err
 	}
-	return legacyOffsetToken(header)
+	token, err := legacyOffsetToken(header)
+	return token, annos, err
 }
 
 // doRequestKeyset is doRequest without the legacy Link-header/X-Total-Count
 // token computation. Keyset callers derive their own token from the decoded
 // body (nextKeysetToken), so a malformed Link header or non-numeric
 // sysparm_offset must not discard an otherwise successfully decoded page.
-func (c *Client) doRequestKeyset(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) error {
-	_, err := c.doHTTPRequest(ctx, urlAddress, method, data, resourceResponse, reqOptions...)
-	return err
+func (c *Client) doRequestKeyset(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) (annotations.Annotations, error) {
+	_, annos, err := c.doHTTPRequest(ctx, urlAddress, method, data, resourceResponse, reqOptions...)
+	return annos, err
 }
 
-// doHTTPRequest sends the request and, for non-DELETE methods, decodes a
-// successful JSON body into resourceResponse. Returns only the response
-// headers, for callers that need to read pagination headers afterward.
-func (c *Client) doHTTPRequest(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) (http.Header, error) {
+// doHTTPRequest sends the request through uhttp and, for non-DELETE methods,
+// decodes a successful JSON body into resourceResponse. Returns the response
+// headers (for callers that read pagination headers afterward) and the
+// rate-limit annotations extracted from the response.
+//
+// uhttp.BaseHttpClient.Do owns status-to-gRPC-code mapping
+// (uhttp.GrpcCodeFromHTTPStatus) and already attaches the rate-limit detail
+// to the error it returns, so there is no connector-local status table.
+func (c *Client) doHTTPRequest(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) (http.Header, annotations.Annotations, error) {
 	var body io.Reader
 
 	if data != nil {
 		jsonBody, err := json.Marshal(data)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		body = bytes.NewBuffer(jsonBody)
@@ -467,7 +464,7 @@ func (c *Client) doHTTPRequest(ctx context.Context, urlAddress string, method st
 
 	req, err := http.NewRequestWithContext(ctx, method, urlAddress, body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Set default value
@@ -476,6 +473,11 @@ func (c *Client) doHTTPRequest(ctx context.Context, urlAddress string, method st
 	req.Header.Set("Authorization", c.auth)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	// uhttp caches GET 200s in memory for an hour by default
+	// (uhttp.DefaultCacheConfig). Identity and membership data must be read
+	// fresh on every sync -- a cached page would resurface deleted grants,
+	// so opt out rather than inherit the default.
+	req.Header.Set("Cache-Control", "no-cache")
 	if method == http.MethodPost || method == http.MethodPatch {
 		req.Header.Set("X-no-response-body", "true")
 	}
@@ -486,30 +488,40 @@ func (c *Client) doHTTPRequest(ctx context.Context, urlAddress string, method st
 
 	req.URL.RawQuery = req.URL.Query().Encode()
 
-	rawResponse, err := c.httpClient.Do(req)
-	if rawResponse != nil && rawResponse.Body != nil {
+	// Rate-limit data is captured for every response, success or failure.
+	// The success path is the one that matters: it lets the SDK's limiter
+	// pace upcoming requests and avoid the next 429, rather than only
+	// reacting once one has already been returned.
+	var rlData v2.RateLimitDescription
+	rawResponse, err := c.httpClient.Do(req, uhttp.WithRatelimitData(&rlData))
+	if rawResponse != nil {
+		// uhttp has already drained and closed the network body, swapping in
+		// an in-memory buffer, so this close is a no-op today. Kept nil-guarded
+		// and unconditional so the error path below can still read the body and
+		// the handling stays correct if uhttp's buffering ever changes.
 		defer rawResponse.Body.Close()
 	}
+	annos := annotations.Annotations{}
+	annos.WithRateLimiting(&rlData)
+
 	if err != nil {
-		return nil, err
-	}
-
-	if rawResponse.StatusCode < 0 || rawResponse.StatusCode > math.MaxUint32 {
-		return nil, errors.New("status code is out of range for uint32")
-	}
-
-	if rawResponse.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(rawResponse.Body)
-		return nil, status.Errorf(handleStatusCode(rawResponse.StatusCode), "baton-servicenow: request failed with status %d: %s", rawResponse.StatusCode, string(respBody))
+		if rawResponse != nil && rawResponse.StatusCode >= 300 {
+			// Best-effort read: the body only enriches the message, so a
+			// read failure must not mask the status the caller needs. uhttp
+			// has already replaced Body with a re-readable buffer.
+			respBody, _ := io.ReadAll(rawResponse.Body)
+			return nil, annos, fmt.Errorf("request failed with status %d: %s: %w", rawResponse.StatusCode, string(respBody), err)
+		}
+		return nil, annos, err
 	}
 
 	if method != http.MethodDelete {
 		if err := json.NewDecoder(rawResponse.Body).Decode(&resourceResponse); err != nil {
-			return nil, err
+			return nil, annos, fmt.Errorf("decode %s response: %w", method, err)
 		}
 	}
 
-	return rawResponse.Header, nil
+	return rawResponse.Header, annos, nil
 }
 
 // legacyOffsetToken computes the Service Catalog/ticketing offset-pagination
@@ -552,8 +564,8 @@ const (
 
 // doRequestWithRetry wraps doRequest with a small retry loop for transient 401 responses.
 // On each 401 it logs the ServiceNow error body and waits an increasing delay before retrying.
-func (c *Client) doRequestWithRetry(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) (string, error) {
-	return withAuthRetry(ctx, urlAddress, method, func() (string, error) {
+func (c *Client) doRequestWithRetry(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) (string, annotations.Annotations, error) {
+	return withAuthRetry(ctx, urlAddress, method, func() (string, annotations.Annotations, error) {
 		return c.doRequest(ctx, urlAddress, method, data, resourceResponse, reqOptions...)
 	})
 }
@@ -561,20 +573,25 @@ func (c *Client) doRequestWithRetry(ctx context.Context, urlAddress string, meth
 // doRequestWithRetryKeyset is doRequestWithRetry for keyset callers, routed
 // through doRequestKeyset instead of doRequest so a legacy-pagination-header
 // hiccup can't fail an otherwise successfully decoded page.
-func (c *Client) doRequestWithRetryKeyset(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) error {
-	_, err := withAuthRetry(ctx, urlAddress, method, func() (string, error) {
-		return "", c.doRequestKeyset(ctx, urlAddress, method, data, resourceResponse, reqOptions...)
+func (c *Client) doRequestWithRetryKeyset(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) (annotations.Annotations, error) {
+	_, annos, err := withAuthRetry(ctx, urlAddress, method, func() (string, annotations.Annotations, error) {
+		a, err := c.doRequestKeyset(ctx, urlAddress, method, data, resourceResponse, reqOptions...)
+		return "", a, err
 	})
-	return err
+	return annos, err
 }
 
 // withAuthRetry retries attempt on transient 401 responses, logging the
 // retry/backoff around it. attempt returns whatever pagination token its
-// underlying request produces (keyset callers always pass "").
-func withAuthRetry(ctx context.Context, urlAddress string, method string, attempt func() (string, error)) (string, error) {
+// underlying request produces (keyset callers always pass "") plus the
+// rate-limit annotations, which are propagated from the final attempt --
+// including the failing one, so a caller that gives up still reports what
+// the last response said about the limit.
+func withAuthRetry(ctx context.Context, urlAddress string, method string, attempt func() (string, annotations.Annotations, error)) (string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
 	var lastErr error
+	var lastAnnos annotations.Annotations
 	for try := 1; try <= maxAuthRetries+1; try++ {
 		if try > 1 {
 			delay := time.Duration(try-1) * authRetryBaseWait
@@ -588,11 +605,12 @@ func withAuthRetry(ctx context.Context, urlAddress string, method string, attemp
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
-				return "", ctx.Err()
+				return "", lastAnnos, ctx.Err()
 			}
 		}
 
-		pageToken, err := attempt()
+		pageToken, annos, err := attempt()
+		lastAnnos = annos
 		if err == nil {
 			if try > 1 {
 				l.Debug("baton-servicenow: request succeeded after retry",
@@ -601,11 +619,11 @@ func withAuthRetry(ctx context.Context, urlAddress string, method string, attemp
 					zap.Int("attempt", try),
 				)
 			}
-			return pageToken, nil
+			return pageToken, annos, nil
 		}
 
 		if status.Code(err) != codes.Unauthenticated {
-			return "", err
+			return "", annos, err
 		}
 
 		l.Debug("baton-servicenow: received 401 unauthorized",
@@ -624,7 +642,7 @@ func withAuthRetry(ctx context.Context, urlAddress string, method string, attemp
 		zap.Int("max_attempts", maxAuthRetries+1),
 		zap.Error(lastErr),
 	)
-	return "", lastErr
+	return "", lastAnnos, lastErr
 }
 
 func (c *Client) CreateUserAccount(ctx context.Context, user any) (*User, error) {
@@ -738,7 +756,7 @@ func (c *Client) GetVariableSetLinksForItem(ctx context.Context, itemSysID strin
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, err := c.get(ctx, c.apiURL(VariableSetM2MBaseUrl, c.deployment), &resp, req...)
+	next, _, err := c.get(ctx, c.apiURL(VariableSetM2MBaseUrl, c.deployment), &resp, req...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -757,7 +775,7 @@ func (c *Client) GetVariablesBySetIDs(ctx context.Context, setIDs []string, pg P
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, err := c.get(ctx, c.apiURL(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
+	next, _, err := c.get(ctx, c.apiURL(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -776,7 +794,7 @@ func (c *Client) GetChoicesForVariables(ctx context.Context, varIDs []string, pg
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, err := c.get(ctx, c.apiURL(QuestionChoiceBaseUrl, c.deployment), &resp, req...)
+	next, _, err := c.get(ctx, c.apiURL(QuestionChoiceBaseUrl, c.deployment), &resp, req...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -793,7 +811,7 @@ func (c *Client) GetVariablesForItem(ctx context.Context, itemSysID string, pg P
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, err := c.get(ctx, c.apiURL(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
+	next, _, err := c.get(ctx, c.apiURL(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
 	if err != nil {
 		return nil, "", err
 	}

@@ -107,12 +107,12 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 		Limit: 1,
 	}
 
-	_, _, err := s.client.GetUsers(ctx, pagination)
+	_, _, annos, err := s.client.GetUsers(ctx, pagination)
 	if err != nil {
-		return nil, fmt.Errorf("baton-servicenow: current user is not able to list users: %w", err)
+		return annos, fmt.Errorf("baton-servicenow: current user is not able to list users: %w", err)
 	}
 
-	return nil, nil
+	return annos, nil
 }
 
 // New returns the ServiceNow connector.
@@ -129,7 +129,14 @@ func New(
 		return nil, err
 	}
 
-	servicenowClient, err := servicenow.NewClient(httpClient, auth, deployment, ticketSchemaFilters, allowedDomains, customUserFields, baseURL)
+	// BaseHttpClient is what makes uhttp's DoOptions (notably
+	// WithRatelimitData) available to the client layer.
+	baseHttpClient, err := uhttp.NewBaseHttpClientWithContext(ctx, httpClient)
+	if err != nil {
+		return nil, err
+	}
+
+	servicenowClient, err := servicenow.NewClient(baseHttpClient, auth, deployment, ticketSchemaFilters, allowedDomains, customUserFields, baseURL)
 	if err != nil {
 		return nil, err
 	}
