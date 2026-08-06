@@ -169,14 +169,14 @@ func (r *groupResourceType) Grant(ctx context.Context, principal *v2.Resource, e
 	}
 
 	groupId := entitlement.Resource.Id.Resource
-	groupMembers, _, _, err := r.client.GetUserToGroup(
+	groupMembers, _, annos, err := r.client.GetUserToGroup(
 		ctx,
 		principal.Id.Resource,
 		groupId,
 		servicenow.KeysetPaginationVars{Limit: 1},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("baton-servicenow: failed to get group members for %s: %w", entitlement.Id, err)
+		return annos, fmt.Errorf("baton-servicenow: failed to get group members for %s: %w", entitlement.Id, err)
 	}
 
 	// check if user is already a member of the group
@@ -187,11 +187,14 @@ func (r *groupResourceType) Grant(ctx context.Context, principal *v2.Resource, e
 			zap.String("user", principal.Id.Resource),
 		)
 
-		return annotations.New(&v2.GrantAlreadyExists{}), nil
+		// Update, not annotations.New: the latter would discard the
+		// rate-limit annotation already in the bag.
+		annos.Update(&v2.GrantAlreadyExists{})
+		return annos, nil
 	}
 
 	// grant group membership to the user
-	err = r.client.AddUserToGroup(
+	annos, err = r.client.AddUserToGroup(
 		ctx,
 		servicenow.GroupMemberPayload{
 			User:  principal.Id.Resource,
@@ -199,10 +202,10 @@ func (r *groupResourceType) Grant(ctx context.Context, principal *v2.Resource, e
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("baton-servicenow: failed to add user %s to group %s: %w", principal.Id.Resource, groupId, err)
+		return annos, fmt.Errorf("baton-servicenow: failed to add user %s to group %s: %w", principal.Id.Resource, groupId, err)
 	}
 
-	return nil, nil
+	return annos, nil
 }
 
 func (r *groupResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
@@ -220,14 +223,14 @@ func (r *groupResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annota
 	}
 
 	groupId := entitlement.Resource.Id.Resource
-	groupMembers, _, _, err := r.client.GetUserToGroup(
+	groupMembers, _, annos, err := r.client.GetUserToGroup(
 		ctx,
 		principal.Id.Resource,
 		groupId,
 		servicenow.KeysetPaginationVars{Limit: 1},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("baton-servicenow: failed to get user roles for %s: %w", grant.Principal.Id.Resource, err)
+		return annos, fmt.Errorf("baton-servicenow: failed to get user roles for %s: %w", grant.Principal.Id.Resource, err)
 	}
 
 	// check if group is empty
@@ -238,23 +241,26 @@ func (r *groupResourceType) Revoke(ctx context.Context, grant *v2.Grant) (annota
 			zap.String("user", principal.Id.Resource),
 		)
 
-		return annotations.New(&v2.GrantAlreadyRevoked{}), nil
+		// Update, not annotations.New: the latter would discard the
+		// rate-limit annotation already in the bag.
+		annos.Update(&v2.GrantAlreadyRevoked{})
+		return annos, nil
 	}
 
 	// revoke all group memberships from the user
 	for _, grpMember := range groupMembers {
-		err = r.client.RemoveUserFromGroup(
+		annos, err = r.client.RemoveUserFromGroup(
 			ctx,
 			grpMember.Id,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("baton-servicenow: failed to remove user %s from group: %w", grant.Principal.Id.Resource, err)
+			return annos, fmt.Errorf("baton-servicenow: failed to remove user %s from group: %w", grant.Principal.Id.Resource, err)
 		}
 
 		l.Debug("revoked role from user", zap.String("role", grant.Entitlement.Id))
 	}
 
-	return nil, nil
+	return annos, nil
 }
 
 func groupBuilder(client *servicenow.Client) *groupResourceType {

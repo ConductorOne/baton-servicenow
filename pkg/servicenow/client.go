@@ -210,10 +210,10 @@ func (c *Client) GetUsers(ctx context.Context, paginationVars KeysetPaginationVa
 	return getKeysetPage(ctx, c, c.apiURL(UsersBaseUrl, c.deployment), reqOpts, func(u User) string { return u.Id })
 }
 
-func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
+func (c *Client) GetUser(ctx context.Context, userId string) (*User, annotations.Annotations, error) {
 	var userResponse UserResponse
 
-	_, _, err := c.get(
+	_, annos, err := c.get(
 		ctx,
 		c.apiURL(UserBaseUrl, c.deployment, userId),
 		&userResponse,
@@ -221,10 +221,10 @@ func (c *Client) GetUser(ctx context.Context, userId string) (*User, error) {
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, annos, err
 	}
 
-	return &userResponse.Result, nil
+	return &userResponse.Result, annos, nil
 }
 
 // Table sys_user_group (Groups).
@@ -234,10 +234,10 @@ func (c *Client) GetGroups(ctx context.Context, paginationVars KeysetPaginationV
 	return getKeysetPage(ctx, c, c.apiURL(GroupsBaseUrl, c.deployment), reqOpts, func(g Group) string { return g.Id })
 }
 
-func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
+func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, annotations.Annotations, error) {
 	var groupResponse GroupResponse
 
-	_, _, err := c.get(
+	_, annos, err := c.get(
 		ctx,
 		c.apiURL(GroupBaseUrl, c.deployment, groupId),
 		&groupResponse,
@@ -245,10 +245,10 @@ func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, error) {
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, annos, err
 	}
 
-	return &groupResponse.Result, nil
+	return &groupResponse.Result, annos, nil
 }
 
 // Table sys_user_grmember (Group Members). When userId is empty
@@ -261,7 +261,7 @@ func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId stri
 	return getKeysetPage(ctx, c, c.apiURL(GroupMembersBaseUrl, c.deployment), reqOpts, func(m GroupMember) string { return m.Id })
 }
 
-func (c *Client) AddUserToGroup(ctx context.Context, record GroupMemberPayload) error {
+func (c *Client) AddUserToGroup(ctx context.Context, record GroupMemberPayload) (annotations.Annotations, error) {
 	return c.post(
 		ctx,
 		c.apiURL(GroupMembersBaseUrl, c.deployment),
@@ -271,7 +271,7 @@ func (c *Client) AddUserToGroup(ctx context.Context, record GroupMemberPayload) 
 	)
 }
 
-func (c *Client) RemoveUserFromGroup(ctx context.Context, id string) error {
+func (c *Client) RemoveUserFromGroup(ctx context.Context, id string) (annotations.Annotations, error) {
 	return c.delete(
 		ctx,
 		c.apiURL(GroupMemberDetailBaseUrl, c.deployment, id),
@@ -296,7 +296,7 @@ func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string
 	return getKeysetPage(ctx, c, c.apiURL(UserRolesBaseUrl, c.deployment), reqOpts, func(r UserToRole) string { return r.Id })
 }
 
-func (c *Client) GrantRoleToUser(ctx context.Context, record UserToRolePayload) error {
+func (c *Client) GrantRoleToUser(ctx context.Context, record UserToRolePayload) (annotations.Annotations, error) {
 	return c.post(
 		ctx,
 		c.apiURL(UserRolesBaseUrl, c.deployment),
@@ -306,7 +306,7 @@ func (c *Client) GrantRoleToUser(ctx context.Context, record UserToRolePayload) 
 	)
 }
 
-func (c *Client) RevokeRoleFromUser(ctx context.Context, id string) error {
+func (c *Client) RevokeRoleFromUser(ctx context.Context, id string) (annotations.Annotations, error) {
 	return c.delete(
 		ctx,
 		c.apiURL(UserRoleDetailBaseUrl, c.deployment, id),
@@ -322,7 +322,7 @@ func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId stri
 	return getKeysetPage(ctx, c, c.apiURL(GroupRolesBaseUrl, c.deployment), reqOpts, func(r GroupToRole) string { return r.Id })
 }
 
-func (c *Client) GrantRoleToGroup(ctx context.Context, record GroupToRolePayload) error {
+func (c *Client) GrantRoleToGroup(ctx context.Context, record GroupToRolePayload) (annotations.Annotations, error) {
 	return c.post(
 		ctx,
 		c.apiURL(GroupRolesBaseUrl, c.deployment),
@@ -332,7 +332,7 @@ func (c *Client) GrantRoleToGroup(ctx context.Context, record GroupToRolePayload
 	)
 }
 
-func (c *Client) RevokeRoleFromGroup(ctx context.Context, id string) error {
+func (c *Client) RevokeRoleFromGroup(ctx context.Context, id string) (annotations.Annotations, error) {
 	return c.delete(
 		ctx,
 		c.apiURL(GroupRoleDetailBaseUrl, c.deployment, id),
@@ -370,8 +370,8 @@ func (c *Client) post(
 	resourceResponse interface{},
 	data interface{},
 	requestOptions ...ReqOpt,
-) error {
-	_, _, err := c.doRequestWithRetry(
+) (annotations.Annotations, error) {
+	_, annos, err := c.doRequestWithRetry(
 		ctx,
 		urlAddress,
 		http.MethodPost,
@@ -380,7 +380,7 @@ func (c *Client) post(
 		requestOptions...,
 	)
 
-	return err
+	return annos, err
 }
 
 func (c *Client) patch(
@@ -389,8 +389,8 @@ func (c *Client) patch(
 	resourceResponse interface{},
 	data interface{},
 	requestOptions ...ReqOpt,
-) error {
-	_, _, err := c.doRequestWithRetry(
+) (annotations.Annotations, error) {
+	_, annos, err := c.doRequestWithRetry(
 		ctx,
 		urlAddress,
 		http.MethodPatch,
@@ -399,7 +399,7 @@ func (c *Client) patch(
 		requestOptions...,
 	)
 
-	return err
+	return annos, err
 }
 
 func (c *Client) delete(
@@ -407,8 +407,8 @@ func (c *Client) delete(
 	urlAddress string,
 	resourceResponse interface{},
 	reqOptions ...ReqOpt,
-) error {
-	_, _, err := c.doRequestWithRetry(
+) (annotations.Annotations, error) {
+	_, annos, err := c.doRequestWithRetry(
 		ctx,
 		urlAddress,
 		http.MethodDelete,
@@ -417,7 +417,7 @@ func (c *Client) delete(
 		reqOptions...,
 	)
 
-	return err
+	return annos, err
 }
 
 // doRequest performs the request, decodes a successful JSON body into
@@ -505,14 +505,31 @@ func (c *Client) doHTTPRequest(ctx context.Context, urlAddress string, method st
 	annos.WithRateLimiting(&rlData)
 
 	if err != nil {
-		if rawResponse != nil && rawResponse.StatusCode >= 300 {
+		switch {
+		case rawResponse == nil:
+			// Transport-level failure -- no response to salvage.
+			return nil, annos, err
+
+		case rawResponse.StatusCode >= 300:
 			// Best-effort read: the body only enriches the message, so a
 			// read failure must not mask the status the caller needs. uhttp
 			// has already replaced Body with a re-readable buffer.
 			respBody, _ := io.ReadAll(rawResponse.Body)
 			return nil, annos, fmt.Errorf("request failed with status %d: %s: %w", rawResponse.StatusCode, string(respBody), err)
+
+		default:
+			// A 2xx with a non-nil error means a DoOption failed, not the
+			// request. The only option we pass is rate-limit extraction, which
+			// is advisory: ExtractRateLimitData runs strconv.ParseInt over the
+			// limit/remaining headers, so a non-numeric value ("unlimited")
+			// errors out. Failing a successfully fetched page over a header we
+			// only use for pacing would be strictly worse than ignoring it.
+			ctxzap.Extract(ctx).Warn(
+				"baton-servicenow: ignoring rate limit extraction failure on a successful response",
+				zap.Int("status_code", rawResponse.StatusCode),
+				zap.Error(err),
+			)
 		}
-		return nil, annos, err
 	}
 
 	if method != http.MethodDelete {
@@ -645,10 +662,10 @@ func withAuthRetry(ctx context.Context, urlAddress string, method string, attemp
 	return "", lastAnnos, lastErr
 }
 
-func (c *Client) CreateUserAccount(ctx context.Context, user any) (*User, error) {
+func (c *Client) CreateUserAccount(ctx context.Context, user any) (*User, annotations.Annotations, error) {
 	var response UserResponse
 
-	err := c.post(
+	annos, err := c.post(
 		ctx,
 		c.apiURL(UsersBaseUrl, c.deployment),
 		&response,
@@ -657,19 +674,19 @@ func (c *Client) CreateUserAccount(ctx context.Context, user any) (*User, error)
 	)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to create user in ServiceNow: %w", err)
+		return nil, annos, fmt.Errorf("failed to create user in ServiceNow: %w", err)
 	}
 
-	return &response.Result, nil
+	return &response.Result, annos, nil
 }
 
-func (c *Client) UpdateUserActiveStatus(ctx context.Context, userId string, active bool) (*User, error) {
+func (c *Client) UpdateUserActiveStatus(ctx context.Context, userId string, active bool) (*User, annotations.Annotations, error) {
 	payload := map[string]bool{
 		"active": active,
 	}
 
 	var response UserResponse
-	err := c.patch(
+	annos, err := c.patch(
 		ctx,
 		c.apiURL(UserBaseUrl, c.deployment, userId),
 		&response,
@@ -678,26 +695,26 @@ func (c *Client) UpdateUserActiveStatus(ctx context.Context, userId string, acti
 	)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to update user active status in ServiceNow: %w", err)
+		return nil, annos, fmt.Errorf("failed to update user active status in ServiceNow: %w", err)
 	}
 
-	return &response.Result, nil
+	return &response.Result, annos, nil
 }
 
 // Includes variables that come from variable sets (Table API -> item_option_new) and choices for those set variables.
-func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID string) ([]CatalogItemVariable, error) {
-	itemVars, err := c.GetCatalogItemVariables(ctx, itemSysID)
+func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID string) ([]CatalogItemVariable, annotations.Annotations, error) {
+	itemVars, annos, err := c.GetCatalogItemVariables(ctx, itemSysID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get item variables: %w", err)
+		return nil, annos, fmt.Errorf("failed to get item variables: %w", err)
 	}
 
 	// Find attached variable sets
-	links, _, err := c.GetVariableSetLinksForItem(ctx, itemSysID, PaginationVars{Limit: 200})
+	links, _, annos, err := c.GetVariableSetLinksForItem(ctx, itemSysID, PaginationVars{Limit: 200})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get variable set links: %w", err)
+		return nil, annos, fmt.Errorf("failed to get variable set links: %w", err)
 	}
 	if len(links) == 0 {
-		return itemVars, nil // nothing to add
+		return itemVars, annos, nil // nothing to add
 	}
 
 	setIDs := make([]string, 0, len(links))
@@ -706,9 +723,9 @@ func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID 
 	}
 
 	// Fetch variables that belong to those sets
-	setVars, _, err := c.GetVariablesBySetIDs(ctx, setIDs, PaginationVars{Limit: 500})
+	setVars, _, annos, err := c.GetVariablesBySetIDs(ctx, setIDs, PaginationVars{Limit: 500})
 	if err != nil {
-		return nil, fmt.Errorf("failde to get variables by set ids: %w", err)
+		return nil, annos, fmt.Errorf("failde to get variables by set ids: %w", err)
 	}
 
 	// Fetch choices for set variables (so selects have options)
@@ -716,9 +733,9 @@ func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID 
 	for _, v := range setVars {
 		varIDs = append(varIDs, v.SysID)
 	}
-	choices, _, err := c.GetChoicesForVariables(ctx, varIDs, PaginationVars{Limit: 1000})
+	choices, _, annos, err := c.GetChoicesForVariables(ctx, varIDs, PaginationVars{Limit: 1000})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get choices for set variables: %w", err)
+		return nil, annos, fmt.Errorf("failed to get choices for set variables: %w", err)
 	}
 	choicesByQ := make(map[string][]QuestionChoice, len(varIDs))
 	for _, ch := range choices {
@@ -744,10 +761,10 @@ func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID 
 		}
 	}
 
-	return out, nil
+	return out, annos, nil
 }
 
-func (c *Client) GetVariableSetLinksForItem(ctx context.Context, itemSysID string, pg PaginationVars) ([]VariableSetM2M, string, error) {
+func (c *Client) GetVariableSetLinksForItem(ctx context.Context, itemSysID string, pg PaginationVars) ([]VariableSetM2M, string, annotations.Annotations, error) {
 	var resp VariableSetM2MResponse
 	req := []ReqOpt{
 		WithQueryParam("sysparm_query", fmt.Sprintf("sc_cat_item=%s", itemSysID)),
@@ -756,16 +773,16 @@ func (c *Client) GetVariableSetLinksForItem(ctx context.Context, itemSysID strin
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, _, err := c.get(ctx, c.apiURL(VariableSetM2MBaseUrl, c.deployment), &resp, req...)
+	next, annos, err := c.get(ctx, c.apiURL(VariableSetM2MBaseUrl, c.deployment), &resp, req...)
 	if err != nil {
-		return nil, "", err
+		return nil, "", annos, err
 	}
-	return resp.Result, next, nil
+	return resp.Result, next, annos, nil
 }
 
-func (c *Client) GetVariablesBySetIDs(ctx context.Context, setIDs []string, pg PaginationVars) ([]ItemOptionNew, string, error) {
+func (c *Client) GetVariablesBySetIDs(ctx context.Context, setIDs []string, pg PaginationVars) ([]ItemOptionNew, string, annotations.Annotations, error) {
 	if len(setIDs) == 0 {
-		return nil, "", nil
+		return nil, "", nil, nil
 	}
 	var resp ItemOptionNewResponse
 	req := []ReqOpt{
@@ -775,16 +792,16 @@ func (c *Client) GetVariablesBySetIDs(ctx context.Context, setIDs []string, pg P
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, _, err := c.get(ctx, c.apiURL(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
+	next, annos, err := c.get(ctx, c.apiURL(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
 	if err != nil {
-		return nil, "", err
+		return nil, "", annos, err
 	}
-	return resp.Result, next, nil
+	return resp.Result, next, annos, nil
 }
 
-func (c *Client) GetChoicesForVariables(ctx context.Context, varIDs []string, pg PaginationVars) ([]QuestionChoice, string, error) {
+func (c *Client) GetChoicesForVariables(ctx context.Context, varIDs []string, pg PaginationVars) ([]QuestionChoice, string, annotations.Annotations, error) {
 	if len(varIDs) == 0 {
-		return nil, "", nil
+		return nil, "", nil, nil
 	}
 	var resp QuestionChoiceResponse
 	req := []ReqOpt{
@@ -794,15 +811,15 @@ func (c *Client) GetChoicesForVariables(ctx context.Context, varIDs []string, pg
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, _, err := c.get(ctx, c.apiURL(QuestionChoiceBaseUrl, c.deployment), &resp, req...)
+	next, annos, err := c.get(ctx, c.apiURL(QuestionChoiceBaseUrl, c.deployment), &resp, req...)
 	if err != nil {
-		return nil, "", err
+		return nil, "", annos, err
 	}
-	return resp.Result, next, nil
+	return resp.Result, next, annos, nil
 }
 
 // Unused but consider switching to this to get both direct catalog item variables and variables from variable sets.
-func (c *Client) GetVariablesForItem(ctx context.Context, itemSysID string, pg PaginationVars) ([]ItemOptionNew, string, error) {
+func (c *Client) GetVariablesForItem(ctx context.Context, itemSysID string, pg PaginationVars) ([]ItemOptionNew, string, annotations.Annotations, error) {
 	var resp ItemOptionNewResponse
 	req := []ReqOpt{
 		WithQueryParam("sysparm_query", fmt.Sprintf("cat_item=%s", itemSysID)),
@@ -811,9 +828,9 @@ func (c *Client) GetVariablesForItem(ctx context.Context, itemSysID string, pg P
 	}
 	req = append(req, paginationVarsToReqOptions(&pg)...)
 
-	next, _, err := c.get(ctx, c.apiURL(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
+	next, annos, err := c.get(ctx, c.apiURL(ItemOptionNewBaseUrl, c.deployment), &resp, req...)
 	if err != nil {
-		return nil, "", err
+		return nil, "", annos, err
 	}
-	return resp.Result, next, nil
+	return resp.Result, next, annos, nil
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/uhttp"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -154,6 +155,92 @@ func TestGetUsers_CapsPageSizeWhenDomainFilterApplies(t *testing.T) {
 	want := fmt.Sprintf("%d", domainFilteredPageSize)
 	if gotLimit != want {
 		t.Errorf("sysparm_limit sent = %q, want %q (AllowedDomains configured must cap the page size)", gotLimit, want)
+	}
+}
+
+// TestNonNumericRateLimitHeaderDoesNotFailA200 is a regression guard. uhttp
+// returns (resp[200], optionError) when a DoOption fails, and the only option
+// we pass is rate-limit extraction -- which runs strconv.ParseInt over the
+// limit/remaining headers, so a non-numeric value errors. Treating that as
+// fatal discarded a successfully fetched page over a header we only use for
+// pacing. Verified against a live instance: ServiceNow's Table API sends no
+// rate-limit headers at all on a 200, so this is reachable only once an
+// instance has a rate-limit rule configured -- which is exactly when we least
+// want the sync to fall over.
+func TestNonNumericRateLimitHeaderDoesNotFailA200(t *testing.T) {
+	for _, hv := range []string{"unlimited", "n/a", ""} {
+		t.Run("limit="+hv, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if hv != "" {
+					w.Header().Set("X-RateLimit-Limit", hv)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(ListResponse[Role]{Result: []Role{{BaseResource: BaseResource{Id: "role-000"}}}}); err != nil {
+					t.Errorf("failed to encode test response: %v", err)
+				}
+			}))
+			defer server.Close()
+
+			client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, nil, nil, server.URL)
+			if err != nil {
+				t.Fatalf("unexpected error creating client: %v", err)
+			}
+
+			roles, _, _, err := client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50})
+			if err != nil {
+				t.Fatalf("an advisory rate-limit header must not fail the page: %v", err)
+			}
+			if len(roles) != 1 {
+				t.Errorf("roles len = %d, want 1 (the page must survive)", len(roles))
+			}
+		})
+	}
+}
+
+// TestWritesCarryRateLimitAnnotations covers the verbs behind provisioning.
+// post/patch/delete used to return only error, which structurally blocked every
+// grant, revoke, and account mutation from reporting rate-limit data.
+func TestWritesCarryRateLimitAnnotations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Limit", "100")
+		w.Header().Set("X-RateLimit-Remaining", "3")
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(SingleResponse[BaseResource]{Result: BaseResource{Id: "x"}}); err != nil {
+			t.Errorf("failed to encode test response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, nil, nil, server.URL)
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	cases := map[string]func() (annotations.Annotations, error){
+		"AddUserToGroup (post)": func() (annotations.Annotations, error) {
+			return client.AddUserToGroup(context.Background(), GroupMemberPayload{User: "u", Group: "g"})
+		},
+		"RemoveUserFromGroup (delete)": func() (annotations.Annotations, error) { return client.RemoveUserFromGroup(context.Background(), "id") },
+		"GrantRoleToUser (post)": func() (annotations.Annotations, error) {
+			return client.GrantRoleToUser(context.Background(), UserToRolePayload{User: "u", Role: "r"})
+		},
+		"RevokeRoleFromUser (delete)": func() (annotations.Annotations, error) { return client.RevokeRoleFromUser(context.Background(), "id") },
+	}
+
+	for name, call := range cases {
+		annos, err := call()
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", name, err)
+			continue
+		}
+		rl := &v2.RateLimitDescription{}
+		if ok, pErr := annos.Pick(rl); pErr != nil || !ok {
+			t.Errorf("%s: no RateLimitDescription annotation (ok=%v err=%v)", name, ok, pErr)
+			continue
+		}
+		if rl.GetRemaining() != 3 {
+			t.Errorf("%s: remaining = %d, want 3", name, rl.GetRemaining())
+		}
 	}
 }
 
