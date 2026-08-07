@@ -104,10 +104,10 @@ func (s *ServiceNow) enableUser(ctx context.Context, args *structpb.Struct) (*st
 
 	l.Info("enabling user", zap.String("userId", userIdStr))
 
-	updatedUser, err := s.client.UpdateUserActiveStatus(ctx, userIdStr, true)
+	updatedUser, annos, err := s.client.UpdateUserActiveStatus(ctx, userIdStr, true)
 	if err != nil {
 		l.Error("failed to enable user", zap.String("userId", userIdStr), zap.Error(err))
-		return nil, nil, fmt.Errorf("baton-servicenow: failed to enable user %s: %w", userIdStr, err)
+		return nil, annos, fmt.Errorf("baton-servicenow: failed to enable user %s: %w", userIdStr, err)
 	}
 
 	success := updatedUser.Active == "true"
@@ -120,7 +120,7 @@ func (s *ServiceNow) enableUser(ctx context.Context, args *structpb.Struct) (*st
 			"success": structpb.NewBoolValue(success),
 		},
 	}
-	return response, nil, nil
+	return response, annos, nil
 }
 
 func (s *ServiceNow) disableUser(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
@@ -150,10 +150,10 @@ func (s *ServiceNow) disableUser(ctx context.Context, args *structpb.Struct) (*s
 
 	l.Info("disabling user", zap.String("userId", userIdStr))
 
-	updatedUser, err := s.client.UpdateUserActiveStatus(ctx, userIdStr, false)
+	updatedUser, annos, err := s.client.UpdateUserActiveStatus(ctx, userIdStr, false)
 	if err != nil {
 		l.Error("failed to disable user", zap.String("userId", userIdStr), zap.Error(err))
-		return nil, nil, fmt.Errorf("baton-servicenow: failed to disable user %s: %w", userIdStr, err)
+		return nil, annos, fmt.Errorf("baton-servicenow: failed to disable user %s: %w", userIdStr, err)
 	}
 
 	success := updatedUser.Active == "false"
@@ -166,5 +166,5 @@ func (s *ServiceNow) disableUser(ctx context.Context, args *structpb.Struct) (*s
 			"success": structpb.NewBoolValue(success),
 		},
 	}
-	return response, nil, nil
+	return response, annos, nil
 }

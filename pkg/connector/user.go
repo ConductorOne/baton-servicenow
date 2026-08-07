@@ -74,7 +74,7 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		return nil, "", nil, err
 	}
 
-	users, nextPageToken, err := u.client.GetUsers(
+	users, nextPageToken, annos, err := u.client.GetUsers(
 		ctx,
 		servicenow.KeysetPaginationVars{
 			Limit:  ResourcesPageSize,
@@ -82,12 +82,12 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		},
 	)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("baton-servicenow: failed to list users: %w", err)
+		return nil, "", annos, fmt.Errorf("baton-servicenow: failed to list users: %w", err)
 	}
 
 	nextPage, err := bag.NextToken(nextPageToken)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", annos, err
 	}
 
 	var rv []*v2.Resource
@@ -96,13 +96,13 @@ func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagin
 		ur, err := userResource(&userCopy)
 
 		if err != nil {
-			return nil, "", nil, err
+			return nil, "", annos, err
 		}
 
 		rv = append(rv, ur)
 	}
 
-	return rv, nextPage, nil, nil
+	return rv, nextPage, annos, nil
 }
 
 func (u *userResourceType) Entitlements(ctx context.Context, resource *v2.Resource, token *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
@@ -171,15 +171,15 @@ func (u *userResourceType) CreateAccount(
 		"active":     "true",
 	}
 
-	createdUser, err := u.client.CreateUserAccount(ctx, user)
+	createdUser, annos, err := u.client.CreateUserAccount(ctx, user)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("baton-servicenow: failed to create user: %w", err)
+		return nil, nil, annos, fmt.Errorf("baton-servicenow: failed to create user: %w", err)
 	}
 
 	resource, err := userResource(createdUser)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("baton-servicenow: failed to create user resource: %w", err)
+		return nil, nil, annos, fmt.Errorf("baton-servicenow: failed to create user resource: %w", err)
 	}
 
-	return &v2.CreateAccountResponse_SuccessResult{Resource: resource}, nil, nil, nil
+	return &v2.CreateAccountResponse_SuccessResult{Resource: resource}, nil, annos, nil
 }
