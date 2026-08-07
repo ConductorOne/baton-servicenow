@@ -244,6 +244,39 @@ func TestWritesCarryRateLimitAnnotations(t *testing.T) {
 	}
 }
 
+// TestNonJSONResponseNamesTheActualProblem covers the shape a hibernating
+// ServiceNow PDI returns: HTTP 200 with an HTML page. Decoding that as JSON
+// produces "invalid character '<' looking for beginning of value", which sent
+// two engineers looking for a connector bug when the instance was simply
+// asleep. The error must say so.
+func TestNonJSONResponseNamesTheActualProblem(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("<!DOCTYPE html><html><body>This instance is hibernating</body></html>")); err != nil {
+			t.Errorf("failed to write test response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, nil, nil, server.URL)
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	_, _, _, err = client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50})
+	if err == nil {
+		t.Fatalf("expected an error decoding an HTML body")
+	}
+
+	msg := err.Error()
+	for _, want := range []string{"hibernating", "text/html", "status 200"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message missing %q; got: %s", want, msg)
+		}
+	}
+}
+
 // TestNewClientValidatesBaseURL covers both URL shapes the constructor
 // produces: the override is an absolute URL spliced in by apiURL, while the
 // deployment-derived value is a bare host that ticket.go composes into

@@ -534,6 +534,18 @@ func (c *Client) doHTTPRequest(ctx context.Context, urlAddress string, method st
 
 	if method != http.MethodDelete {
 		if err := json.NewDecoder(rawResponse.Body).Decode(&resourceResponse); err != nil {
+			// A hibernating ServiceNow instance answers 200 with an HTML
+			// page, and maintenance pages / WAF interstitials in front of a
+			// live one do the same. Decoding that as JSON yields "invalid
+			// character '<'", which tells an operator nothing about what is
+			// actually wrong. Only the message changes here -- the decode
+			// still has to fail first, so no working response is affected.
+			if contentType := rawResponse.Header.Get("Content-Type"); !uhttp.IsJSONContentType(contentType) {
+				return nil, annos, fmt.Errorf(
+					"expected a JSON response but got status %d with content-type %q -- the ServiceNow instance may be hibernating or behind an error page: %w",
+					rawResponse.StatusCode, contentType, err,
+				)
+			}
 			return nil, annos, fmt.Errorf("decode %s response: %w", method, err)
 		}
 	}
