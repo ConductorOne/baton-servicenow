@@ -69,17 +69,14 @@ func userResource(user *servicenow.User) (*v2.Resource, error) {
 }
 
 func (u *userResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	bag, lastID, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeUser.Id})
+	bag, page, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeUser.Id})
 	if err != nil {
 		return nil, "", nil, err
 	}
 
 	users, nextPageToken, annos, err := u.client.GetUsers(
 		ctx,
-		servicenow.KeysetPaginationVars{
-			Limit:  ResourcesPageSize,
-			LastID: lastID,
-		},
+		page,
 	)
 	if err != nil {
 		return nil, "", annos, fmt.Errorf("baton-servicenow: failed to list users: %w", err)

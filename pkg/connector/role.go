@@ -49,17 +49,14 @@ func roleResource(role *servicenow.Role) (*v2.Resource, error) {
 }
 
 func (r *roleResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	bag, lastID, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeRole.Id})
+	bag, page, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeRole.Id})
 	if err != nil {
 		return nil, "", nil, err
 	}
 
 	roles, nextPageToken, annos, err := r.client.GetRoles(
 		ctx,
-		servicenow.KeysetPaginationVars{
-			Limit:  ResourcesPageSize,
-			LastID: lastID,
-		},
+		page,
 	)
 	if err != nil {
 		return nil, "", annos, fmt.Errorf("baton-servicenow: failed to list roles: %w", err)
@@ -104,7 +101,7 @@ func (r *roleResourceType) Entitlements(ctx context.Context, resource *v2.Resour
 }
 
 func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	bag, lastID, err := parsePageToken(pt.Token, resource.Id)
+	bag, page, err := parsePageToken(pt.Token, resource.Id)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -129,10 +126,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			ctx,
 			"", // all users, domain-filtered when allowed-domains is set
 			resource.Id.Resource,
-			servicenow.KeysetPaginationVars{
-				Limit:  ResourcesPageSize,
-				LastID: lastID,
-			},
+			page,
 		)
 		annos = userAnnos
 		if err != nil {
@@ -164,10 +158,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			ctx,
 			"", // all groups
 			resource.Id.Resource,
-			servicenow.KeysetPaginationVars{
-				Limit:  ResourcesPageSize,
-				LastID: lastID,
-			},
+			page,
 		)
 		annos = groupAnnos
 		if err != nil {

@@ -3,6 +3,7 @@ package servicenow
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -91,13 +92,6 @@ func WithIncludeExternalRefLink() ReqOpt {
 	return WithQueryParam("sysparm_exclude_reference_link", "false")
 }
 
-// WithNoCount skips ServiceNow's X-Total-Count computation (a COUNT(*) over
-// the whole filtered set). Keyset termination doesn't need it -- it only
-// checks for an empty page (see nextKeysetToken).
-func WithNoCount() ReqOpt {
-	return WithQueryParam("sysparm_no_count", "true")
-}
-
 type PaginationVars struct {
 	Limit  int
 	Offset int
@@ -109,8 +103,11 @@ type PaginationVars struct {
 // deep-offset requests degrade on large tables. Service Catalog/ticketing
 // endpoints keep using PaginationVars/WithOffset.
 type KeysetPaginationVars struct {
-	Limit  int
-	LastID string
+	Limit  int    // page size, and the most rows a call may return
+	LastID string // seek cursor
+	// Offset is non-zero only while stepping past an ACL-emptied window, where
+	// the cursor cannot advance on its own.
+	Offset int
 }
 
 // domainFilteredPageSize caps the page size for enumeration calls that add
@@ -130,13 +127,14 @@ func cappedForDomainFilter(userId string, domains []string, vars KeysetPaginatio
 }
 
 // keysetPaginationVarsToReqOptions sets sysparm_limit, appends the sys_id
-// seek condition onto sysparm_query (must run after filterToReqOptions),
-// and disables X-Total-Count via WithNoCount.
+// seek condition onto sysparm_query (must run after filterToReqOptions), and
+// carries the skip offset. X-Total-Count is left on: nextSkipToken needs it to
+// tell an ACL-emptied window from the end of the table.
 func keysetPaginationVarsToReqOptions(vars *KeysetPaginationVars) []ReqOpt {
 	reqOpts := make([]ReqOpt, 0, 3)
 	reqOpts = append(reqOpts, WithPageLimit(vars.Limit))
 	reqOpts = append(reqOpts, WithQueryAppend(keysetCursorFragment(vars.LastID)))
-	reqOpts = append(reqOpts, WithNoCount())
+	reqOpts = append(reqOpts, WithOffset(vars.Offset))
 	return reqOpts
 }
 
@@ -167,6 +165,43 @@ func nextKeysetToken[T any](items []T, idFn func(T) string) string {
 		return ""
 	}
 	return idFn(items[len(items)-1])
+}
+
+// Matches "cursor" or "cursor:offset". The cursor is optional: the first window
+// of a listing can be the emptied one, leaving nothing to seek from.
+var keysetTokenPattern = regexp.MustCompile(`^([0-9a-fA-F]{32})?(?::([0-9]{1,18}))?$`)
+
+// EncodeKeysetToken is the only producer of the page token format. A bare cursor
+// is the common shape: nothing to skip.
+func EncodeKeysetToken(lastID string, offset int) string {
+	if offset == 0 {
+		return lastID
+	}
+	return fmt.Sprintf("%s:%d", lastID, offset)
+}
+
+// ParseKeysetToken is the only consumer of it, returning the cursor and the skip
+// offset.
+func ParseKeysetToken(token string) (string, int, error) {
+	if token == "" {
+		return "", 0, nil
+	}
+
+	match := keysetTokenPattern.FindStringSubmatch(token)
+	if match == nil {
+		return "", 0, fmt.Errorf("malformed page token %q", token)
+	}
+
+	var offset int
+	if match[2] != "" {
+		parsed, err := strconv.Atoi(match[2])
+		if err != nil {
+			return "", 0, fmt.Errorf("malformed offset in page token %q: %w", token, err)
+		}
+		offset = parsed
+	}
+
+	return strings.ToLower(match[1]), offset, nil
 }
 
 type FilterVars struct {

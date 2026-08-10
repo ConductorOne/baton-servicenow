@@ -31,8 +31,8 @@ func TestBuildDomainQuery(t *testing.T) {
 		{
 			name:    "multiple domains are OR'd",
 			field:   "user.email",
-			domains: []string{"draftkings.com", "dk.com"},
-			want:    "user.emailENDSWITH@draftkings.com^ORuser.emailENDSWITH@dk.com",
+			domains: []string{"example.com", "dk.com"},
+			want:    "user.emailENDSWITH@example.com^ORuser.emailENDSWITH@dk.com",
 		},
 		{
 			name:    "single domain",
@@ -55,8 +55,8 @@ func TestBuildDomainQuery(t *testing.T) {
 		{
 			name:    "domains are trimmed and lowercased",
 			field:   "email",
-			domains: []string{" DraftKings.com "},
-			want:    "emailENDSWITH@draftkings.com",
+			domains: []string{" Example.com "},
+			want:    "emailENDSWITH@example.com",
 		},
 	}
 
@@ -92,21 +92,21 @@ func TestPrepareUserToRoleFilter(t *testing.T) {
 			name:    "enumeration (Grants) with allowed domains filters by domain",
 			userId:  "",
 			roleId:  "ROLE1",
-			domains: []string{"draftkings.com"},
-			want:    "role=ROLE1^user.emailENDSWITH@draftkings.com",
+			domains: []string{"example.com"},
+			want:    "role=ROLE1^user.emailENDSWITH@example.com",
 		},
 		{
 			name:    "enumeration with multiple allowed domains ORs the domain conditions, ANDed with role=",
 			userId:  "",
 			roleId:  "ROLE1",
-			domains: []string{"draftkings.com", "dk.com"},
-			want:    "role=ROLE1^user.emailENDSWITH@draftkings.com^ORuser.emailENDSWITH@dk.com",
+			domains: []string{"example.com", "dk.com"},
+			want:    "role=ROLE1^user.emailENDSWITH@example.com^ORuser.emailENDSWITH@dk.com",
 		},
 		{
 			name:    "provisioning check for a specific user does not filter by domain",
 			userId:  "USER1",
 			roleId:  "ROLE1",
-			domains: []string{"draftkings.com"},
+			domains: []string{"example.com"},
 			want:    "user=USER1^role=ROLE1",
 		},
 		{
@@ -140,21 +140,21 @@ func TestPrepareUserToGroupFilter(t *testing.T) {
 			name:    "enumeration (Grants) with allowed domains filters by domain",
 			userId:  "",
 			groupId: "GROUP1",
-			domains: []string{"draftkings.com"},
-			want:    "group=GROUP1^user.emailENDSWITH@draftkings.com",
+			domains: []string{"example.com"},
+			want:    "group=GROUP1^user.emailENDSWITH@example.com",
 		},
 		{
 			name:    "enumeration with multiple allowed domains ORs the domain conditions, ANDed with group=",
 			userId:  "",
 			groupId: "GROUP1",
-			domains: []string{"draftkings.com", "dk.com"},
-			want:    "group=GROUP1^user.emailENDSWITH@draftkings.com^ORuser.emailENDSWITH@dk.com",
+			domains: []string{"example.com", "dk.com"},
+			want:    "group=GROUP1^user.emailENDSWITH@example.com^ORuser.emailENDSWITH@dk.com",
 		},
 		{
 			name:    "provisioning check for a specific user does not filter by domain",
 			userId:  "USER1",
 			groupId: "GROUP1",
-			domains: []string{"draftkings.com"},
+			domains: []string{"example.com"},
 			want:    "user=USER1^group=GROUP1",
 		},
 		{
@@ -209,26 +209,19 @@ func TestKeysetCursorFragment(t *testing.T) {
 // options appended after in the same ReqOpt slice. The seek condition must
 // AND onto the existing filter query rather than clobbering it.
 func TestKeysetPaginationVarsToReqOptions_ComposesWithFilterQuery(t *testing.T) {
-	filterOpts := filterToReqOptions(prepareUserToRoleFilter("", "ROLE1", []string{"draftkings.com"}))
+	filterOpts := filterToReqOptions(prepareUserToRoleFilter("", "ROLE1", []string{"example.com"}))
 	paginationOpts := keysetPaginationVarsToReqOptions(&KeysetPaginationVars{Limit: 50, LastID: "abc123"})
 
 	req := newTestRequest(t)
 	applyReqOpts(req, filterOpts...)
 	applyReqOpts(req, paginationOpts...)
 
-	wantQuery := "role=ROLE1^user.emailENDSWITH@draftkings.com^sys_id>abc123^ORDERBYsys_id"
+	wantQuery := "role=ROLE1^user.emailENDSWITH@example.com^sys_id>abc123^ORDERBYsys_id"
 	if got := req.URL.Query().Get("sysparm_query"); got != wantQuery {
 		t.Errorf("sysparm_query = %q, want %q", got, wantQuery)
 	}
 	if got := req.URL.Query().Get("sysparm_limit"); got != "50" {
 		t.Errorf("sysparm_limit = %q, want %q", got, "50")
-	}
-	// ServiceNow computes X-Total-Count (a COUNT(*) over the whole filtered
-	// set) unless told not to, which is expensive on every page. Termination
-	// keys off an empty page only (see nextKeysetToken), so the count is
-	// suppressed because it's never read.
-	if got := req.URL.Query().Get("sysparm_no_count"); got != "true" {
-		t.Errorf("sysparm_no_count = %q, want %q", got, "true")
 	}
 }
 
@@ -240,25 +233,16 @@ func TestKeysetPaginationVarsToReqOptions_ComposesWithFilterQuery(t *testing.T) 
 // (sys_id greater than the max possible value) returned zero rows, proving
 // the seek constrains every branch rather than only the trailing one.
 func TestKeysetPaginationVarsToReqOptions_ComposesWithMultiDomainFilterQuery(t *testing.T) {
-	filterOpts := filterToReqOptions(prepareUserToRoleFilter("", "ROLE1", []string{"draftkings.com", "dk.com"}))
+	filterOpts := filterToReqOptions(prepareUserToRoleFilter("", "ROLE1", []string{"example.com", "dk.com"}))
 	paginationOpts := keysetPaginationVarsToReqOptions(&KeysetPaginationVars{Limit: 50, LastID: "abc123"})
 
 	req := newTestRequest(t)
 	applyReqOpts(req, filterOpts...)
 	applyReqOpts(req, paginationOpts...)
 
-	wantQuery := "role=ROLE1^user.emailENDSWITH@draftkings.com^ORuser.emailENDSWITH@dk.com^sys_id>abc123^ORDERBYsys_id"
+	wantQuery := "role=ROLE1^user.emailENDSWITH@example.com^ORuser.emailENDSWITH@dk.com^sys_id>abc123^ORDERBYsys_id"
 	if got := req.URL.Query().Get("sysparm_query"); got != wantQuery {
 		t.Errorf("sysparm_query = %q, want %q", got, wantQuery)
-	}
-}
-
-func TestWithNoCount(t *testing.T) {
-	req := newTestRequest(t)
-	applyReqOpts(req, WithNoCount())
-
-	if got := req.URL.Query().Get("sysparm_no_count"); got != "true" {
-		t.Errorf("sysparm_no_count = %q, want %q", got, "true")
 	}
 }
 
@@ -309,21 +293,21 @@ func TestCappedForDomainFilter(t *testing.T) {
 		{
 			name:    "enumeration with allowed domains caps a larger limit",
 			userId:  "",
-			domains: []string{"draftkings.com"},
+			domains: []string{"example.com"},
 			limit:   200,
 			want:    domainFilteredPageSize,
 		},
 		{
 			name:    "enumeration with allowed domains leaves an already-small limit alone",
 			userId:  "",
-			domains: []string{"draftkings.com"},
+			domains: []string{"example.com"},
 			limit:   10,
 			want:    10,
 		},
 		{
 			name:    "provisioning check (specific userId) is never capped",
 			userId:  "USER1",
-			domains: []string{"draftkings.com"},
+			domains: []string{"example.com"},
 			limit:   200,
 			want:    200,
 		},

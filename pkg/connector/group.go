@@ -50,17 +50,14 @@ func groupResource(group *servicenow.Group) (*v2.Resource, error) {
 }
 
 func (g *groupResourceType) List(ctx context.Context, _ *v2.ResourceId, pt *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	bag, lastID, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeGroup.Id})
+	bag, page, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeGroup.Id})
 	if err != nil {
 		return nil, "", nil, err
 	}
 
 	groups, nextPageToken, annos, err := g.client.GetGroups(
 		ctx,
-		servicenow.KeysetPaginationVars{
-			Limit:  ResourcesPageSize,
-			LastID: lastID,
-		},
+		page,
 		nil,
 	)
 	if err != nil {
@@ -106,7 +103,7 @@ func (g *groupResourceType) Entitlements(ctx context.Context, resource *v2.Resou
 }
 
 func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, pt *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	bag, lastID, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeGroup.Id})
+	bag, page, err := parsePageToken(pt.Token, &v2.ResourceId{ResourceType: resourceTypeGroup.Id})
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -115,10 +112,7 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 		ctx,
 		"", // all users, domain-filtered when allowed-domains is set
 		resource.Id.Resource,
-		servicenow.KeysetPaginationVars{
-			Limit:  ResourcesPageSize,
-			LastID: lastID,
-		},
+		page,
 	)
 	if err != nil {
 		return nil, "", annos, fmt.Errorf("baton-servicenow: failed to list groupMembers: %w", err)

@@ -2,8 +2,6 @@ package connector
 
 import (
 	"fmt"
-	"regexp"
-	"strings"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -23,25 +21,20 @@ import (
 const ResourcesPageSize = 200
 const TicketSchemasPageSize = 25
 
-// sysIDPattern matches a ServiceNow sys_id: 32 hex characters. ServiceNow's
-// storage collation is case-insensitive, so either case is accepted and
-// normalized to lowercase for a stable cursor.
-var sysIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
-
 func annotationsForUserResourceType() annotations.Annotations {
 	annos := annotations.Annotations{}
 	annos.Update(&v2.SkipEntitlementsAndGrants{})
 	return annos
 }
 
-// parsePageToken returns the bag along with its current page token, which for
-// keyset-paginated resources (users, roles, groups, membership) is the last
-// seen sys_id rather than a numeric offset.
-func parsePageToken(i string, resourceID *v2.ResourceId) (*pagination.Bag, string, error) {
+// parsePageToken returns the bag plus the seek position, decoded by the same codec
+// that produced it (servicenow.ParseKeysetToken) and carrying ResourcesPageSize as
+// the limit. A malformed token fails loudly rather than restarting: a wrong guess
+// means silently wrong pagination.
+func parsePageToken(i string, resourceID *v2.ResourceId) (*pagination.Bag, servicenow.KeysetPaginationVars, error) {
 	b := &pagination.Bag{}
-	err := b.Unmarshal(i)
-	if err != nil {
-		return nil, "", err
+	if err := b.Unmarshal(i); err != nil {
+		return nil, servicenow.KeysetPaginationVars{}, err
 	}
 
 	if b.Current() == nil {
@@ -51,19 +44,16 @@ func parsePageToken(i string, resourceID *v2.ResourceId) (*pagination.Bag, strin
 		})
 	}
 
-	token := b.PageToken()
-	if token == "" {
-		return b, "", nil
+	lastID, offset, err := servicenow.ParseKeysetToken(b.PageToken())
+	if err != nil {
+		return nil, servicenow.KeysetPaginationVars{}, fmt.Errorf("baton-servicenow: %w", err)
 	}
 
-	// A valid sys_id cursor normalizes to lowercase; anything else --
-	// including a pre-keyset numeric offset token -- fails loudly rather
-	// than guessing, since a wrong guess here means silently wrong
-	// pagination results, not just a restart.
-	if !sysIDPattern.MatchString(token) {
-		return nil, "", fmt.Errorf("baton-servicenow: malformed page token %q", token)
-	}
-	return b, strings.ToLower(token), nil
+	return b, servicenow.KeysetPaginationVars{
+		Limit:  ResourcesPageSize,
+		LastID: lastID,
+		Offset: offset,
+	}, nil
 }
 
 // convertPageToken converts a string token into an int.

@@ -95,14 +95,13 @@ func TestGetRoles_DoesNotTruncateOnShortNonEmptyPage(t *testing.T) {
 	}
 }
 
-// TestGetRoles_IgnoresMalformedLegacyPaginationHeaders guards against a
-// keyset page failing over the unrelated legacy Link-header/X-Total-Count
-// computation, which keyset callers never read (see doRequestKeyset in
-// client.go).
+// A keyset page must not fail over the legacy offset token, which keyset callers
+// never compute (see doRequestWithRetryKeyset). They do read X-Total-Count, but
+// only on an empty page, and an unparseable value there just ends the listing.
 func TestGetRoles_IgnoresMalformedLegacyPaginationHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// doRequest's legacy pagination-token logic would fail parsing this
-		// as an int; doRequestKeyset must never even attempt to.
+		// legacyOffsetToken would fail parsing this as an int; the keyset
+		// path must never even attempt to.
 		w.Header().Set("X-Total-Count", "not-a-number")
 		w.Header().Set("Content-Type", "application/json")
 
@@ -142,7 +141,7 @@ func TestGetUsers_CapsPageSizeWhenDomainFilterApplies(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, []string{"draftkings.com"}, nil, server.URL)
+	client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, []string{"example.com"}, nil, server.URL)
 	if err != nil {
 		t.Fatalf("unexpected error creating client: %v", err)
 	}
