@@ -186,11 +186,9 @@ func (c *Client) apiURL(pattern string, args ...any) string {
 	return expanded
 }
 
-// getKeysetPage runs one keyset-paginated Table API GET and derives the
-// next seek token from the response. Uses c.getKeyset, not c.get: keyset
-// callers compute their own token via nextKeysetToken and don't need
-// doRequest's legacy Link-header token. An empty result is not the end of
-// the listing -- see nextSkipToken.
+// getKeysetPage runs one keyset-paginated Table API GET. Uses c.getKeyset, not
+// c.get: keyset callers derive their own token and don't need doRequest's legacy
+// Link-header one. What follows the page is nextKeysetPageToken's call.
 func getKeysetPage[T any](
 	ctx context.Context,
 	c *Client,
@@ -209,18 +207,32 @@ func getKeysetPage[T any](
 		return nil, "", annos, err
 	}
 
-	if len(resp.Result) == 0 {
-		return nil, nextSkipToken(ctx, url, header, keysetVars), annos, nil
+	return resp.Result, nextKeysetPageToken(ctx, url, header, keysetVars, resp.Result, idFn), annos, nil
+}
+
+// nextKeysetPageToken decides what follows this page: advance the cursor, step
+// past a window row-level ACLs emptied, or end the listing.
+func nextKeysetPageToken[T any](
+	ctx context.Context,
+	url string,
+	header http.Header,
+	v *KeysetPaginationVars,
+	items []T,
+	idFn func(T) string,
+) string {
+	if len(items) == 0 {
+		return nextSkipToken(ctx, url, header, v)
 	}
 
-	if keysetVars.Offset > 0 {
+	if v.Offset > 0 {
 		ctxzap.Extract(ctx).Debug("baton-servicenow: stepped past rows the sync account cannot read",
 			zap.String("url", url),
-			zap.String("cursor", keysetVars.LastID),
-			zap.Int("offset", keysetVars.Offset),
+			zap.String("cursor", v.LastID),
+			zap.Int("offset", v.Offset),
 		)
 	}
-	return resp.Result, nextKeysetToken(resp.Result, idFn), annos, nil
+	// Readable rows: seek from the last one, and any skip offset is spent.
+	return nextKeysetToken(items, idFn)
 }
 
 // nextSkipToken decides what an empty page means: the end of the listing (""),

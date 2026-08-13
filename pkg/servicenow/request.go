@@ -156,15 +156,15 @@ func keysetCursorFragment(lastID string) string {
 	return "ORDERBYsys_id"
 }
 
-// nextKeysetToken derives the next seek token from a keyset page.
-// Termination is decided solely by an empty page, never by len(items) <
-// limit: ServiceNow doesn't always return exactly the requested row count,
-// so a short-but-nonempty page must not be treated as the last one.
+// nextKeysetToken derives the seek cursor from a page that returned rows. Never
+// keys off len(items) < limit: ServiceNow doesn't always return exactly the
+// requested count, so a short-but-nonempty page must not end the listing. What an
+// empty page means is nextSkipToken's call, not this one's.
 func nextKeysetToken[T any](items []T, idFn func(T) string) string {
 	if len(items) == 0 {
 		return ""
 	}
-	return idFn(items[len(items)-1])
+	return EncodeKeysetToken(idFn(items[len(items)-1]), 0)
 }
 
 // Matches "cursor" or "cursor:offset". The cursor is optional: the first window

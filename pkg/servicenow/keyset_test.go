@@ -271,6 +271,32 @@ func TestGetRoles_EndsListingWhenRowCountUnavailable(t *testing.T) {
 	}
 }
 
+// An unparseable X-Total-Count ends the listing rather than failing the sync. The
+// header-absent case takes the same branch; this one covers the parse error.
+func TestGetRoles_EndsListingWhenRowCountIsNotNumeric(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Total-Count", "not-a-number")
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(ListResponse[Role]{Result: nil}); err != nil {
+			t.Errorf("failed to encode test response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, nil, nil, server.URL)
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	rows, next, _, err := client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 200})
+	if err != nil {
+		t.Fatalf("unexpected error: %v (a header we cannot parse must not fail the sync)", err)
+	}
+	if len(rows) != 0 || next != "" {
+		t.Errorf("rows = %d, next = %q; want the listing to end", len(rows), next)
+	}
+}
+
 // The skip is bounded by the row count, so a hidden tail cannot walk past the table.
 func TestGetRoles_StopsSteppingAtTheRowCount(t *testing.T) {
 	ids := sysIDs(1, 8)

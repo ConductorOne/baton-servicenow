@@ -250,9 +250,9 @@ func TestNextKeysetToken(t *testing.T) {
 	type item struct{ id string }
 	idFn := func(i item) string { return i.id }
 
-	// ServiceNow doesn't reliably honor sysparm_limit's exact row count, so
-	// termination must key off an empty page only -- a short-but-nonempty
-	// page must still continue, or the listing silently truncates.
+	// ServiceNow doesn't reliably honor sysparm_limit's exact row count, so a
+	// short-but-nonempty page must still yield a cursor, or the listing
+	// silently truncates.
 	t.Run("short but nonempty page continues pagination", func(t *testing.T) {
 		items := []item{{"a"}, {"b"}}
 		got := nextKeysetToken(items, idFn)
