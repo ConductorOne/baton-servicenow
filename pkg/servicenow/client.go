@@ -207,7 +207,13 @@ func getKeysetPage[T any](
 		return nil, "", annos, err
 	}
 
-	return resp.Result, nextKeysetPageToken(ctx, url, header, keysetVars, resp.Result, idFn), annos, nil
+	token := nextKeysetPageToken(ctx, url, header, keysetVars, resp.Result, idFn)
+	// An empty token ends the listing, so a page that returned rows must never
+	// produce one -- that would drop the rest of the table without a trace.
+	if len(resp.Result) > 0 && token == "" {
+		return nil, "", annos, fmt.Errorf("page returned %d rows but no cursor for %s", len(resp.Result), url)
+	}
+	return resp.Result, token, annos, nil
 }
 
 // nextKeysetPageToken decides what follows this page: advance the cursor, step
@@ -258,6 +264,10 @@ func nextSkipToken(ctx context.Context, url string, header http.Header, v *Keyse
 
 	// The window covered rows Offset+1..Offset+Limit past the cursor. Anything
 	// beyond that is a row this page never reached, so the emptiness was the ACL.
+	//
+	// This assumes sysparm_limit is honoured exactly, which an empty page gives no
+	// way to confirm. Measured true here (see testdata); if a deployment ever
+	// narrowed the window, sysparm_no_count reports its real size.
 	next := v.Offset + v.Limit
 	if count <= next {
 		l.Debug("baton-servicenow: ending the listing, no rows past the window",
