@@ -186,17 +186,112 @@ func (c *Client) apiURL(pattern string, args ...any) string {
 	return expanded
 }
 
-// getKeysetPage runs one keyset-paginated Table API GET and derives the
-// next seek token from the response. Uses c.getKeyset, not c.get: keyset
-// callers compute their own token via nextKeysetToken and don't need
-// doRequest's legacy Link-header token.
-func getKeysetPage[T any](ctx context.Context, c *Client, url string, reqOpts []ReqOpt, idFn func(T) string) ([]T, string, annotations.Annotations, error) {
+// getKeysetPage runs one keyset-paginated Table API GET. Uses c.getKeyset, not
+// c.get: keyset callers derive their own token and don't need doRequest's legacy
+// Link-header one. What follows the page is nextKeysetPageToken's call.
+func getKeysetPage[T any](
+	ctx context.Context,
+	c *Client,
+	url string,
+	filterVars *FilterVars,
+	keysetVars *KeysetPaginationVars,
+	idFn func(T) string,
+) ([]T, string, annotations.Annotations, error) {
+	if keysetVars.Limit <= 0 {
+		return nil, "", nil, fmt.Errorf("keyset pagination called with Limit %d for %s", keysetVars.Limit, url)
+	}
+
 	var resp ListResponse[T]
-	annos, err := c.getKeyset(ctx, url, &resp, reqOpts...)
+	header, annos, err := c.getKeyset(ctx, url, &resp, buildKeysetReqOptions(filterVars, keysetVars)...)
 	if err != nil {
 		return nil, "", annos, err
 	}
-	return resp.Result, nextKeysetToken(resp.Result, idFn), annos, nil
+
+	token := nextKeysetPageToken(ctx, url, header, keysetVars, resp.Result, idFn)
+	// An empty token ends the listing, so a page that returned rows must never
+	// produce one -- that would drop the rest of the table without a trace.
+	if len(resp.Result) > 0 && token == "" {
+		return nil, "", annos, fmt.Errorf("page returned %d rows but no cursor for %s", len(resp.Result), url)
+	}
+	return resp.Result, token, annos, nil
+}
+
+// nextKeysetPageToken decides what follows this page: advance the cursor, step
+// past a window row-level ACLs emptied, or end the listing.
+func nextKeysetPageToken[T any](
+	ctx context.Context,
+	url string,
+	header http.Header,
+	v *KeysetPaginationVars,
+	items []T,
+	idFn func(T) string,
+) string {
+	if len(items) == 0 {
+		return nextSkipToken(ctx, url, header, v)
+	}
+
+	if v.Offset > 0 {
+		ctxzap.Extract(ctx).Debug("baton-servicenow: stepped past rows the sync account cannot read",
+			zap.String("url", url),
+			zap.String("cursor", v.LastID),
+			zap.Int("offset", v.Offset),
+		)
+	}
+	// Readable rows: seek from the last one, and any skip offset is spent.
+	return nextKeysetToken(items, idFn)
+}
+
+// nextSkipToken decides what an empty page means: the end of the listing (""),
+// or a window row-level ACLs emptied (a token stepping the offset past it).
+// X-Total-Count counts matching rows before ACLs run, so it still sees the rows
+// this page could not.
+func nextSkipToken(ctx context.Context, url string, header http.Header, v *KeysetPaginationVars) string {
+	l := ctxzap.Extract(ctx)
+
+	// Existence checks pass Limit 1: empty is the answer, not a page boundary.
+	if v.Limit <= 1 {
+		return ""
+	}
+
+	count, ok := readTotalCount(header)
+	if !ok {
+		l.Debug("baton-servicenow: ending the listing, row count unavailable",
+			zap.String("url", url),
+			zap.String("cursor", v.LastID),
+		)
+		return ""
+	}
+
+	// The window covered rows Offset+1..Offset+Limit past the cursor. Anything
+	// beyond that is a row this page never reached, so the emptiness was the ACL.
+	//
+	// This assumes sysparm_limit is honoured exactly, which an empty page gives no
+	// way to confirm. Measured true here (see testdata); if a deployment ever
+	// narrowed the window, sysparm_no_count reports its real size.
+	next := v.Offset + v.Limit
+	if count <= next {
+		l.Debug("baton-servicenow: ending the listing, no rows past the window",
+			zap.String("url", url),
+			zap.String("cursor", v.LastID),
+			zap.Int("count", count),
+			zap.Int("offset", v.Offset),
+		)
+		return ""
+	}
+	return EncodeKeysetToken(v.LastID, next)
+}
+
+// readTotalCount parses the row count ServiceNow puts in X-Total-Count.
+func readTotalCount(header http.Header) (int, bool) {
+	raw := header.Get("X-Total-Count")
+	if raw == "" {
+		return 0, false
+	}
+	size, err := ConvertPageToken(raw)
+	if err != nil {
+		return 0, false
+	}
+	return size, true
 }
 
 // Table sys_user (Users). GetUsers always enumerates -- there's no
@@ -205,9 +300,9 @@ func getKeysetPage[T any](ctx context.Context, c *Client, url string, reqOpts []
 // configured.
 func (c *Client) GetUsers(ctx context.Context, paginationVars KeysetPaginationVars) ([]User, string, annotations.Annotations, error) {
 	paginationVars = cappedForDomainFilter("", c.AllowedDomains, paginationVars)
-	reqOpts := buildKeysetReqOptions(prepareUserFilters(c.AllowedDomains, c.CustomUserFields), &paginationVars)
-
-	return getKeysetPage(ctx, c, c.apiURL(UsersBaseUrl, c.deployment), reqOpts, func(u User) string { return u.Id })
+	return getKeysetPage(ctx, c, c.apiURL(UsersBaseUrl, c.deployment),
+		prepareUserFilters(c.AllowedDomains, c.CustomUserFields), &paginationVars,
+		func(u User) string { return u.Id })
 }
 
 func (c *Client) GetUser(ctx context.Context, userId string) (*User, annotations.Annotations, error) {
@@ -229,9 +324,9 @@ func (c *Client) GetUser(ctx context.Context, userId string) (*User, annotations
 
 // Table sys_user_group (Groups).
 func (c *Client) GetGroups(ctx context.Context, paginationVars KeysetPaginationVars, groupIDs []string) ([]Group, string, annotations.Annotations, error) {
-	reqOpts := buildKeysetReqOptions(prepareGroupFilters(groupIDs), &paginationVars)
-
-	return getKeysetPage(ctx, c, c.apiURL(GroupsBaseUrl, c.deployment), reqOpts, func(g Group) string { return g.Id })
+	return getKeysetPage(ctx, c, c.apiURL(GroupsBaseUrl, c.deployment),
+		prepareGroupFilters(groupIDs), &paginationVars,
+		func(g Group) string { return g.Id })
 }
 
 func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, annotations.Annotations, error) {
@@ -256,9 +351,9 @@ func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, annotati
 // the page size is capped (see domainFilteredPageSize).
 func (c *Client) GetUserToGroup(ctx context.Context, userId string, groupId string, paginationVars KeysetPaginationVars) ([]GroupMember, string, annotations.Annotations, error) {
 	paginationVars = cappedForDomainFilter(userId, c.AllowedDomains, paginationVars)
-	reqOpts := buildKeysetReqOptions(prepareUserToGroupFilter(userId, groupId, c.AllowedDomains), &paginationVars)
-
-	return getKeysetPage(ctx, c, c.apiURL(GroupMembersBaseUrl, c.deployment), reqOpts, func(m GroupMember) string { return m.Id })
+	return getKeysetPage(ctx, c, c.apiURL(GroupMembersBaseUrl, c.deployment),
+		prepareUserToGroupFilter(userId, groupId, c.AllowedDomains), &paginationVars,
+		func(m GroupMember) string { return m.Id })
 }
 
 func (c *Client) AddUserToGroup(ctx context.Context, record GroupMemberPayload) (annotations.Annotations, error) {
@@ -281,9 +376,9 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, id string) (annotation
 
 // Table sys_user_role (Roles).
 func (c *Client) GetRoles(ctx context.Context, paginationVars KeysetPaginationVars) ([]Role, string, annotations.Annotations, error) {
-	reqOpts := buildKeysetReqOptions(prepareRoleFilters(), &paginationVars)
-
-	return getKeysetPage(ctx, c, c.apiURL(RolesBaseUrl, c.deployment), reqOpts, func(r Role) string { return r.Id })
+	return getKeysetPage(ctx, c, c.apiURL(RolesBaseUrl, c.deployment),
+		prepareRoleFilters(), &paginationVars,
+		func(r Role) string { return r.Id })
 }
 
 // Table sys_user_has_role (User to Role). When userId is empty
@@ -291,9 +386,9 @@ func (c *Client) GetRoles(ctx context.Context, paginationVars KeysetPaginationVa
 // the page size is capped (see domainFilteredPageSize).
 func (c *Client) GetUserToRole(ctx context.Context, userId string, roleId string, paginationVars KeysetPaginationVars) ([]UserToRole, string, annotations.Annotations, error) {
 	paginationVars = cappedForDomainFilter(userId, c.AllowedDomains, paginationVars)
-	reqOpts := buildKeysetReqOptions(prepareUserToRoleFilter(userId, roleId, c.AllowedDomains), &paginationVars)
-
-	return getKeysetPage(ctx, c, c.apiURL(UserRolesBaseUrl, c.deployment), reqOpts, func(r UserToRole) string { return r.Id })
+	return getKeysetPage(ctx, c, c.apiURL(UserRolesBaseUrl, c.deployment),
+		prepareUserToRoleFilter(userId, roleId, c.AllowedDomains), &paginationVars,
+		func(r UserToRole) string { return r.Id })
 }
 
 func (c *Client) GrantRoleToUser(ctx context.Context, record UserToRolePayload) (annotations.Annotations, error) {
@@ -317,9 +412,9 @@ func (c *Client) RevokeRoleFromUser(ctx context.Context, id string) (annotations
 // Table sys_group_has_role (Group to Role). No domain filter -- groups
 // don't have an email to scope by.
 func (c *Client) GetGroupToRole(ctx context.Context, groupId string, roleId string, paginationVars KeysetPaginationVars) ([]GroupToRole, string, annotations.Annotations, error) {
-	reqOpts := buildKeysetReqOptions(prepareGroupToRoleFilter(groupId, roleId), &paginationVars)
-
-	return getKeysetPage(ctx, c, c.apiURL(GroupRolesBaseUrl, c.deployment), reqOpts, func(r GroupToRole) string { return r.Id })
+	return getKeysetPage(ctx, c, c.apiURL(GroupRolesBaseUrl, c.deployment),
+		prepareGroupToRoleFilter(groupId, roleId), &paginationVars,
+		func(r GroupToRole) string { return r.Id })
 }
 
 func (c *Client) GrantRoleToGroup(ctx context.Context, record GroupToRolePayload) (annotations.Annotations, error) {
@@ -353,7 +448,8 @@ func (c *Client) get(ctx context.Context, urlAddress string, resourceResponse in
 
 // getKeyset is like get but for keyset-paginated callers: it never computes
 // the legacy Link-header/X-Total-Count token, so it can't fail because of it.
-func (c *Client) getKeyset(ctx context.Context, urlAddress string, resourceResponse interface{}, reqOptions ...ReqOpt) (annotations.Annotations, error) {
+// Returns the headers as well, for X-Total-Count.
+func (c *Client) getKeyset(ctx context.Context, urlAddress string, resourceResponse interface{}, reqOptions ...ReqOpt) (http.Header, annotations.Annotations, error) {
 	return c.doRequestWithRetryKeyset(
 		ctx,
 		urlAddress,
@@ -423,7 +519,7 @@ func (c *Client) delete(
 // doRequest performs the request, decodes a successful JSON body into
 // resourceResponse, and returns the legacy Link-header/X-Total-Count
 // offset-pagination token used by Service Catalog/ticketing callers. Keyset
-// callers use doRequestKeyset instead.
+// callers use doRequestWithRetryKeyset instead.
 func (c *Client) doRequest(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) (string, annotations.Annotations, error) {
 	header, annos, err := c.doHTTPRequest(ctx, urlAddress, method, data, resourceResponse, reqOptions...)
 	if err != nil {
@@ -431,15 +527,6 @@ func (c *Client) doRequest(ctx context.Context, urlAddress string, method string
 	}
 	token, err := legacyOffsetToken(header)
 	return token, annos, err
-}
-
-// doRequestKeyset is doRequest without the legacy Link-header/X-Total-Count
-// token computation. Keyset callers derive their own token from the decoded
-// body (nextKeysetToken), so a malformed Link header or non-numeric
-// sysparm_offset must not discard an otherwise successfully decoded page.
-func (c *Client) doRequestKeyset(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) (annotations.Annotations, error) {
-	_, annos, err := c.doHTTPRequest(ctx, urlAddress, method, data, resourceResponse, reqOptions...)
-	return annos, err
 }
 
 // doHTTPRequest sends the request through uhttp and, for non-DELETE methods,
@@ -599,15 +686,17 @@ func (c *Client) doRequestWithRetry(ctx context.Context, urlAddress string, meth
 	})
 }
 
-// doRequestWithRetryKeyset is doRequestWithRetry for keyset callers, routed
-// through doRequestKeyset instead of doRequest so a legacy-pagination-header
-// hiccup can't fail an otherwise successfully decoded page.
-func (c *Client) doRequestWithRetryKeyset(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) (annotations.Annotations, error) {
+// doRequestWithRetryKeyset is doRequestWithRetry for keyset callers. It skips
+// doRequest's legacy Link-header token, which could otherwise fail a page that
+// decoded fine, and hands back the headers for X-Total-Count.
+func (c *Client) doRequestWithRetryKeyset(ctx context.Context, urlAddress string, method string, data any, resourceResponse any, reqOptions ...ReqOpt) (http.Header, annotations.Annotations, error) {
+	var header http.Header
 	_, annos, err := withAuthRetry(ctx, urlAddress, method, func() (string, annotations.Annotations, error) {
-		a, err := c.doRequestKeyset(ctx, urlAddress, method, data, resourceResponse, reqOptions...)
-		return "", a, err
+		h, a, reqErr := c.doHTTPRequest(ctx, urlAddress, method, data, resourceResponse, reqOptions...)
+		header = h
+		return "", a, reqErr
 	})
-	return annos, err
+	return header, annos, err
 }
 
 // withAuthRetry retries attempt on transient 401 responses, logging the
