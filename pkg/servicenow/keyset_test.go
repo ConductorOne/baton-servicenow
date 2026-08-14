@@ -271,6 +271,19 @@ func TestGetRoles_EndsListingWhenRowCountUnavailable(t *testing.T) {
 	}
 }
 
+// A page that returned rows must never yield an empty cursor: the SDK would read
+// it as the end of the listing and drop the rest of the table.
+func TestGetRoles_ErrorsWhenAPageOfRowsYieldsNoCursor(t *testing.T) {
+	stub := newACLStub(func(string) Role { return Role{} }, sysIDs(1, 4))
+	client, done := newStubClient(t, stub, nil)
+	defer done()
+
+	rows, next, _, err := client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 2})
+	if err == nil {
+		t.Fatalf("rows = %d, next = %q, err = nil; want an error rather than a silent end of listing", len(rows), next)
+	}
+}
+
 // An unparseable X-Total-Count ends the listing rather than failing the sync. The
 // header-absent case takes the same branch; this one covers the parse error.
 func TestGetRoles_EndsListingWhenRowCountIsNotNumeric(t *testing.T) {
