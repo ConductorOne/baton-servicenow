@@ -30,6 +30,17 @@ func marshalPageToken(t *testing.T, resourceID *v2.ResourceId, checkpointedToken
 	return marshaled
 }
 
+// encodeKeysetToken wraps servicenow.EncodeKeysetToken for tests that only
+// exercise well-formed cursors and don't want to thread the error return.
+func encodeKeysetToken(t *testing.T, lastID string, offset int) string {
+	t.Helper()
+	token, err := servicenow.EncodeKeysetToken(lastID, offset)
+	if err != nil {
+		t.Fatalf("unexpected error encoding page token: %v", err)
+	}
+	return token
+}
+
 // The shapes a checkpointed page token can take. Anything else must fail loudly:
 // a wrong guess means silently wrong pagination, not just a restart.
 func TestParsePageToken_TokenValidation(t *testing.T) {
@@ -66,7 +77,11 @@ func TestParsePageToken_TokenValidation(t *testing.T) {
 		}
 	})
 
-	t.Run("uppercase sys_id cursor is normalized to lowercase", func(t *testing.T) {
+	// CXP-947: an earlier version lower-cased every cursor unconditionally,
+	// which corrupted mixed/upper-case sys_ids (a shape ServiceNow's
+	// third-party-populated role tables actually contain) on the very next
+	// page request. Case must survive the round trip untouched.
+	t.Run("uppercase sys_id cursor is preserved, not normalized", func(t *testing.T) {
 		sysID := "CC6F85B5EBC31300A210A2505206FEC0"
 		keysetToken := marshalPageToken(t, resourceID, sysID)
 
@@ -74,9 +89,37 @@ func TestParsePageToken_TokenValidation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		want := "cc6f85b5ebc31300a210a2505206fec0"
-		if page.LastID != want {
-			t.Errorf("lastID = %q, want %q (ServiceNow's collation is case-insensitive; normalize for a stable cursor)", page.LastID, want)
+		if page.LastID != sysID {
+			t.Errorf("lastID = %q, want %q (case must be preserved)", page.LastID, sysID)
+		}
+	})
+
+	// CXP-947: sys_user_role/sys_user_has_role/sys_group_has_role rows written
+	// by third-party update sets can carry non-canonical sys_ids that are not
+	// 32-char hex at all. These must not poison the page token parser.
+	t.Run("non-canonical human-chosen sys_id cursor passes through unchanged", func(t *testing.T) {
+		sysID := "glean_user_role"
+		keysetToken := marshalPageToken(t, resourceID, sysID)
+
+		_, page, err := parsePageToken(keysetToken, resourceID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if page.LastID != sysID {
+			t.Errorf("lastID = %q, want %q", page.LastID, sysID)
+		}
+	})
+
+	t.Run("31-hex-plus-trailing-char sys_id cursor passes through unchanged", func(t *testing.T) {
+		sysID := "ffd6d201d7b3020058c92cf65e61039g"
+		keysetToken := marshalPageToken(t, resourceID, sysID)
+
+		_, page, err := parsePageToken(keysetToken, resourceID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if page.LastID != sysID {
+			t.Errorf("lastID = %q, want %q", page.LastID, sysID)
 		}
 	})
 
@@ -93,7 +136,7 @@ func TestParsePageToken_TokenValidation(t *testing.T) {
 	t.Run("cursor with skip offset yields both halves", func(t *testing.T) {
 		sysID := "cc6f85b5ebc31300a210a2505206fec0"
 		// Built by the client layer's encoder, so a format change can't pass here.
-		keysetToken := marshalPageToken(t, resourceID, servicenow.EncodeKeysetToken(sysID, 400))
+		keysetToken := marshalPageToken(t, resourceID, encodeKeysetToken(t, sysID, 400))
 
 		_, page, err := parsePageToken(keysetToken, resourceID)
 		if err != nil {
@@ -109,7 +152,7 @@ func TestParsePageToken_TokenValidation(t *testing.T) {
 
 	t.Run("skip offset with no cursor is accepted", func(t *testing.T) {
 		// The first window of a listing can be the emptied one: offset, no cursor.
-		keysetToken := marshalPageToken(t, resourceID, servicenow.EncodeKeysetToken("", 200))
+		keysetToken := marshalPageToken(t, resourceID, encodeKeysetToken(t, "", 200))
 
 		_, page, err := parsePageToken(keysetToken, resourceID)
 		if err != nil {
@@ -133,7 +176,7 @@ func TestParsePageToken_TokenValidation(t *testing.T) {
 	})
 
 	t.Run("plain cursor reports offset zero", func(t *testing.T) {
-		keysetToken := marshalPageToken(t, resourceID, servicenow.EncodeKeysetToken("cc6f85b5ebc31300a210a2505206fec0", 0))
+		keysetToken := marshalPageToken(t, resourceID, encodeKeysetToken(t, "cc6f85b5ebc31300a210a2505206fec0", 0))
 
 		_, page, err := parsePageToken(keysetToken, resourceID)
 		if err != nil {
