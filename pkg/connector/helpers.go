@@ -27,6 +27,13 @@ func annotationsForUserResourceType() annotations.Annotations {
 	return annos
 }
 
+// annotationsForScheduleResourceType marks the schedule resource type opt-in.
+func annotationsForScheduleResourceType() annotations.Annotations {
+	annos := annotations.Annotations{}
+	annos.Update(&v2.OptInRequired{})
+	return annos
+}
+
 // parsePageToken returns the bag plus the seek position, decoded by the same codec
 // that produced it (servicenow.ParseKeysetToken) and carrying ResourcesPageSize as
 // the limit. A malformed token fails loudly rather than restarting: a wrong guess
@@ -66,6 +73,16 @@ func mapGroupMembers(resources []servicenow.GroupMember) []string {
 
 	for i, r := range resources {
 		members[i] = r.User
+	}
+
+	return members
+}
+
+func mapRotaMembers(resources []servicenow.RotaMember) []string {
+	members := make([]string, len(resources))
+
+	for i, r := range resources {
+		members[i] = r.Member
 	}
 
 	return members
