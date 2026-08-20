@@ -285,8 +285,8 @@ func TestNextKeysetToken(t *testing.T) {
 		}
 	})
 
-	// CXP-947: sys_user_role/sys_user_has_role/sys_group_has_role rows written
-	// by third-party update sets can carry non-canonical sys_ids -- short,
+	// sys_user_role/sys_user_has_role/sys_group_has_role rows written by
+	// third-party update sets can carry non-canonical sys_ids -- short,
 	// human-chosen names, or hex with a stray trailing character. These must
 	// still produce a usable cursor instead of poisoning the next page.
 	t.Run("non-canonical human-chosen sys_id still produces a cursor", func(t *testing.T) {
@@ -330,8 +330,8 @@ func TestNextKeysetToken(t *testing.T) {
 	})
 }
 
-// TestParseKeysetToken_RoundTripsNonCanonicalCursors covers CXP-947: the
-// cursor produced by EncodeKeysetToken must parse back byte-for-byte,
+// TestParseKeysetToken_RoundTripsNonCanonicalCursors: the cursor produced by
+// EncodeKeysetToken must parse back byte-for-byte,
 // including case, for the sys_id shapes that broke pagination permanently.
 func TestParseKeysetToken_RoundTripsNonCanonicalCursors(t *testing.T) {
 	tests := []struct {

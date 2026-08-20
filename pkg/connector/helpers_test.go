@@ -77,7 +77,7 @@ func TestParsePageToken_TokenValidation(t *testing.T) {
 		}
 	})
 
-	// CXP-947: an earlier version lower-cased every cursor unconditionally,
+	// An earlier version lower-cased every cursor unconditionally,
 	// which corrupted mixed/upper-case sys_ids (a shape ServiceNow's
 	// third-party-populated role tables actually contain) on the very next
 	// page request. Case must survive the round trip untouched.
@@ -94,8 +94,8 @@ func TestParsePageToken_TokenValidation(t *testing.T) {
 		}
 	})
 
-	// CXP-947: sys_user_role/sys_user_has_role/sys_group_has_role rows written
-	// by third-party update sets can carry non-canonical sys_ids that are not
+	// sys_user_role/sys_user_has_role/sys_group_has_role rows written by
+	// third-party update sets can carry non-canonical sys_ids that are not
 	// 32-char hex at all. These must not poison the page token parser.
 	t.Run("non-canonical human-chosen sys_id cursor passes through unchanged", func(t *testing.T) {
 		sysID := "glean_user_role"
