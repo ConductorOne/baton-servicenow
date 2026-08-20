@@ -190,32 +190,37 @@ var cursorPattern = regexp.MustCompile(`^` + cursorCharset + `$`)
 // separate pattern rather than folded into cursorPattern.
 var allDigitsPattern = regexp.MustCompile(`^[0-9]+$`)
 
-// isValidCursor reports whether id is an acceptable keyset cursor: within the
-// allowed charset, and -- if purely numeric -- 32 characters long. That
-// length check, not the digits themselves, is what tells a real cursor apart
-// from a stale token left over from baton-servicenow's pre-keyset (<=v1.1.18)
-// offset-based pagination, which encoded the page position as a short bare
-// integer (e.g. "150"): a canonical sys_id is always exactly 32 characters
-// and can legitimately be all-digits (nothing requires a hex GUID to contain
-// a letter), while a page offset never reaches 32 digits. Rejecting only
-// short numeric strings keeps a resumed pre-keyset sync failing loudly
-// instead of being silently misread as a keyset cursor.
-func isValidCursor(id string) bool {
-	if !cursorPattern.MatchString(id) {
-		return false
-	}
-	return len(id) == 32 || !allDigitsPattern.MatchString(id)
+// looksLikeStaleOffsetToken reports whether a bare cursor string (no
+// ":offset" segment) is indistinguishable from a stale token left over from
+// baton-servicenow's pre-keyset (<=v1.1.18) offset-based pagination, which
+// encoded the page position as a short bare integer (e.g. "150"). A canonical
+// sys_id is always exactly 32 characters and can legitimately be all-digits
+// (nothing requires a hex GUID to contain a letter), so length -- not the
+// digits themselves -- is what distinguishes the two: a page offset never
+// reaches 32 digits.
+//
+// This only matters for a BARE cursor. EncodeKeysetToken forces the
+// ":offset" form (even for offset 0) whenever lastID itself would collide
+// with this shape, which removes the ambiguity at the source instead of
+// asking the parser to guess.
+func looksLikeStaleOffsetToken(cursor string) bool {
+	return len(cursor) != 32 && allDigitsPattern.MatchString(cursor)
 }
 
 // EncodeKeysetToken is the only producer of the page token format. A bare cursor
-// is the common shape: nothing to skip. Validates lastID so a non-conforming
-// sys_id fails here, at the page that produced it, with the row's own context
-// in the error -- not one page later, parsed out of a token with none.
+// is the common shape: nothing to skip. Validates lastID's charset -- the
+// query-injection guard -- so a sys_id with disallowed characters fails here,
+// at the page that produced it, with the row's own context in the error --
+// not one page later, parsed out of a token with none.
 func EncodeKeysetToken(lastID string, offset int) (string, error) {
-	if lastID != "" && !isValidCursor(lastID) {
-		return "", fmt.Errorf("cannot build page cursor: sys_id %q is not a valid cursor (must match %s and not be purely numeric)", lastID, cursorPattern.String())
+	if lastID != "" && !cursorPattern.MatchString(lastID) {
+		return "", fmt.Errorf("cannot build page cursor: sys_id %q is outside the allowed cursor charset %s", lastID, cursorPattern.String())
 	}
-	if offset == 0 {
+	// A short all-numeric sys_id, encoded bare, is indistinguishable from a
+	// stale pre-keyset offset token (see looksLikeStaleOffsetToken and
+	// ParseKeysetToken). Force the ":offset" form even at offset 0 so the
+	// parser can tell the two apart by shape alone.
+	if offset == 0 && !looksLikeStaleOffsetToken(lastID) {
 		return lastID, nil
 	}
 	return fmt.Sprintf("%s:%d", lastID, offset), nil
@@ -234,15 +239,18 @@ func ParseKeysetToken(token string) (string, int, error) {
 	if match == nil {
 		return "", 0, fmt.Errorf("malformed page token %q", token)
 	}
-	// A purely numeric cursor is a stale pre-keyset (<=v1.1.18) offset token,
-	// not a sys_id -- reject it here rather than mis-seeking on it (see
-	// isValidCursor).
-	if match[1] != "" && !isValidCursor(match[1]) {
+
+	hasOffsetSegment := match[2] != ""
+	// A bare (no ":offset" segment) purely numeric cursor is a stale
+	// pre-keyset token, not a sys_id -- reject it rather than mis-seeking on
+	// it. A short all-numeric sys_id is never encoded bare (see
+	// EncodeKeysetToken), so this can't reject a real cursor.
+	if match[1] != "" && !hasOffsetSegment && looksLikeStaleOffsetToken(match[1]) {
 		return "", 0, fmt.Errorf("malformed page token %q: %q is not a valid cursor", token, match[1])
 	}
 
 	var offset int
-	if match[2] != "" {
+	if hasOffsetSegment {
 		parsed, err := strconv.Atoi(match[2])
 		if err != nil {
 			return "", 0, fmt.Errorf("malformed offset in page token %q: %w", token, err)

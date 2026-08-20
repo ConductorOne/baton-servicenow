@@ -339,10 +339,13 @@ func TestParseKeysetToken_RoundTripsNonCanonicalCursors(t *testing.T) {
 		lastID string
 		offset int
 	}{
-		{name: "canonical 32-hex", lastID: "ffd6d201d7b3020058c92cf65e61039", offset: 0},
+		{name: "canonical 32-hex", lastID: "ffd6d201d7b3020058c92cf65e610390", offset: 0},
 		{name: "human-chosen short id", lastID: "glean_user_role", offset: 0},
 		{name: "31-hex plus trailing non-hex char", lastID: "ffd6d201d7b3020058c92cf65e61039g", offset: 0},
 		{name: "mixed case", lastID: "AbC123", offset: 0},
+		{name: "32-digit all-numeric sys_id", lastID: "00000000000000000000000000000042", offset: 0},
+		{name: "short all-numeric sys_id", lastID: "12345", offset: 0},
+		{name: "short all-numeric sys_id with a skip offset", lastID: "12345", offset: 50},
 		{name: "with a skip offset", lastID: "glean_user_role", offset: 50},
 	}
 
@@ -376,6 +379,33 @@ func TestEncodeKeysetToken_RejectsQueryInjectionCharacters(t *testing.T) {
 		if _, err := EncodeKeysetToken(lastID, 0); err == nil {
 			t.Errorf("EncodeKeysetToken(%q, 0) = nil error, want a rejection", lastID)
 		}
+	}
+}
+
+// TestEncodeKeysetToken_ShortAllNumericSysIDRoundTrips guards against
+// EncodeKeysetToken applying ParseKeysetToken's stale-legacy-token heuristic
+// (reject a short all-numeric string) to a live row's sys_id -- and against
+// the two functions disagreeing about the encoded shape. An earlier version
+// of this fix relaxed EncodeKeysetToken to accept "12345" but left it encoded
+// bare, which ParseKeysetToken then rejected as a stale legacy token: the
+// same permanent-sync-failure bug, just moved from encode to parse. Asserting
+// only the encoded string (not the round trip) is exactly how that went
+// unnoticed, so this checks both.
+func TestEncodeKeysetToken_ShortAllNumericSysIDRoundTrips(t *testing.T) {
+	token, err := EncodeKeysetToken("12345", 0)
+	if err != nil {
+		t.Fatalf("EncodeKeysetToken(%q, 0) returned an error: %v", "12345", err)
+	}
+
+	gotID, gotOffset, err := ParseKeysetToken(token)
+	if err != nil {
+		t.Fatalf("ParseKeysetToken(%q) returned an error: %v (the token EncodeKeysetToken just produced must be parseable)", token, err)
+	}
+	if gotID != "12345" {
+		t.Errorf("ParseKeysetToken(%q) id = %q, want %q", token, gotID, "12345")
+	}
+	if gotOffset != 0 {
+		t.Errorf("ParseKeysetToken(%q) offset = %d, want 0", token, gotOffset)
 	}
 }
 
