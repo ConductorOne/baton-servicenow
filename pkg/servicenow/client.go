@@ -272,7 +272,7 @@ func nextKeysetPageToken[T any](
 	if fallbackErr != nil {
 		return "", err
 	}
-	ctxzap.Extract(ctx).Warn("baton-servicenow: last row's sys_id cannot be used as a seek cursor, stepping past this window by offset instead",
+	ctxzap.Extract(ctx).Debug("baton-servicenow: last row's sys_id cannot be used as a seek cursor, stepping past this window by offset instead",
 		zap.String("url", url),
 		zap.String("cursor", v.LastID),
 		zap.Int("offset", next),
