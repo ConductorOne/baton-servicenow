@@ -126,12 +126,12 @@ func TestGetRoles_IgnoresMalformedLegacyPaginationHeaders(t *testing.T) {
 	}
 }
 
-// TestGetRoles_StepsPastACaretSysIdByOffset guards CXP-967: a sys_id
-// containing ^ (ServiceNow's unescapable AND operator) sorting last in a
-// page can never be embedded in the next page's sysparm_query seek
-// fragment. Before this fix that permanently failed the sync; now it steps
-// past the window by sysparm_offset instead, the same fallback used for an
-// ACL-emptied window.
+// TestGetRoles_StepsPastACaretSysIdByOffset guards a sys_id containing ^
+// (ServiceNow's unescapable AND operator) sorting last in a page, which can
+// never be embedded in the next page's sysparm_query seek fragment. Before
+// this fix that permanently failed the sync; now it steps past the window
+// by sysparm_offset instead, the same fallback used for an ACL-emptied
+// window.
 func TestGetRoles_StepsPastACaretSysIdByOffset(t *testing.T) {
 	var page2Query, page2Offset string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
