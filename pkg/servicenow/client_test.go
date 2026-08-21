@@ -126,6 +126,73 @@ func TestGetRoles_IgnoresMalformedLegacyPaginationHeaders(t *testing.T) {
 	}
 }
 
+// TestGetRoles_StepsPastACaretSysIdByOffset guards a sys_id containing ^
+// (ServiceNow's unescapable AND operator) sorting last in a page, which can
+// never be embedded in the next page's sysparm_query seek fragment. Before
+// this fix that permanently failed the sync; now it steps past the window
+// by sysparm_offset instead, the same fallback used for an ACL-emptied
+// window.
+func TestGetRoles_StepsPastACaretSysIdByOffset(t *testing.T) {
+	var page2Query, page2Offset string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		isSeeking := strings.Contains(r.URL.Query().Get("sysparm_query"), "sys_id>")
+
+		var roles []Role
+		switch {
+		case !isSeeking && r.URL.Query().Get("sysparm_offset") == "":
+			roles = []Role{
+				{BaseResource: BaseResource{Id: "role-000"}},
+				{BaseResource: BaseResource{Id: "qa^cxp947caret"}},
+			}
+		default:
+			page2Query = r.URL.Query().Get("sysparm_query")
+			page2Offset = r.URL.Query().Get("sysparm_offset")
+			roles = nil
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(ListResponse[Role]{Result: roles}); err != nil {
+			t.Errorf("failed to encode test response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", nil, nil, nil, server.URL)
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+
+	page1, next1, _, err := client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50})
+	if err != nil {
+		t.Fatalf("unexpected error on page 1: %v (a caret-bearing sys_id sorting last must not fail the sync)", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("page1 len = %d, want 2", len(page1))
+	}
+	if next1 == "" {
+		t.Fatalf("expected a non-empty next token after a full page")
+	}
+
+	lastID, offset, err := ParseKeysetToken(next1)
+	if err != nil {
+		t.Fatalf("ParseKeysetToken(%q) returned an error: %v", next1, err)
+	}
+	if lastID != "" || offset != 2 {
+		t.Errorf("ParseKeysetToken(%q) = (%q, %d), want (\"\", 2): step past the whole window by offset, not seek on the caret sys_id", next1, lastID, offset)
+	}
+
+	_, _, _, err = client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50, LastID: lastID, Offset: offset})
+	if err != nil {
+		t.Fatalf("unexpected error on page 2: %v", err)
+	}
+	if strings.Contains(page2Query, "sys_id>") {
+		t.Errorf("page 2 sysparm_query = %q, must not seek on the caret sys_id", page2Query)
+	}
+	if page2Offset != "2" {
+		t.Errorf("page 2 sysparm_offset = %q, want %q", page2Offset, "2")
+	}
+}
+
 // TestGetUsers_CapsPageSizeWhenDomainFilterApplies covers GetUsers
 // specifically: it always enumerates (no per-user provisioning variant),
 // so the domain filter's page-size cap always applies when AllowedDomains
