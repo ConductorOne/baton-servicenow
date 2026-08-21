@@ -223,7 +223,8 @@ func getKeysetPage[T any](
 }
 
 // nextKeysetPageToken decides what follows this page: advance the cursor, step
-// past a window row-level ACLs emptied, or end the listing.
+// past a window row-level ACLs emptied or whose last row can't be seeked on,
+// or end the listing.
 func nextKeysetPageToken[T any](
 	ctx context.Context,
 	url string,
@@ -253,7 +254,31 @@ func nextKeysetPageToken[T any](
 		)
 	}
 	// Readable rows: seek from the last one, and any skip offset is spent.
-	return nextKeysetToken(items, idFn)
+	token, err := nextKeysetToken(items, idFn)
+	if err == nil {
+		return token, nil
+	}
+
+	// The last row's sys_id can't be used as a seek value at all -- most
+	// notably one containing ^, ServiceNow's AND operator, which has no
+	// escape mechanism in sysparm_query (a URL-encoded %5E is decoded back
+	// to ^ server-side and parsed as the operator). Falling through to that
+	// error would exit the sync and, because the row persists in the source
+	// table, fail identically on every subsequent run. Instead, step past
+	// this whole window by offset from the same base cursor, the same
+	// fallback nextSkipToken already uses for an ACL-emptied window.
+	next := v.Offset + len(items)
+	fallbackToken, fallbackErr := EncodeKeysetToken(v.LastID, next)
+	if fallbackErr != nil {
+		return "", err
+	}
+	ctxzap.Extract(ctx).Warn("baton-servicenow: last row's sys_id cannot be used as a seek cursor, stepping past this window by offset instead",
+		zap.String("url", url),
+		zap.String("cursor", v.LastID),
+		zap.Int("offset", next),
+		zap.Error(err),
+	)
+	return fallbackToken, nil
 }
 
 // nextSkipToken decides what an empty page means: the end of the listing (""),

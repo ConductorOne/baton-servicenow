@@ -328,6 +328,20 @@ func TestNextKeysetToken(t *testing.T) {
 			t.Error("nextKeysetToken(...) = nil error, want a rejection: this sys_id could break out of the sysparm_query fragment")
 		}
 	})
+
+	// : has no meaning in sysparm_query -- it was only rejected because the
+	// token format used to delimit cursor/offset with it. The delimiter is
+	// now ^, so a sys_id containing : must round-trip like any other.
+	t.Run("sys_id containing a colon still produces a cursor", func(t *testing.T) {
+		items := []item{{"qa:cxp947:colon"}}
+		got, err := nextKeysetToken(items, idFn)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "qa:cxp947:colon" {
+			t.Errorf("nextKeysetToken(...) = %q, want %q", got, "qa:cxp947:colon")
+		}
+	})
 }
 
 // TestParseKeysetToken_RoundTripsNonCanonicalCursors: the cursor produced by
@@ -347,6 +361,8 @@ func TestParseKeysetToken_RoundTripsNonCanonicalCursors(t *testing.T) {
 		{name: "short all-numeric sys_id", lastID: "12345", offset: 0},
 		{name: "short all-numeric sys_id with a skip offset", lastID: "12345", offset: 50},
 		{name: "with a skip offset", lastID: "glean_user_role", offset: 50},
+		{name: "colon-bearing sys_id", lastID: "qa:cxp947:colon", offset: 0},
+		{name: "colon-bearing sys_id with a skip offset", lastID: "qa:cxp947:colon", offset: 50},
 	}
 
 	for _, tc := range tests {
