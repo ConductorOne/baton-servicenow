@@ -197,6 +197,18 @@ var keysetTokenPattern = regexp.MustCompile(`^(` + cursorCharset + `)?(?:\^([0-9
 
 var cursorPattern = regexp.MustCompile(`^` + cursorCharset + `$`)
 
+// legacyCursorCharset is the cursor charset from before this version switched
+// the token delimiter from ':' to '^' (see cursorCharset's comment). It
+// excluded ':' itself, so a legacy token's cursor half never contains one --
+// that's what makes legacyKeysetTokenPattern unambiguous below.
+const legacyCursorCharset = `[0-9A-Za-z_.\-]{1,32}`
+
+// legacyKeysetTokenPattern matches a page token in the pre-'^'-delimiter
+// "cursor:offset" format. A sync paused across a connector upgrade can
+// resume holding one of these, so ParseKeysetToken checks for this shape
+// before the current one.
+var legacyKeysetTokenPattern = regexp.MustCompile(`^(` + legacyCursorCharset + `):([0-9]{1,18})$`)
+
 // allDigitsPattern matches a purely numeric string. Go's RE2 engine has no
 // lookahead, so "at least one non-digit character" is checked as a second,
 // separate pattern rather than folded into cursorPattern.
@@ -245,6 +257,24 @@ func EncodeKeysetToken(lastID string, offset int) (string, error) {
 func ParseKeysetToken(token string) (string, int, error) {
 	if token == "" {
 		return "", 0, nil
+	}
+
+	// A token from before the '^'-delimiter switch never contains '^' (the
+	// charset in effect when it was produced excluded it too), and its
+	// cursor half never contains ':' (excluded from that same older
+	// charset). Recognize that shape first: against the current pattern, a
+	// canonical 32-char cursor plus ":offset" overruns the 32-char cap and
+	// is rejected outright, while a short non-canonical cursor plus
+	// ":offset" instead matches as a bare cursor that silently absorbs the
+	// ":offset" suffix as literal content, dropping the skip offset.
+	if !strings.Contains(token, "^") {
+		if legacy := legacyKeysetTokenPattern.FindStringSubmatch(token); legacy != nil {
+			offset, err := strconv.Atoi(legacy[2])
+			if err != nil {
+				return "", 0, fmt.Errorf("malformed offset in page token %q: %w", token, err)
+			}
+			return legacy[1], offset, nil
+		}
 	}
 
 	match := keysetTokenPattern.FindStringSubmatch(token)

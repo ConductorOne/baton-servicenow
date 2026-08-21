@@ -425,6 +425,51 @@ func TestEncodeKeysetToken_ShortAllNumericSysIDRoundTrips(t *testing.T) {
 	}
 }
 
+// TestParseKeysetToken_RecoversLegacyColonDelimitedTokens guards CXP-967's
+// review fix: a page token persisted in the pre-'^'-delimiter "cursor:offset"
+// format can still resume across a connector upgrade. Before this fix, a
+// canonical 32-char cursor plus ":offset" overran keysetTokenPattern's
+// 32-char cap and was rejected as malformed (failing the resumed sync), and
+// a short non-canonical cursor plus ":offset" instead matched as a bare
+// cursor that silently absorbed the ":offset" suffix as literal content,
+// dropping the skip offset and mis-seeking without an error.
+func TestParseKeysetToken_RecoversLegacyColonDelimitedTokens(t *testing.T) {
+	tests := []struct {
+		name       string
+		token      string
+		wantID     string
+		wantOffset int
+	}{
+		{
+			name:       "canonical 32-char cursor with a legacy offset",
+			token:      "ffd6d201d7b3020058c92cf65e610390:50",
+			wantID:     "ffd6d201d7b3020058c92cf65e610390",
+			wantOffset: 50,
+		},
+		{
+			name:       "short non-canonical cursor with a legacy offset",
+			token:      "glean_user_role:50",
+			wantID:     "glean_user_role",
+			wantOffset: 50,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotID, gotOffset, err := ParseKeysetToken(tc.token)
+			if err != nil {
+				t.Fatalf("ParseKeysetToken(%q) returned an error: %v", tc.token, err)
+			}
+			if gotID != tc.wantID {
+				t.Errorf("ParseKeysetToken(%q) id = %q, want %q", tc.token, gotID, tc.wantID)
+			}
+			if gotOffset != tc.wantOffset {
+				t.Errorf("ParseKeysetToken(%q) offset = %d, want %d", tc.token, gotOffset, tc.wantOffset)
+			}
+		})
+	}
+}
+
 // TestCappedForDomainFilter covers the page-size cap for the
 // allowed-domains dot-walk filter (user.emailENDSWITH). The cap must apply
 // only when the domain filter itself would apply (enumeration, userId=="",
