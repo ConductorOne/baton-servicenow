@@ -255,7 +255,10 @@ func TestNextKeysetToken(t *testing.T) {
 	// silently truncates.
 	t.Run("short but nonempty page continues pagination", func(t *testing.T) {
 		items := []item{{"a"}, {"b"}}
-		got := nextKeysetToken(items, idFn)
+		got, err := nextKeysetToken(items, idFn)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		if got != "b" {
 			t.Errorf("nextKeysetToken(...) = %q, want %q (must not treat a short page as the last one)", got, "b")
 		}
@@ -263,18 +266,147 @@ func TestNextKeysetToken(t *testing.T) {
 
 	t.Run("full page continues from the last row's sys_id", func(t *testing.T) {
 		items := []item{{"a"}, {"b"}, {"c"}}
-		got := nextKeysetToken(items, idFn)
+		got, err := nextKeysetToken(items, idFn)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		if got != "c" {
 			t.Errorf("nextKeysetToken(...) = %q, want %q", got, "c")
 		}
 	})
 
 	t.Run("empty page terminates pagination", func(t *testing.T) {
-		got := nextKeysetToken([]item{}, idFn)
+		got, err := nextKeysetToken([]item{}, idFn)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		if got != "" {
 			t.Errorf("nextKeysetToken(...) = %q, want empty token", got)
 		}
 	})
+
+	// sys_user_role/sys_user_has_role/sys_group_has_role rows written by
+	// third-party update sets can carry non-canonical sys_ids -- short,
+	// human-chosen names, or hex with a stray trailing character. These must
+	// still produce a usable cursor instead of poisoning the next page.
+	t.Run("non-canonical human-chosen sys_id still produces a cursor", func(t *testing.T) {
+		items := []item{{"glean_user_role"}}
+		got, err := nextKeysetToken(items, idFn)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "glean_user_role" {
+			t.Errorf("nextKeysetToken(...) = %q, want %q", got, "glean_user_role")
+		}
+	})
+
+	t.Run("31-hex-plus-trailing-char sys_id still produces a cursor", func(t *testing.T) {
+		items := []item{{"ffd6d201d7b3020058c92cf65e61039g"}}
+		got, err := nextKeysetToken(items, idFn)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "ffd6d201d7b3020058c92cf65e61039g" {
+			t.Errorf("nextKeysetToken(...) = %q, want %q", got, "ffd6d201d7b3020058c92cf65e61039g")
+		}
+	})
+
+	t.Run("mixed-case sys_id is preserved, not lowercased", func(t *testing.T) {
+		items := []item{{"AbC123"}}
+		got, err := nextKeysetToken(items, idFn)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "AbC123" {
+			t.Errorf("nextKeysetToken(...) = %q, want %q (case must survive the round trip)", got, "AbC123")
+		}
+	})
+
+	t.Run("sys_id with a query-injection character is rejected at the producing page", func(t *testing.T) {
+		items := []item{{"abc^ORDERBYname"}}
+		if _, err := nextKeysetToken(items, idFn); err == nil {
+			t.Error("nextKeysetToken(...) = nil error, want a rejection: this sys_id could break out of the sysparm_query fragment")
+		}
+	})
+}
+
+// TestParseKeysetToken_RoundTripsNonCanonicalCursors: the cursor produced by
+// EncodeKeysetToken must parse back byte-for-byte,
+// including case, for the sys_id shapes that broke pagination permanently.
+func TestParseKeysetToken_RoundTripsNonCanonicalCursors(t *testing.T) {
+	tests := []struct {
+		name   string
+		lastID string
+		offset int
+	}{
+		{name: "canonical 32-hex", lastID: "ffd6d201d7b3020058c92cf65e610390", offset: 0},
+		{name: "human-chosen short id", lastID: "glean_user_role", offset: 0},
+		{name: "31-hex plus trailing non-hex char", lastID: "ffd6d201d7b3020058c92cf65e61039g", offset: 0},
+		{name: "mixed case", lastID: "AbC123", offset: 0},
+		{name: "32-digit all-numeric sys_id", lastID: "00000000000000000000000000000042", offset: 0},
+		{name: "short all-numeric sys_id", lastID: "12345", offset: 0},
+		{name: "short all-numeric sys_id with a skip offset", lastID: "12345", offset: 50},
+		{name: "with a skip offset", lastID: "glean_user_role", offset: 50},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			token, err := EncodeKeysetToken(tc.lastID, tc.offset)
+			if err != nil {
+				t.Fatalf("EncodeKeysetToken(%q, %d) returned an error: %v", tc.lastID, tc.offset, err)
+			}
+
+			gotID, gotOffset, err := ParseKeysetToken(token)
+			if err != nil {
+				t.Fatalf("ParseKeysetToken(%q) returned an error: %v", token, err)
+			}
+			if gotID != tc.lastID {
+				t.Errorf("ParseKeysetToken(%q) id = %q, want %q", token, gotID, tc.lastID)
+			}
+			if gotOffset != tc.offset {
+				t.Errorf("ParseKeysetToken(%q) offset = %d, want %d", token, gotOffset, tc.offset)
+			}
+		})
+	}
+}
+
+// TestEncodeKeysetToken_RejectsQueryInjectionCharacters guards the reason the
+// cursor charset is restricted at all: the cursor is interpolated unescaped
+// into a sysparm_query fragment (keysetCursorFragment), so characters like
+// ^ or = must never reach EncodeKeysetToken's output.
+func TestEncodeKeysetToken_RejectsQueryInjectionCharacters(t *testing.T) {
+	for _, lastID := range []string{"abc^ORDERBYname", "abc=1", "abc>1", "abc def", "abc'1"} {
+		if _, err := EncodeKeysetToken(lastID, 0); err == nil {
+			t.Errorf("EncodeKeysetToken(%q, 0) = nil error, want a rejection", lastID)
+		}
+	}
+}
+
+// TestEncodeKeysetToken_ShortAllNumericSysIDRoundTrips guards against
+// EncodeKeysetToken applying ParseKeysetToken's stale-legacy-token heuristic
+// (reject a short all-numeric string) to a live row's sys_id -- and against
+// the two functions disagreeing about the encoded shape. An earlier version
+// of this fix relaxed EncodeKeysetToken to accept "12345" but left it encoded
+// bare, which ParseKeysetToken then rejected as a stale legacy token: the
+// same permanent-sync-failure bug, just moved from encode to parse. Asserting
+// only the encoded string (not the round trip) is exactly how that went
+// unnoticed, so this checks both.
+func TestEncodeKeysetToken_ShortAllNumericSysIDRoundTrips(t *testing.T) {
+	token, err := EncodeKeysetToken("12345", 0)
+	if err != nil {
+		t.Fatalf("EncodeKeysetToken(%q, 0) returned an error: %v", "12345", err)
+	}
+
+	gotID, gotOffset, err := ParseKeysetToken(token)
+	if err != nil {
+		t.Fatalf("ParseKeysetToken(%q) returned an error: %v (the token EncodeKeysetToken just produced must be parseable)", token, err)
+	}
+	if gotID != "12345" {
+		t.Errorf("ParseKeysetToken(%q) id = %q, want %q", token, gotID, "12345")
+	}
+	if gotOffset != 0 {
+		t.Errorf("ParseKeysetToken(%q) offset = %d, want 0", token, gotOffset)
+	}
 }
 
 // TestCappedForDomainFilter covers the page-size cap for the

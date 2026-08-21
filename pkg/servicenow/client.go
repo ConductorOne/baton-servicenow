@@ -207,10 +207,16 @@ func getKeysetPage[T any](
 		return nil, "", annos, err
 	}
 
-	token := nextKeysetPageToken(ctx, url, header, keysetVars, resp.Result, idFn)
+	token, err := nextKeysetPageToken(ctx, url, header, keysetVars, resp.Result, idFn)
+	if err != nil {
+		return nil, "", annos, fmt.Errorf("%s: %w", url, err)
+	}
 	// An empty token ends the listing, so a page that returned rows must never
 	// produce one -- that would drop the rest of the table without a trace.
-	if len(resp.Result) > 0 && token == "" {
+	// Except a point lookup (Limit<=1): it never continues pagination, so an
+	// empty token alongside its one matched row is the intended outcome, not
+	// a dropped table.
+	if keysetVars.Limit > 1 && len(resp.Result) > 0 && token == "" {
 		return nil, "", annos, fmt.Errorf("page returned %d rows but no cursor for %s", len(resp.Result), url)
 	}
 	return resp.Result, token, annos, nil
@@ -225,7 +231,16 @@ func nextKeysetPageToken[T any](
 	v *KeysetPaginationVars,
 	items []T,
 	idFn func(T) string,
-) string {
+) (string, error) {
+	// A point lookup (Limit<=1, e.g. a Grant/Revoke idempotency check) never
+	// continues pagination -- its caller always discards the token -- so don't
+	// compute one. Otherwise a found row whose sys_id fails cursor validation
+	// would turn "the grant already exists" into a hard error instead of the
+	// GrantAlreadyExists/GrantAlreadyRevoked annotation callers rely on.
+	if v.Limit <= 1 {
+		return "", nil
+	}
+
 	if len(items) == 0 {
 		return nextSkipToken(ctx, url, header, v)
 	}
@@ -245,13 +260,10 @@ func nextKeysetPageToken[T any](
 // or a window row-level ACLs emptied (a token stepping the offset past it).
 // X-Total-Count counts matching rows before ACLs run, so it still sees the rows
 // this page could not.
-func nextSkipToken(ctx context.Context, url string, header http.Header, v *KeysetPaginationVars) string {
+// nextKeysetPageToken already returns before calling this for Limit<=1, so an
+// empty page here always means a real window, never a point lookup.
+func nextSkipToken(ctx context.Context, url string, header http.Header, v *KeysetPaginationVars) (string, error) {
 	l := ctxzap.Extract(ctx)
-
-	// Existence checks pass Limit 1: empty is the answer, not a page boundary.
-	if v.Limit <= 1 {
-		return ""
-	}
 
 	count, ok := readTotalCount(header)
 	if !ok {
@@ -259,7 +271,7 @@ func nextSkipToken(ctx context.Context, url string, header http.Header, v *Keyse
 			zap.String("url", url),
 			zap.String("cursor", v.LastID),
 		)
-		return ""
+		return "", nil
 	}
 
 	// The window covered rows Offset+1..Offset+Limit past the cursor. Anything
@@ -276,7 +288,7 @@ func nextSkipToken(ctx context.Context, url string, header http.Header, v *Keyse
 			zap.Int("count", count),
 			zap.Int("offset", v.Offset),
 		)
-		return ""
+		return "", nil
 	}
 	return EncodeKeysetToken(v.LastID, next)
 }

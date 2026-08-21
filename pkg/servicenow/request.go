@@ -160,28 +160,76 @@ func keysetCursorFragment(lastID string) string {
 // keys off len(items) < limit: ServiceNow doesn't always return exactly the
 // requested count, so a short-but-nonempty page must not end the listing. What an
 // empty page means is nextSkipToken's call, not this one's.
-func nextKeysetToken[T any](items []T, idFn func(T) string) string {
+func nextKeysetToken[T any](items []T, idFn func(T) string) (string, error) {
 	if len(items) == 0 {
-		return ""
+		return "", nil
 	}
 	return EncodeKeysetToken(idFn(items[len(items)-1]), 0)
 }
 
+// cursorPattern is the charset EncodeKeysetToken accepts for a sys_id-derived
+// cursor. ServiceNow sys_ids aren't always canonical 32-char hex GUIDs: rows
+// written by third-party update sets (seen in practice on sys_user_role,
+// sys_user_has_role, sys_group_has_role) can carry short, mixed-case,
+// human-chosen ids like "glean_user_role", or hex with a stray trailing
+// character. This is widened to admit that real-world variance while still
+// excluding characters (^, =, >, whitespace, quotes, ...) that would let a
+// cursor value escape the sysparm_query fragment it's interpolated into
+// unescaped (see keysetCursorFragment) -- this regex is a query-injection
+// guard, not just a format check.
+const cursorCharset = `[0-9A-Za-z_.\-]{1,32}`
+
 // Matches "cursor" or "cursor:offset". The cursor is optional: the first window
 // of a listing can be the emptied one, leaving nothing to seek from.
-var keysetTokenPattern = regexp.MustCompile(`^([0-9a-fA-F]{32})?(?::([0-9]{1,18}))?$`)
+var keysetTokenPattern = regexp.MustCompile(`^(` + cursorCharset + `)?(?::([0-9]{1,18}))?$`)
+
+var cursorPattern = regexp.MustCompile(`^` + cursorCharset + `$`)
+
+// allDigitsPattern matches a purely numeric string. Go's RE2 engine has no
+// lookahead, so "at least one non-digit character" is checked as a second,
+// separate pattern rather than folded into cursorPattern.
+var allDigitsPattern = regexp.MustCompile(`^[0-9]+$`)
+
+// looksLikeStaleOffsetToken reports whether a bare cursor string (no
+// ":offset" segment) is indistinguishable from a stale token left over from
+// baton-servicenow's pre-keyset (<=v1.1.18) offset-based pagination, which
+// encoded the page position as a short bare integer (e.g. "150"). A canonical
+// sys_id is always exactly 32 characters and can legitimately be all-digits
+// (nothing requires a hex GUID to contain a letter), so length -- not the
+// digits themselves -- is what distinguishes the two: a page offset never
+// reaches 32 digits.
+//
+// This only matters for a BARE cursor. EncodeKeysetToken forces the
+// ":offset" form (even for offset 0) whenever lastID itself would collide
+// with this shape, which removes the ambiguity at the source instead of
+// asking the parser to guess.
+func looksLikeStaleOffsetToken(cursor string) bool {
+	return len(cursor) != 32 && allDigitsPattern.MatchString(cursor)
+}
 
 // EncodeKeysetToken is the only producer of the page token format. A bare cursor
-// is the common shape: nothing to skip.
-func EncodeKeysetToken(lastID string, offset int) string {
-	if offset == 0 {
-		return lastID
+// is the common shape: nothing to skip. Validates lastID's charset -- the
+// query-injection guard -- so a sys_id with disallowed characters fails here,
+// at the page that produced it, with the row's own context in the error --
+// not one page later, parsed out of a token with none.
+func EncodeKeysetToken(lastID string, offset int) (string, error) {
+	if lastID != "" && !cursorPattern.MatchString(lastID) {
+		return "", fmt.Errorf("cannot build page cursor: sys_id %q is outside the allowed cursor charset %s", lastID, cursorPattern.String())
 	}
-	return fmt.Sprintf("%s:%d", lastID, offset)
+	// A short all-numeric sys_id, encoded bare, is indistinguishable from a
+	// stale pre-keyset offset token (see looksLikeStaleOffsetToken and
+	// ParseKeysetToken). Force the ":offset" form even at offset 0 so the
+	// parser can tell the two apart by shape alone.
+	if offset == 0 && !looksLikeStaleOffsetToken(lastID) {
+		return lastID, nil
+	}
+	return fmt.Sprintf("%s:%d", lastID, offset), nil
 }
 
 // ParseKeysetToken is the only consumer of it, returning the cursor and the skip
-// offset.
+// offset. The cursor is returned as-is: case is significant in a ServiceNow
+// sys_id and must not be normalized away (an earlier version lower-cased every
+// cursor, corrupting mixed-case ids on the very next page request).
 func ParseKeysetToken(token string) (string, int, error) {
 	if token == "" {
 		return "", 0, nil
@@ -192,8 +240,17 @@ func ParseKeysetToken(token string) (string, int, error) {
 		return "", 0, fmt.Errorf("malformed page token %q", token)
 	}
 
+	hasOffsetSegment := match[2] != ""
+	// A bare (no ":offset" segment) purely numeric cursor is a stale
+	// pre-keyset token, not a sys_id -- reject it rather than mis-seeking on
+	// it. A short all-numeric sys_id is never encoded bare (see
+	// EncodeKeysetToken), so this can't reject a real cursor.
+	if match[1] != "" && !hasOffsetSegment && looksLikeStaleOffsetToken(match[1]) {
+		return "", 0, fmt.Errorf("malformed page token %q: %q is not a valid cursor", token, match[1])
+	}
+
 	var offset int
-	if match[2] != "" {
+	if hasOffsetSegment {
 		parsed, err := strconv.Atoi(match[2])
 		if err != nil {
 			return "", 0, fmt.Errorf("malformed offset in page token %q: %w", token, err)
@@ -201,7 +258,7 @@ func ParseKeysetToken(token string) (string, int, error) {
 		offset = parsed
 	}
 
-	return strings.ToLower(match[1]), offset, nil
+	return match[1], offset, nil
 }
 
 type FilterVars struct {

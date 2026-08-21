@@ -405,6 +405,28 @@ func TestGetUserToRole_PointLookupNeverEscalates(t *testing.T) {
 	}
 }
 
+// A point lookup (Limit:1) must never fail on a matched row's sys_id, even
+// one that couldn't be encoded as a cursor: the token is never used for a
+// call this shape, and failing here would turn a successful Grant/Revoke
+// idempotency check ("this grant already exists") into a hard error instead
+// of the GrantAlreadyExists/GrantAlreadyRevoked annotation callers rely on.
+func TestGetUserToRole_PointLookupIgnoresUnencodableSysID(t *testing.T) {
+	stub := userToRoleStub([]string{"bad^id"})
+	client, done := newStubClient(t, stub, nil)
+	defer done()
+
+	rows, next, _, err := client.GetUserToRole(context.Background(), "user-1", "role-1", KeysetPaginationVars{Limit: 1})
+	if err != nil {
+		t.Fatalf("unexpected error: %v (a point lookup must not encode a cursor for its matched row)", err)
+	}
+	if len(rows) != 1 {
+		t.Errorf("rows = %v, want the one matched row", rows)
+	}
+	if next != "" {
+		t.Errorf("next token = %q, want empty: a point lookup has no page to continue", next)
+	}
+}
+
 // The allowed-domains filter must survive every request of a listing, skip included:
 // dropping it there would recover rows scoped differently from the page it replaces.
 func TestGetUserToRole_DomainFilterSurvivesTheSkip(t *testing.T) {
