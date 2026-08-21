@@ -398,6 +398,71 @@ func TestEncodeKeysetToken_RejectsQueryInjectionCharacters(t *testing.T) {
 	}
 }
 
+// TestEncodeKeysetToken_RejectsJavascriptSchemePrefix: keysetCursorFragment
+// interpolates the cursor directly after "sys_id>", so a cursor beginning
+// with "javascript:" would land exactly where ServiceNow's encoded-query
+// idiom evaluates a script server-side (e.g.
+// "sys_created_on>javascript:gs.beginningOfToday()"). ':' is otherwise a
+// legal cursor character, so this prefix needs its own check.
+func TestEncodeKeysetToken_RejectsJavascriptSchemePrefix(t *testing.T) {
+	for _, lastID := range []string{"javascript:gs.beginningOfToday()", "JavaScript:alert(1)"} {
+		if _, err := EncodeKeysetToken(lastID, 0); err == nil {
+			t.Errorf("EncodeKeysetToken(%q, 0) = nil error, want a rejection", lastID)
+		}
+	}
+	// A sys_id that merely contains "javascript:" past the start must still
+	// round-trip -- only the prefix position is dangerous.
+	token, err := EncodeKeysetToken("qa_javascript:not_a_prefix", 0)
+	if err != nil {
+		t.Fatalf("EncodeKeysetToken(...) returned an error for a non-prefix occurrence: %v", err)
+	}
+	if token != "qa_javascript:not_a_prefix" {
+		t.Errorf("EncodeKeysetToken(...) = %q, want the cursor unchanged", token)
+	}
+}
+
+// TestParseKeysetToken_RejectsLegacyColonOffsetShape guards the
+// v1.1.19-v1.1.22 ':'-delimited "cursor:offset" format (released, though
+// never promoted to the stable channel): now that ':' is a legal cursor
+// character, a bare token ending in ":<digits>" is genuinely ambiguous
+// between "a real cursor that happens to end that way" and "a legacy
+// cursor/offset pair" persisted before a connector upgrade. ParseKeysetToken
+// must reject it -- silently reading it as a bare cursor would drop the
+// offset and seek from a cursor that never existed.
+func TestParseKeysetToken_RejectsLegacyColonOffsetShape(t *testing.T) {
+	for _, token := range []string{"glean_user_role:50", "ffd6d201d7b3020058c92cf65e610390:50"} {
+		if _, _, err := ParseKeysetToken(token); err == nil {
+			t.Errorf("ParseKeysetToken(%q) = nil error, want a rejection (looks like a legacy cursor:offset pair)", token)
+		}
+	}
+}
+
+// TestEncodeKeysetToken_ColonOffsetSuffixSysIDRoundTrips guards the producer
+// side of the same ambiguity: a live sys_id that happens to end in
+// ":<digits>" (e.g. "glean_user_role:50") must not be encoded bare, or
+// ParseKeysetToken would reject it as a legacy cursor/offset pair on the
+// very next page -- the same permanent-sync-failure shape
+// TestEncodeKeysetToken_ShortAllNumericSysIDRoundTrips guards for a stale
+// pre-keyset token. EncodeKeysetToken must force the "^offset" form instead,
+// same as it does for a short all-numeric cursor.
+func TestEncodeKeysetToken_ColonOffsetSuffixSysIDRoundTrips(t *testing.T) {
+	token, err := EncodeKeysetToken("glean_user_role:50", 0)
+	if err != nil {
+		t.Fatalf("EncodeKeysetToken(%q, 0) returned an error: %v", "glean_user_role:50", err)
+	}
+
+	gotID, gotOffset, err := ParseKeysetToken(token)
+	if err != nil {
+		t.Fatalf("ParseKeysetToken(%q) returned an error: %v (the token EncodeKeysetToken just produced must be parseable)", token, err)
+	}
+	if gotID != "glean_user_role:50" {
+		t.Errorf("ParseKeysetToken(%q) id = %q, want %q", token, gotID, "glean_user_role:50")
+	}
+	if gotOffset != 0 {
+		t.Errorf("ParseKeysetToken(%q) offset = %d, want 0", token, gotOffset)
+	}
+}
+
 // TestEncodeKeysetToken_ShortAllNumericSysIDRoundTrips guards against
 // EncodeKeysetToken applying ParseKeysetToken's stale-legacy-token heuristic
 // (reject a short all-numeric string) to a live row's sys_id -- and against

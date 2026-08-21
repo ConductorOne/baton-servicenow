@@ -202,6 +202,19 @@ var cursorPattern = regexp.MustCompile(`^` + cursorCharset + `$`)
 // separate pattern rather than folded into cursorPattern.
 var allDigitsPattern = regexp.MustCompile(`^[0-9]+$`)
 
+// legacyOffsetSuffixPattern matches a bare cursor ending in ":<digits>" --
+// the exact shape v1.1.19 through v1.1.22 (all released, though never to the
+// stable channel) encoded for "cursor with a skip offset" using ':' as the
+// delimiter. Now that ':' is a legal cursor character in its own right, that
+// shape is genuinely ambiguous (a real cursor can end in ":<digits>" too),
+// so ParseKeysetToken rejects it outright rather than guessing -- silently
+// treating "glean_user_role:50" as a bare cursor with the ":50" dropped
+// would seek from a cursor that never existed and skip every row the
+// original offset was meant to step past, succeeding while quietly losing
+// data. Rejecting it converts that into the same loud, safe failure already
+// used for a stale pre-keyset token (looksLikeStaleOffsetToken).
+var legacyOffsetSuffixPattern = regexp.MustCompile(`:[0-9]{1,18}$`)
+
 // looksLikeStaleOffsetToken reports whether a bare cursor string (no
 // ":offset" segment) is indistinguishable from a stale token left over from
 // baton-servicenow's pre-keyset (<=v1.1.18) offset-based pagination, which
@@ -213,8 +226,8 @@ var allDigitsPattern = regexp.MustCompile(`^[0-9]+$`)
 //
 // This only matters for a BARE cursor. EncodeKeysetToken forces the
 // "^offset" form (even for offset 0) whenever lastID itself would collide
-// with this shape, which removes the ambiguity at the source instead of
-// asking the parser to guess.
+// with this shape, or with legacyOffsetSuffixPattern's, which removes the
+// ambiguity at the source instead of asking the parser to guess.
 func looksLikeStaleOffsetToken(cursor string) bool {
 	return len(cursor) != 32 && allDigitsPattern.MatchString(cursor)
 }
@@ -228,14 +241,31 @@ func EncodeKeysetToken(lastID string, offset int) (string, error) {
 	if lastID != "" && !cursorPattern.MatchString(lastID) {
 		return "", fmt.Errorf("cannot build page cursor: sys_id %q is outside the allowed cursor charset %s", lastID, cursorPattern.String())
 	}
-	// A short all-numeric sys_id, encoded bare, is indistinguishable from a
-	// stale pre-keyset offset token (see looksLikeStaleOffsetToken and
+	if hasJavascriptSchemePrefix(lastID) {
+		return "", fmt.Errorf("cannot build page cursor: sys_id %q begins with a javascript: scheme, which ServiceNow evaluates server-side when it lands after sys_id>", lastID)
+	}
+	// A short all-numeric sys_id, or one ending in ":<digits>", encoded
+	// bare, is indistinguishable from a stale pre-keyset token or a
+	// v1.1.19-v1.1.22 ':'-delimited cursor/offset pair (see
+	// looksLikeStaleOffsetToken, legacyOffsetSuffixPattern, and
 	// ParseKeysetToken). Force the "^offset" form even at offset 0 so the
-	// parser can tell the two apart by shape alone.
-	if offset == 0 && !looksLikeStaleOffsetToken(lastID) {
+	// parser can tell them apart from a real bare cursor by shape alone.
+	if offset == 0 && !looksLikeStaleOffsetToken(lastID) && !legacyOffsetSuffixPattern.MatchString(lastID) {
 		return lastID, nil
 	}
 	return fmt.Sprintf("%s^%d", lastID, offset), nil
+}
+
+// hasJavascriptSchemePrefix reports whether cursor begins with a
+// "javascript:" scheme (case-insensitive), ServiceNow's encoded-query
+// idiom for evaluating a script server-side (e.g.
+// "sys_created_on>javascript:gs.beginningOfToday()"). keysetCursorFragment
+// interpolates the cursor directly after "sys_id>", the exact prefix
+// position that idiom needs, so a cursor value can't be allowed to start
+// with it even though ':' is otherwise a legal cursor character.
+func hasJavascriptSchemePrefix(cursor string) bool {
+	const scheme = "javascript:"
+	return len(cursor) >= len(scheme) && strings.EqualFold(cursor[:len(scheme)], scheme)
 }
 
 // ParseKeysetToken is the only consumer of it, returning the cursor and the skip
@@ -259,6 +289,13 @@ func ParseKeysetToken(token string) (string, int, error) {
 	// EncodeKeysetToken), so this can't reject a real cursor.
 	if match[1] != "" && !hasOffsetSegment && looksLikeStaleOffsetToken(match[1]) {
 		return "", 0, fmt.Errorf("malformed page token %q: %q is not a valid cursor", token, match[1])
+	}
+	// A bare cursor ending in ":<digits>" is the v1.1.19-v1.1.22
+	// ':'-delimited "cursor:offset" shape (see legacyOffsetSuffixPattern).
+	// Reject it rather than silently treating it as a bare cursor with the
+	// offset dropped.
+	if match[1] != "" && !hasOffsetSegment && legacyOffsetSuffixPattern.MatchString(match[1]) {
+		return "", 0, fmt.Errorf("malformed page token %q: %q looks like a legacy ':'-delimited cursor/offset pair", token, match[1])
 	}
 
 	var offset int
