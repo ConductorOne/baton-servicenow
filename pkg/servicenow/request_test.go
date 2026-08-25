@@ -333,13 +333,13 @@ func TestNextKeysetToken(t *testing.T) {
 	// token format used to delimit cursor/offset with it. The delimiter is
 	// now ^, so a sys_id containing : must round-trip like any other.
 	t.Run("sys_id containing a colon still produces a cursor", func(t *testing.T) {
-		items := []item{{"qa:cxp947:colon"}}
+		items := []item{{"qa:colon:example"}}
 		got, err := nextKeysetToken(items, idFn)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got != "qa:cxp947:colon" {
-			t.Errorf("nextKeysetToken(...) = %q, want %q", got, "qa:cxp947:colon")
+		if got != "qa:colon:example" {
+			t.Errorf("nextKeysetToken(...) = %q, want %q", got, "qa:colon:example")
 		}
 	})
 }
@@ -361,8 +361,8 @@ func TestParseKeysetToken_RoundTripsNonCanonicalCursors(t *testing.T) {
 		{name: "short all-numeric sys_id", lastID: "12345", offset: 0},
 		{name: "short all-numeric sys_id with a skip offset", lastID: "12345", offset: 50},
 		{name: "with a skip offset", lastID: "glean_user_role", offset: 50},
-		{name: "colon-bearing sys_id", lastID: "qa:cxp947:colon", offset: 0},
-		{name: "colon-bearing sys_id with a skip offset", lastID: "qa:cxp947:colon", offset: 50},
+		{name: "colon-bearing sys_id", lastID: "qa:colon:example", offset: 0},
+		{name: "colon-bearing sys_id with a skip offset", lastID: "qa:colon:example", offset: 50},
 	}
 
 	for _, tc := range tests {
@@ -418,6 +418,20 @@ func TestEncodeKeysetToken_RejectsJavascriptSchemePrefix(t *testing.T) {
 	}
 	if token != "qa_javascript:not_a_prefix" {
 		t.Errorf("EncodeKeysetToken(...) = %q, want the cursor unchanged", token)
+	}
+}
+
+// TestParseKeysetToken_RejectsJavascriptSchemePrefix mirrors
+// TestEncodeKeysetToken_RejectsJavascriptSchemePrefix on the parse side:
+// ParseKeysetToken re-validates the charset independently of EncodeKeysetToken
+// (its only intended producer), so it must not trust that a javascript:-prefixed
+// cursor could only have arrived pre-rejected. Covers both the bare-cursor and
+// "cursor^offset" shapes, since the prefix is dangerous in either.
+func TestParseKeysetToken_RejectsJavascriptSchemePrefix(t *testing.T) {
+	for _, token := range []string{"javascript:gs.beginningOfToday()", "JavaScript:alert(1)", "javascript:gs.foo()^0"} {
+		if _, _, err := ParseKeysetToken(token); err == nil {
+			t.Errorf("ParseKeysetToken(%q) = nil error, want a rejection (javascript: scheme prefix)", token)
+		}
 	}
 }
 

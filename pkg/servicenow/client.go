@@ -265,8 +265,15 @@ func nextKeysetPageToken[T any](
 	// to ^ server-side and parsed as the operator). Falling through to that
 	// error would exit the sync and, because the row persists in the source
 	// table, fail identically on every subsequent run. Instead, step past
-	// this whole window by offset from the same base cursor, the same
-	// fallback nextSkipToken already uses for an ACL-emptied window.
+	// this page by offset from the same base cursor.
+	//
+	// This steps by len(items), not v.Limit like nextSkipToken's ACL-emptied
+	// fallback does: sysparm_limit applies before row-level ACLs, so a
+	// thinned page can return far fewer rows than Limit, and stepping by
+	// Limit would skip over unread rows the next request should still see.
+	// The tradeoff is that on a heavily ACL-thinned page this fallback can
+	// fire again on the next hop, re-emitting the unseekable row each time --
+	// it still terminates, just not in one step.
 	next := v.Offset + len(items)
 	fallbackToken, fallbackErr := EncodeKeysetToken(v.LastID, next)
 	if fallbackErr != nil {

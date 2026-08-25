@@ -172,7 +172,7 @@ func nextKeysetToken[T any](items []T, idFn func(T) string) (string, error) {
 // written by third-party update sets (seen in practice on sys_user_role,
 // sys_user_has_role, sys_group_has_role) can carry short, mixed-case,
 // human-chosen ids like "glean_user_role", arbitrary punctuation like
-// "qa:cxp947:colon", or hex with a stray trailing character. This is a
+// "qa:colon:example", or hex with a stray trailing character. This is a
 // disallow-list, not an allow-list: it excludes only the characters
 // (^, =, >, <, whitespace, quotes) that carry meaning in ServiceNow's query
 // language and would let a cursor value escape the sysparm_query fragment
@@ -296,6 +296,14 @@ func ParseKeysetToken(token string) (string, int, error) {
 	// offset dropped.
 	if match[1] != "" && !hasOffsetSegment && legacyOffsetSuffixPattern.MatchString(match[1]) {
 		return "", 0, fmt.Errorf("malformed page token %q: %q looks like a legacy ':'-delimited cursor/offset pair", token, match[1])
+	}
+	// Defense in depth: EncodeKeysetToken already refuses to produce a
+	// javascript:-prefixed cursor, but the parser re-validates the charset
+	// independently of its producer, so it re-validates this too rather than
+	// trusting every token handed to it came from EncodeKeysetToken. Applies
+	// regardless of hasOffsetSegment -- the prefix is dangerous in either shape.
+	if hasJavascriptSchemePrefix(match[1]) {
+		return "", 0, fmt.Errorf("malformed page token %q: cursor %q begins with a javascript: scheme, which ServiceNow evaluates server-side when it lands after sys_id>", token, match[1])
 	}
 
 	var offset int

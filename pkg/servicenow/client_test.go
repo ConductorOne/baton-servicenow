@@ -142,7 +142,7 @@ func TestGetRoles_StepsPastACaretSysIdByOffset(t *testing.T) {
 		case !isSeeking && r.URL.Query().Get("sysparm_offset") == "":
 			roles = []Role{
 				{BaseResource: BaseResource{Id: "role-000"}},
-				{BaseResource: BaseResource{Id: "qa^cxp947caret"}},
+				{BaseResource: BaseResource{Id: "qa^caretexample"}},
 			}
 		default:
 			page2Query = r.URL.Query().Get("sysparm_query")
@@ -178,7 +178,7 @@ func TestGetRoles_StepsPastACaretSysIdByOffset(t *testing.T) {
 		t.Fatalf("ParseKeysetToken(%q) returned an error: %v", next1, err)
 	}
 	if lastID != "" || offset != 2 {
-		t.Errorf("ParseKeysetToken(%q) = (%q, %d), want (\"\", 2): step past the whole window by offset, not seek on the caret sys_id", next1, lastID, offset)
+		t.Errorf("ParseKeysetToken(%q) = (%q, %d), want (\"\", 2): step past this page by offset, not seek on the caret sys_id", next1, lastID, offset)
 	}
 
 	_, _, _, err = client.GetRoles(context.Background(), KeysetPaginationVars{Limit: 50, LastID: lastID, Offset: offset})
