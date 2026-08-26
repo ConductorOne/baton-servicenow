@@ -20,9 +20,21 @@ const (
 
 // newCreateTicketTestClient stands up a ServiceNow stub that walks the
 // CreateTicket call chain: order the catalog item, look up the request item the
-// order produced, then PATCH its description. patchStatus controls the outcome
-// of that final PATCH, which is the call that fails in production.
-func newCreateTicketTestClient(t *testing.T, patchStatus int) (*ServiceNow, func()) {
+// order produced, PATCH its description, then read its labels back during ticket
+// conversion. Every step after the order runs against a request item that already
+// exists in ServiceNow, so each one is a chance to lose its id.
+type createTicketStub struct {
+	// Response status for the description PATCH and the label lookup. Zero
+	// means 200; these are the calls that fail in production.
+	patchStatus int
+	labelStatus int
+}
+
+func (c createTicketStub) failed(status int) bool {
+	return status != 0 && status != http.StatusOK
+}
+
+func newCreateTicketTestClient(t *testing.T, stub createTicketStub) (*ServiceNow, func()) {
 	t.Helper()
 
 	requestedItem := servicenow.RequestedItem{
@@ -44,8 +56,8 @@ func newCreateTicketTestClient(t *testing.T, patchStatus int) (*ServiceNow, func
 				Result: servicenow.RequestInfo{RequestID: "REQ0012345", RequestNumber: "REQ0012345"},
 			}
 		case r.Method == http.MethodPatch:
-			if patchStatus != http.StatusOK {
-				w.WriteHeader(patchStatus)
+			if stub.failed(stub.patchStatus) {
+				w.WriteHeader(stub.patchStatus)
 				return
 			}
 			updated := requestedItem
@@ -55,6 +67,10 @@ func newCreateTicketTestClient(t *testing.T, patchStatus int) (*ServiceNow, func
 		case strings.HasSuffix(r.URL.Path, "/sc_req_item"):
 			payload = servicenow.RequestItemsResponse{Result: []servicenow.RequestedItem{requestedItem}}
 		case strings.HasSuffix(r.URL.Path, "/label_entry"):
+			if stub.failed(stub.labelStatus) {
+				w.WriteHeader(stub.labelStatus)
+				return
+			}
 			payload = servicenow.LabelEntriesLabelNameResponse{Result: []servicenow.LabelEntryName{}}
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -95,7 +111,7 @@ func newTestTicket() (*v2.Ticket, *v2.TicketSchema) {
 // response carries a ticket -- without it the task is stranded mid-create with
 // nothing left to reconcile it against.
 func TestCreateTicket_KeepsCreatedItemWhenDescriptionUpdateFails(t *testing.T) {
-	s, closeServer := newCreateTicketTestClient(t, http.StatusBadRequest)
+	s, closeServer := newCreateTicketTestClient(t, createTicketStub{patchStatus: http.StatusBadRequest})
 	defer closeServer()
 
 	ticket, schema := newTestTicket()
@@ -125,7 +141,7 @@ func TestCreateTicket_KeepsCreatedItemWhenDescriptionUpdateFails(t *testing.T) {
 // The happy path still has to adopt the PATCH response, otherwise the returned
 // ticket reports a stale description.
 func TestCreateTicket_UsesUpdatedItemWhenDescriptionUpdateSucceeds(t *testing.T) {
-	s, closeServer := newCreateTicketTestClient(t, http.StatusOK)
+	s, closeServer := newCreateTicketTestClient(t, createTicketStub{})
 	defer closeServer()
 
 	ticket, schema := newTestTicket()
@@ -139,6 +155,64 @@ func TestCreateTicket_UsesUpdatedItemWhenDescriptionUpdateSucceeds(t *testing.T)
 	}
 	if created.GetDescription() != "description after update" {
 		t.Errorf("ticket description = %q, want the updated description", created.GetDescription())
+	}
+}
+
+// A failed label read is the other way the request item's id used to go missing:
+// the conversion returns a usable ticket alongside its error, and CreateTicket
+// discarded it. C1 then has no id for a request item that exists downstream, so
+// its retry orders a second one.
+func TestCreateTicket_KeepsCreatedItemWhenLabelFetchFails(t *testing.T) {
+	s, closeServer := newCreateTicketTestClient(t, createTicketStub{labelStatus: http.StatusForbidden})
+	defer closeServer()
+
+	ticket, schema := newTestTicket()
+
+	created, _, err := s.CreateTicket(context.Background(), ticket, schema)
+	if err == nil {
+		t.Fatal("expected the label fetch failure to be reported, got nil error")
+	}
+	if !strings.Contains(err.Error(), "failed to get labels for requested item") {
+		t.Errorf("error = %v, want it to mention the failed label fetch", err)
+	}
+
+	if created == nil {
+		t.Fatal("created ticket is nil; the already-created ServiceNow request item was lost")
+	}
+	if created.GetId() != testRequestedItemID {
+		t.Errorf("ticket id = %q, want %q", created.GetId(), testRequestedItemID)
+	}
+}
+
+// Every best-effort failure has to survive into the returned error. Reporting
+// only the last one hides why a ticket came back incomplete.
+func TestCreateTicket_ReportsEveryBestEffortFailure(t *testing.T) {
+	s, closeServer := newCreateTicketTestClient(t, createTicketStub{
+		patchStatus: http.StatusBadRequest,
+		labelStatus: http.StatusForbidden,
+	})
+	defer closeServer()
+
+	ticket, schema := newTestTicket()
+
+	created, _, err := s.CreateTicket(context.Background(), ticket, schema)
+	if err == nil {
+		t.Fatal("expected both failures to be reported, got nil error")
+	}
+	for _, want := range []string{
+		"failed to update catalog requested item description",
+		"failed to get labels for requested item",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v, want it to mention %q", err, want)
+		}
+	}
+
+	if created == nil {
+		t.Fatal("created ticket is nil; the already-created ServiceNow request item was lost")
+	}
+	if created.GetId() != testRequestedItemID {
+		t.Errorf("ticket id = %q, want %q", created.GetId(), testRequestedItemID)
 	}
 }
 

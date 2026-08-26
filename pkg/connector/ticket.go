@@ -183,10 +183,11 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 		serviceCatalogRequestedItem = updatedItem
 	}
 
+	// No early return on err: the conversion still yields a usable ticket when only
+	// the label fetch failed, and dropping it here would discard the id of a request
+	// item that already exists in ServiceNow -- a retry then orders a second one.
+	// Returning early would also swallow labelErr and updateErr.
 	ticket, annos, err := s.serviceCatalogRequestItemToTicket(ctx, serviceCatalogRequestedItem)
-	if err != nil {
-		return nil, annos, err
-	}
 
 	err = multierr.Combine(labelErr, updateErr, err)
 	if err != nil {
