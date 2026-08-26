@@ -167,7 +167,11 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 	}
 	_, labelErr := s.client.AddLabelsToRequest(ctx, serviceCatalogRequestedItem.Id, ticket.Labels)
 
-	serviceCatalogRequestedItem, _, updateErr := s.client.UpdateServiceCatalogRequestItem(ctx,
+	// The request item already exists in ServiceNow by this point, so the description
+	// update is best-effort: on failure keep the created item rather than the update's
+	// nil return, so the caller still learns the ticket id. Losing it strands a live
+	// ServiceNow request item that nothing will ever reconcile.
+	updatedItem, _, updateErr := s.client.UpdateServiceCatalogRequestItem(ctx,
 		serviceCatalogRequestedItem.Id,
 		&servicenow.RequestedItemUpdatePayload{
 			Description: ticket.Description,
@@ -175,6 +179,8 @@ func (s *ServiceNow) CreateTicket(ctx context.Context, ticket *v2.Ticket, schema
 	)
 	if updateErr != nil {
 		updateErr = fmt.Errorf("baton-servicenow: failed to update catalog requested item description: %w", updateErr)
+	} else {
+		serviceCatalogRequestedItem = updatedItem
 	}
 
 	ticket, annos, err := s.serviceCatalogRequestItemToTicket(ctx, serviceCatalogRequestedItem)
@@ -287,6 +293,12 @@ func (s *ServiceNow) schemaForCatalogItem(ctx context.Context, catalogItem *serv
 }
 
 func (s *ServiceNow) serviceCatalogRequestItemToTicket(ctx context.Context, requestedItem *servicenow.RequestedItem) (*v2.Ticket, annotations.Annotations, error) {
+	// A panic here fails every ticket in the enclosing BulkCreateTickets batch, not
+	// just this one, so a nil item has to surface as an error.
+	if requestedItem == nil {
+		return nil, nil, errors.New("baton-servicenow: cannot convert a nil requested item to a ticket")
+	}
+
 	createdAt, err := time.Parse(time.DateTime, requestedItem.SysCreatedOn)
 	if err != nil {
 		return nil, nil, err
