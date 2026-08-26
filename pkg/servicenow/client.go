@@ -43,6 +43,21 @@ const (
 
 	UserRoleInheritanceBaseUrl = GlobalApiBaseURL + "/user_role_inheritance"
 
+	// On-Call Scheduling.
+	RotasBaseUrl            = TableAPIBaseURL + "/cmn_rota"
+	RotaDetailBaseUrl       = RotasBaseUrl + "/%s"
+	RostersBaseUrl          = TableAPIBaseURL + "/cmn_rota_roster"
+	RosterDetailBaseUrl     = RostersBaseUrl + "/%s"
+	RotaMembersBaseUrl      = TableAPIBaseURL + "/cmn_rota_member"
+	RotaMemberDetailBaseUrl = RotaMembersBaseUrl + "/%s"
+
+	// On-Call member provisioning action tables (engine-processed server-side).
+	OnCallAddMemberUrl    = TableAPIBaseURL + "/on_call_add_member"
+	OnCallRemoveMemberUrl = TableAPIBaseURL + "/on_call_remove_member"
+
+	// On-Call REST API (not the Table API): returns who is on call now.
+	WhoIsOnCallUrl = BaseURL + "/now/on_call_rota/whoisoncall"
+
 	// Service Catalogs.
 	ServiceCatalogRequestedItemBaseUrl        = TableAPIBaseURL + "/sc_req_item"
 	ServiceCatalogRequestedItemDetailsBaseUrl = ServiceCatalogRequestedItemBaseUrl + "/%s"
@@ -88,6 +103,9 @@ type SingleResponse[T any] struct {
 type IDResponse = SingleResponse[BaseResource]
 type UserResponse = SingleResponse[User]
 type GroupResponse = SingleResponse[Group]
+type RotaResponse = SingleResponse[Rota]
+type RosterResponse = SingleResponse[Roster]
+type WhoIsOnCallResponse = ListResponse[OnCallMember]
 type CatalogsResponse = ListResponse[Catalog]
 type CatalogItemsResponse = ListResponse[CatalogItem]
 type CatalogItemResponse = SingleResponse[CatalogItem]
@@ -380,7 +398,9 @@ func (c *Client) GetGroup(ctx context.Context, groupId string) (*Group, annotati
 		ctx,
 		c.apiURL(GroupBaseUrl, c.deployment, groupId),
 		&groupResponse,
-		WithFields(GroupFields...),
+		// manager is not in the default GroupFields (the bulk group list
+		// doesn't need it); request it here for schedule manager resolution.
+		WithFields("sys_id", "description", "name", "manager"),
 	)
 
 	if err != nil {
@@ -415,6 +435,93 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, id string) (annotation
 		ctx,
 		c.apiURL(GroupMemberDetailBaseUrl, c.deployment, id),
 		nil,
+	)
+}
+
+// Table `cmn_rota_roster` (On-Call Rosters).
+func (c *Client) GetRosters(ctx context.Context, paginationVars KeysetPaginationVars) ([]Roster, string, annotations.Annotations, error) {
+	return getKeysetPage(ctx, c, c.apiURL(RostersBaseUrl, c.deployment),
+		prepareRosterFilters(), &paginationVars,
+		func(r Roster) string { return r.Id })
+}
+
+// Table `cmn_rota_member` (On-Call Roster Members).
+func (c *Client) GetRotaMembers(ctx context.Context, rosterId string, memberId string, paginationVars KeysetPaginationVars) ([]RotaMember, string, annotations.Annotations, error) {
+	paginationVars = cappedForDomainFilter(memberId, c.AllowedDomains, paginationVars)
+	return getKeysetPage(ctx, c, c.apiURL(RotaMembersBaseUrl, c.deployment),
+		prepareRotaMemberFilter(rosterId, memberId, c.AllowedDomains), &paginationVars,
+		func(m RotaMember) string { return m.Id })
+}
+
+// WhoIsOnCall returns the on-call lineup for a roster now, ordered (Order==1 is
+// currently on call). Members must also be in the assignment group to appear.
+func (c *Client) WhoIsOnCall(ctx context.Context, rosterId string) ([]OnCallMember, error) {
+	var resp WhoIsOnCallResponse
+
+	_, _, err := c.get(
+		ctx,
+		c.apiURL(WhoIsOnCallUrl, c.deployment),
+		&resp,
+		WithQueryParam("roster_ids", rosterId),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.Result, nil
+}
+
+// GetRoster fetches a single on-call roster (cmn_rota_roster) by sys_id.
+func (c *Client) GetRoster(ctx context.Context, rosterId string) (*Roster, error) {
+	var resp RosterResponse
+	_, _, err := c.get(
+		ctx,
+		c.apiURL(RosterDetailBaseUrl, c.deployment, rosterId),
+		&resp,
+		WithFields("sys_id", "name", "rota"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &resp.Result, nil
+}
+
+// GetRota fetches a single on-call rota (cmn_rota) by sys_id.
+func (c *Client) GetRota(ctx context.Context, rotaId string) (*Rota, error) {
+	var resp RotaResponse
+	_, _, err := c.get(
+		ctx,
+		c.apiURL(RotaDetailBaseUrl, c.deployment, rotaId),
+		&resp,
+		WithFields("sys_id", "name", "group"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &resp.Result, nil
+}
+
+// AddOnCallMember adds a user to roster(s) via the on_call_add_member action
+// table; the engine creates the cmn_rota_member row. User must be in the group.
+func (c *Client) AddOnCallMember(ctx context.Context, payload OnCallAddMemberPayload) (annotations.Annotations, error) {
+	return c.post(
+		ctx,
+		c.apiURL(OnCallAddMemberUrl, c.deployment),
+		nil,
+		&payload,
+		WithIncludeResponseBody(),
+	)
+}
+
+// RemoveOnCallMember removes a user from roster(s) via the on_call_remove_member
+// action table.
+func (c *Client) RemoveOnCallMember(ctx context.Context, payload OnCallRemoveMemberPayload) (annotations.Annotations, error) {
+	return c.post(
+		ctx,
+		c.apiURL(OnCallRemoveMemberUrl, c.deployment),
+		nil,
+		&payload,
+		WithIncludeResponseBody(),
 	)
 }
 
@@ -558,6 +665,19 @@ func (c *Client) delete(
 	)
 
 	return annos, err
+}
+
+// IsInvalidTableError reports whether err is ServiceNow's HTTP 400 "Invalid
+// table" error, returned when a queried table doesn't exist — e.g. the on-call
+// tables when the On-Call Scheduling plugin isn't installed.
+func IsInvalidTableError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Invalid table")
+}
+
+// IsAccessDeniedError reports whether err is a ServiceNow HTTP 403, returned
+// when the table exists but the account lacks the read ACL for it.
+func IsAccessDeniedError(err error) bool {
+	return status.Code(err) == codes.PermissionDenied
 }
 
 // doRequest performs the request, decodes a successful JSON body into
