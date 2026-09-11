@@ -40,7 +40,7 @@ baton resources
 ## docker
 
 ```
-docker run --rm -v $(pwd):/out -e BATON_USERNAME=username BATON_PASSWORD=password BATON_DEPLOYMENT=deployment ghcr.io/conductorone/baton-servicenow:latest -f "/out/sync.c1z"
+docker run --rm -v $(pwd):/out -e BATON_USERNAME=username BATON_PASSWORD=password BATON_DEPLOYMENT=deployment public.ecr.aws/conductorone/baton-servicenow:latest -f "/out/sync.c1z"
 docker run --rm -v $(pwd):/out ghcr.io/conductorone/baton:latest -f "/out/sync.c1z" resources
 ```
 
