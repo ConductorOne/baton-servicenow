@@ -51,6 +51,8 @@ func newCreateTicketTestClient(t *testing.T, stub createTicketStub) (*ServiceNow
 
 		var payload any
 		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/servicecatalog/cart"):
+			payload = servicenow.ServiceCatalogCartResponse{Result: servicenow.ServiceCatalogCart{CartID: "empty-cart"}}
 		case strings.HasSuffix(r.URL.Path, "/order_now"):
 			payload = servicenow.OrderCatalogItemResponse{
 				Result: servicenow.RequestInfo{RequestID: "REQ0012345", RequestNumber: "REQ0012345"},
@@ -97,12 +99,12 @@ func newCreateTicketTestClient(t *testing.T, stub createTicketStub) (*ServiceNow
 
 func newTestTicket() (*v2.Ticket, *v2.TicketSchema) {
 	return &v2.Ticket{
-			DisplayName: "Access request",
-			Description: "please grant access",
-		}, &v2.TicketSchema{
-			Id:          "catalog-item-1",
-			DisplayName: "Access request",
-		}
+		DisplayName: "Access request",
+		Description: "please grant access",
+	}, &v2.TicketSchema{
+		Id:          "catalog-item-1",
+		DisplayName: "Access request",
+	}
 }
 
 // A failed description update must not lose the request item the order already
