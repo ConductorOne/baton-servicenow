@@ -148,19 +148,67 @@ func (c *Client) GetCatalogItemVariables(ctx context.Context, catalogItemId stri
 	return catalogItemVariablesResponse.Result, annos, nil
 }
 
-// Creating a service catalog request requires:
-// 1. Add catalog item to cart (with all required variables).
-// 2. Submit cart order.
+// CreateServiceCatalogRequest orders an item and returns its requested item.
+// Two-Step Checkout stages the item in a cart, which must be submitted before
+// the requested item can be looked up.
 func (c *Client) CreateServiceCatalogRequest(ctx context.Context, catalogItemId string, payload *OrderItemPayload) (*RequestedItem, annotations.Annotations, error) {
 	requestInfo, annos, err := c.OrderItemNow(ctx, catalogItemId, payload)
 	if err != nil {
 		return nil, annos, err
+	}
+	if requestInfo.RequestID == "" && requestInfo.CartID != "" {
+		cart, annos, err := c.GetServiceCatalogCart(ctx)
+		if err != nil {
+			return nil, annos, err
+		}
+		// order_now's cart_id and GET /cart's cart_id are not the same
+		// identifier in ServiceNow's Catalog API -- comparing them always
+		// fails, so identity is confirmed by item contents instead.
+		if len(cart.Items) != 1 || (cart.Items[0].CatalogItemID != catalogItemId && cart.Items[0].ItemID != catalogItemId) {
+			return nil, annos, fmt.Errorf(
+				"cannot submit service catalog cart %s: expected one item for catalog item %s, found %d item(s); clear the ServiceNow cart before retrying",
+				cart.CartID,
+				catalogItemId,
+				len(cart.Items),
+			)
+		}
+		requestInfo, annos, err = c.SubmitServiceCatalogCartOrder(ctx)
+		if err != nil {
+			return nil, annos, err
+		}
+	}
+	if requestInfo.RequestID == "" {
+		return nil, annos, errors.New("service catalog order response did not include a request ID")
 	}
 	requestItem, annos, err := c.GetServiceCatalogRequestedItemForRequest(ctx, requestInfo.RequestID)
 	if err != nil {
 		return nil, annos, err
 	}
 	return requestItem, annos, nil
+}
+
+func (c *Client) GetServiceCatalogCart(ctx context.Context) (*ServiceCatalogCart, annotations.Annotations, error) {
+	var cartResponse ServiceCatalogCartResponse
+	_, annos, err := c.get(ctx, c.apiURL(ServiceCatalogCartUrl, c.deployment), &cartResponse)
+	if err != nil {
+		return nil, annos, err
+	}
+	return &cartResponse.Result, annos, nil
+}
+
+func (c *Client) SubmitServiceCatalogCartOrder(ctx context.Context) (*RequestInfo, annotations.Annotations, error) {
+	var orderResponse OrderCatalogItemResponse
+	annos, err := c.post(
+		ctx,
+		c.apiURL(ServiceCatalogSubmitCartUrl, c.deployment),
+		&orderResponse,
+		nil,
+		WithIncludeResponseBody(),
+	)
+	if err != nil {
+		return nil, annos, err
+	}
+	return &orderResponse.Result, annos, nil
 }
 
 func (c *Client) OrderItemNow(ctx context.Context, catalogItemId string, payload *OrderItemPayload) (*RequestInfo, annotations.Annotations, error) {

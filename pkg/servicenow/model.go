@@ -248,6 +248,48 @@ type OrderItemPayload struct {
 type RequestInfo struct {
 	RequestNumber string `json:"request_number"`
 	RequestID     string `json:"request_id"`
+	CartID        string `json:"cart_id"`
+}
+
+// ServiceCatalogCart groups items by recurring frequency in ServiceNow's
+// response. The bucket names are instance data (for example, "none" or
+// "monthly"), so decode them dynamically rather than assuming a fixed set.
+type ServiceCatalogCart struct {
+	CartID string            `json:"cart_id"`
+	Items  []ServiceCartItem `json:"-"`
+}
+
+// ServiceCartItem identifies an item currently staged in a ServiceNow cart.
+type ServiceCartItem struct {
+	CartItemID    string `json:"cart_item_id"`
+	CatalogItemID string `json:"catalog_item_id"`
+	ItemID        string `json:"item_id"`
+}
+
+func (c *ServiceCatalogCart) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	if cartID, ok := fields["cart_id"]; ok {
+		if err := json.Unmarshal(cartID, &c.CartID); err != nil {
+			return err
+		}
+	}
+
+	c.Items = nil
+	for _, field := range fields {
+		var bucket struct {
+			Items []ServiceCartItem `json:"items"`
+		}
+		if err := json.Unmarshal(field, &bucket); err != nil || bucket.Items == nil {
+			continue
+		}
+		c.Items = append(c.Items, bucket.Items...)
+	}
+
+	return nil
 }
 
 type Label struct {
