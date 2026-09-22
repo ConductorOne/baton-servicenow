@@ -152,20 +152,12 @@ func (c *Client) GetCatalogItemVariables(ctx context.Context, catalogItemId stri
 // Two-Step Checkout stages the item in a cart, which must be submitted before
 // the requested item can be looked up.
 func (c *Client) CreateServiceCatalogRequest(ctx context.Context, catalogItemId string, payload *OrderItemPayload) (*RequestedItem, annotations.Annotations, error) {
-	cart, annos, err := c.GetServiceCatalogCart(ctx)
-	if err != nil {
-		return nil, annos, err
-	}
-	if len(cart.Items) > 0 {
-		return nil, annos, fmt.Errorf("cannot create service catalog request: cart %s contains %d existing item(s)", cart.CartID, len(cart.Items))
-	}
-
 	requestInfo, annos, err := c.OrderItemNow(ctx, catalogItemId, payload)
 	if err != nil {
 		return nil, annos, err
 	}
 	if requestInfo.RequestID == "" && requestInfo.CartID != "" {
-		cart, annos, err = c.GetServiceCatalogCart(ctx)
+		cart, annos, err := c.GetServiceCatalogCart(ctx)
 		if err != nil {
 			return nil, annos, err
 		}
@@ -173,12 +165,20 @@ func (c *Client) CreateServiceCatalogRequest(ctx context.Context, catalogItemId 
 		// identifier in ServiceNow's Catalog API -- comparing them always
 		// fails, so identity is confirmed by item contents instead.
 		if len(cart.Items) != 1 || (cart.Items[0].CatalogItemID != catalogItemId && cart.Items[0].ItemID != catalogItemId) {
-			return nil, annos, fmt.Errorf("cannot submit service catalog cart %s: expected one item for catalog item %s, found %d item(s)", cart.CartID, catalogItemId, len(cart.Items))
+			return nil, annos, fmt.Errorf(
+				"cannot submit service catalog cart %s: expected one item for catalog item %s, found %d item(s); clear the ServiceNow cart before retrying",
+				cart.CartID,
+				catalogItemId,
+				len(cart.Items),
+			)
 		}
 		requestInfo, annos, err = c.SubmitServiceCatalogCartOrder(ctx)
 		if err != nil {
 			return nil, annos, err
 		}
+	}
+	if requestInfo.RequestID == "" {
+		return nil, annos, errors.New("service catalog order response did not include a request ID")
 	}
 	requestItem, annos, err := c.GetServiceCatalogRequestedItemForRequest(ctx, requestInfo.RequestID)
 	if err != nil {
