@@ -73,6 +73,7 @@ type Group struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Roles       string `json:"roles"`
+	Manager     string `json:"manager"`
 }
 
 type GroupMember struct {
@@ -84,6 +85,57 @@ type GroupMember struct {
 type GroupMemberPayload struct {
 	User  string `json:"user"`
 	Group string `json:"group"`
+}
+
+// Table `cmn_rota` (On-Call Rotation). Belongs to a group; the group's manager
+// is the schedule's manager.
+type Rota struct {
+	BaseResource
+	Name  string `json:"name"`
+	Group string `json:"group"`
+}
+
+// Table `cmn_rota_roster` (On-Call Roster). A roster belongs to a rota.
+type Roster struct {
+	BaseResource
+	Name string `json:"name"`
+	Rota string `json:"rota"`
+}
+
+// Table `cmn_rota_member` (On-Call Roster Member). Joins a user to a roster.
+type RotaMember struct {
+	BaseResource
+	Roster string `json:"roster"`
+	Member string `json:"member"`
+	Order  string `json:"order"`
+}
+
+// OnCallMember is one whoisoncall lineup entry, ranked by Order (Order==1 is
+// currently on call).
+type OnCallMember struct {
+	UserId     string `json:"userId"`
+	Roster     string `json:"roster"`
+	Rota       string `json:"rota"`
+	Group      string `json:"group"`
+	Order      int    `json:"order"`
+	IsOverride bool   `json:"isOverride"`
+}
+
+// OnCallAddMemberPayload is posted to the `on_call_add_member` action table.
+type OnCallAddMemberPayload struct {
+	Member   string `json:"member"`         // sys_user
+	Rosters  string `json:"rosters"`        // glide_list of cmn_rota_roster sys_ids
+	Rota     string `json:"rota,omitempty"` // cmn_rota
+	FromDate string `json:"from_date"`      // YYYY-MM-DD
+}
+
+// OnCallRemoveMemberPayload is posted to the `on_call_remove_member` action table.
+type OnCallRemoveMemberPayload struct {
+	User         string `json:"user"`           // sys_user
+	Rosters      string `json:"rosters"`        // glide_list of cmn_rota_roster sys_ids
+	Rota         string `json:"rota,omitempty"` // cmn_rota
+	FromDate     string `json:"from_date"`      // YYYY-MM-DD
+	DeleteMember string `json:"delete_member"`  // "true" to delete the membership
 }
 
 type UserToRole struct {

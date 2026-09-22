@@ -1,0 +1,44 @@
+package connector
+
+import (
+	"testing"
+
+	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
+)
+
+func TestEntitlementSlug(t *testing.T) {
+	tests := []struct {
+		name string
+		ent  *v2.Entitlement
+		want string
+	}{
+		{"member", &v2.Entitlement{Id: "schedule:c8dff571:member"}, "member"},
+		{"on-call", &v2.Entitlement{Id: "schedule:c8dff571:on-call"}, "on-call"},
+		{"manager", &v2.Entitlement{Id: "schedule:c8dff571:manager"}, "manager"},
+		{"falls back to Slug when id has no colon", &v2.Entitlement{Id: "member", Slug: "member"}, "member"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := entitlementSlug(tt.ent); got != tt.want {
+				t.Errorf("entitlementSlug(%q) = %q, want %q", tt.ent.Id, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestScheduleResourceType_OptInRequired locks in that the schedule resource
+// type carries the OptInRequired annotation.
+func TestScheduleResourceType_OptInRequired(t *testing.T) {
+	annos := annotations.Annotations(resourceTypeSchedule.Annotations)
+	if !annos.Contains(&v2.OptInRequired{}) {
+		t.Fatal("schedule resource type must carry the OptInRequired annotation")
+	}
+}
+
+func TestOnCallActionDate(t *testing.T) {
+	got := onCallActionDate()
+	if len(got) != 10 || got[4] != '-' || got[7] != '-' {
+		t.Errorf("onCallActionDate() = %q, want YYYY-MM-DD", got)
+	}
+}
