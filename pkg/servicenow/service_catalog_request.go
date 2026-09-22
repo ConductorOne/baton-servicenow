@@ -169,9 +169,9 @@ func (c *Client) CreateServiceCatalogRequest(ctx context.Context, catalogItemId 
 		if err != nil {
 			return nil, annos, err
 		}
-		if cart.CartID != requestInfo.CartID {
-			return nil, annos, fmt.Errorf("cannot submit service catalog cart: order returned cart %s but current cart is %s", requestInfo.CartID, cart.CartID)
-		}
+		// order_now's cart_id and GET /cart's cart_id are not the same
+		// identifier in ServiceNow's Catalog API -- comparing them always
+		// fails, so identity is confirmed by item contents instead.
 		if len(cart.Items) != 1 || (cart.Items[0].CatalogItemID != catalogItemId && cart.Items[0].ItemID != catalogItemId) {
 			return nil, annos, fmt.Errorf("cannot submit service catalog cart %s: expected one item for catalog item %s, found %d item(s)", cart.CartID, catalogItemId, len(cart.Items))
 		}
