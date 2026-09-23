@@ -117,6 +117,7 @@ type Client struct {
 	TicketSchemaFilters map[string]string
 	AllowedDomains      []string
 	CustomUserFields    []string
+	TwoStepCheckout     bool
 }
 
 // Official documentation.

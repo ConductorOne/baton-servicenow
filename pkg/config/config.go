@@ -34,7 +34,12 @@ var (
 		field.WithDescription("Additional custom user fields to sync (must start with u_ prefix, e.g., u_type, u_department)"),
 		field.WithDefaultValue([]string{}),
 	)
-	externalTicketField = field.TicketingField.ExportAs(field.ExportTargetGUI)
+	externalTicketField  = field.TicketingField.ExportAs(field.ExportTargetGUI)
+	twoStepCheckoutField = field.BoolField("two-step-checkout",
+		field.WithDisplayName("Two-Step Checkout"),
+		field.WithDescription("Enable ServiceNow Two-Step Checkout for external ticket requests. Requires access to the Service Catalog cart endpoints."),
+		field.WithDefaultValue(false),
+	)
 	baseURLField = field.StringField("base-url",
 		field.WithDescription("Override the ServiceNow API URL (for testing)"),
 		field.WithHidden(true),
@@ -58,12 +63,16 @@ var configurationFields = []field.SchemaField{
 	allowedDomainsField,
 	customUserFieldsField,
 	externalTicketField,
+	twoStepCheckoutField,
 	baseURLField,
 	insecureField,
 }
 
 var configRelations = []field.SchemaFieldRelationship{
-	field.FieldsDependentOn([]field.SchemaField{catalogField, categoryField}, []field.SchemaField{externalTicketField}),
+	field.FieldsDependentOn(
+		[]field.SchemaField{catalogField, categoryField, twoStepCheckoutField},
+		[]field.SchemaField{externalTicketField},
+	),
 }
 
 //go:generate go run ./gen
