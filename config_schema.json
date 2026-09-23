@@ -155,6 +155,12 @@
       "displayName": "Enable external ticket provisioning",
       "description": "This must be set to enable ticketing support",
       "boolField": {}
+    },
+    {
+      "name": "two-step-checkout",
+      "displayName": "Two-Step Checkout",
+      "description": "Enable ServiceNow Two-Step Checkout for external ticket requests. Requires access to the Service Catalog cart endpoints.",
+      "boolField": {}
     }
   ],
   "constraints": [
@@ -162,7 +168,8 @@
       "kind": "CONSTRAINT_KIND_DEPENDENT_ON",
       "fieldNames": [
         "catalog-id",
-        "category-id"
+        "category-id",
+        "two-step-checkout"
       ],
       "secondaryFieldNames": [
         "ticketing"
