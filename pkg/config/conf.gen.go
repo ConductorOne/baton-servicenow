@@ -12,6 +12,7 @@ type ServiceNow struct {
 	AllowedDomains []string `mapstructure:"allowed-domains"`
 	CustomUserFields []string `mapstructure:"custom-user-fields"`
 	Ticketing bool `mapstructure:"ticketing"`
+	TwoStepCheckout bool `mapstructure:"two-step-checkout"`
 	BaseUrl string `mapstructure:"base-url"`
 	Insecure bool `mapstructure:"insecure"`
 }

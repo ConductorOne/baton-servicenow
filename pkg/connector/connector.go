@@ -118,7 +118,7 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 // New returns the ServiceNow connector.
 func New(
 	ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string,
-	allowedDomains []string, customUserFields []string, baseURL string, insecure bool,
+	allowedDomains []string, customUserFields []string, baseURL string, insecure bool, twoStepCheckout bool,
 ) (*ServiceNow, error) {
 	uhttpOpts := []uhttp.Option{uhttp.WithLogger(true, ctxzap.Extract(ctx))}
 	if insecure {
@@ -140,6 +140,7 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	servicenowClient.TwoStepCheckout = twoStepCheckout
 
 	return &ServiceNow{
 		client: servicenowClient,
