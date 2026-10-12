@@ -1,12 +1,16 @@
 package connector
 
 import (
+	"context"
 	"fmt"
+	"strings"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 )
 
 // ResourcesPageSize is the page size for the 6 keyset-paginated Table API
@@ -61,12 +65,38 @@ func convertPageToken(token string) (int, error) {
 	return servicenow.ConvertPageToken(token)
 }
 
-func mapGroupMembers(resources []servicenow.GroupMember) []string {
-	members := make([]string, len(resources))
+// mapGroupMembers returns the member user IDs and how many rows were skipped for an empty user reference.
+func mapGroupMembers(resources []servicenow.GroupMember) ([]string, int) {
+	members := make([]string, 0, len(resources))
+	skipped := 0
 
-	for i, r := range resources {
-		members[i] = r.User
+	for _, r := range resources {
+		if isEmptyRef(r.User) {
+			skipped++
+			continue
+		}
+		members = append(members, r.User)
 	}
 
-	return members
+	return members, skipped
+}
+
+// isEmptyRef reports a blank reference field, which ServiceNow returns for
+// orphaned membership rows or values hidden by field-level read ACLs.
+func isEmptyRef(ref string) bool {
+	return strings.TrimSpace(ref) == ""
+}
+
+func logSkippedMemberships(ctx context.Context, table string, resource *v2.Resource, skipped int) {
+	if skipped == 0 {
+		return
+	}
+
+	ctxzap.Extract(ctx).Warn(
+		"baton-servicenow: skipping membership rows with empty principal reference",
+		zap.String("table", table),
+		zap.String("resource_type", resource.Id.ResourceType),
+		zap.String("resource_id", resource.Id.Resource),
+		zap.Int("skipped_count", skipped),
+	)
 }

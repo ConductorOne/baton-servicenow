@@ -123,7 +123,8 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 		return nil, "", annos, err
 	}
 
-	memberIDs := mapGroupMembers(groupMembers)
+	memberIDs, skipped := mapGroupMembers(groupMembers)
+	logSkippedMemberships(ctx, "sys_user_grmember", resource, skipped)
 	if len(memberIDs) == 0 {
 		return []*v2.Grant{}, nextPage, annos, nil
 	}

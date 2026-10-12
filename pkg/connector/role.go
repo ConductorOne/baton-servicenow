@@ -138,8 +138,12 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			return nil, "", annos, err
 		}
 
-		// for each roleBinding, create a grant
+		skipped := 0
 		for _, roleBinding := range usersToRoles {
+			if isEmptyRef(roleBinding.User) {
+				skipped++
+				continue
+			}
 			rv = append(
 				rv,
 				grant.NewGrant(
@@ -152,6 +156,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 				),
 			)
 		}
+		logSkippedMemberships(ctx, "sys_user_has_role", resource, skipped)
 
 	case resourceTypeGroup.Id:
 		groupsToRoles, nextPageToken, groupAnnos, err := r.client.GetGroupToRole(
@@ -170,8 +175,12 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 			return nil, "", annos, err
 		}
 
-		// for each roleBinding, create a grant
+		skipped := 0
 		for _, roleBinding := range groupsToRoles {
+			if isEmptyRef(roleBinding.Group) {
+				skipped++
+				continue
+			}
 			rv = append(
 				rv,
 				grant.NewGrant(
@@ -185,6 +194,7 @@ func (r *roleResourceType) Grants(ctx context.Context, resource *v2.Resource, pt
 				),
 			)
 		}
+		logSkippedMemberships(ctx, "sys_group_has_role", resource, skipped)
 
 	default:
 		return nil, "", nil, fmt.Errorf("baton-servicenow: unknown resource type: %s", bag.ResourceTypeID())
