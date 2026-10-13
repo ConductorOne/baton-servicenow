@@ -253,9 +253,9 @@ func TestGrants_PageSizeOneEmitsAllValidGrants(t *testing.T) {
 	require.Equal(t, []string{"group:G:member:user:u1"}, grantIDs(groupGrantsOut))
 }
 
-func TestGrants_LogsOneWarnPerPageWithSkips(t *testing.T) {
+func TestGrants_LogsSkipsAtDebug(t *testing.T) {
 	var buf bytes.Buffer
-	core := zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(&buf), zapcore.WarnLevel)
+	core := zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(&buf), zapcore.DebugLevel)
 	ctx := ctxzap.ToContext(context.Background(), zap.New(core))
 	client := newMembershipServer(t, 200, map[string][]membershipRow{"sys_user_grmember": {{"row01", ""}, {"row02", ""}, {"row03", "u1"}}})
 
@@ -266,7 +266,28 @@ func TestGrants_LogsOneWarnPerPageWithSkips(t *testing.T) {
 	require.Contains(t, logs, `"table":"sys_user_grmember"`)
 	require.Contains(t, logs, `"resource_id":"G"`)
 	require.Contains(t, logs, `"skipped_count":2`)
+	require.Contains(t, logs, `"total_occurrences":1`)
+	require.Contains(t, logs, `"level":"debug"`)
+	require.NotContains(t, logs, `"level":"warn"`)
 	require.NotContains(t, logs, `"level":"error"`)
+}
+
+// One builder serves every Grants call in a sync, so its counter spans resources.
+func TestGrants_SamplesSkipLogsAcrossResources(t *testing.T) {
+	var buf bytes.Buffer
+	core := zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(&buf), zapcore.DebugLevel)
+	ctx := ctxzap.ToContext(context.Background(), zap.New(core))
+	client := newMembershipServer(t, 200, map[string][]membershipRow{"sys_user_grmember": {{"row01", ""}, {"row02", "u1"}}})
+
+	builder := groupBuilder(client)
+	for i := 0; i < 12; i++ {
+		drainGrants(ctx, t, builder.Grants, testGroup(t))
+	}
+
+	logs := buf.String()
+	require.Equal(t, 2, strings.Count(logs, "skipping membership rows with empty principal reference"), "expected occurrences 1 and 10 out of 12")
+	require.Contains(t, logs, `"total_occurrences":1}`)
+	require.Contains(t, logs, `"total_occurrences":10}`)
 }
 
 func TestMapGroupMembers_DropsEmptyReferences(t *testing.T) {

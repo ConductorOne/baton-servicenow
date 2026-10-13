@@ -9,7 +9,6 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
-	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 )
 
@@ -87,12 +86,14 @@ func isEmptyRef(ref string) bool {
 	return strings.TrimSpace(ref) == ""
 }
 
-func logSkippedMemberships(ctx context.Context, table string, resource *v2.Resource, skipped int) {
+// logSkippedMemberships samples per table: an orphaned row is not actionable by the
+// customer and can recur on every page of every role and group.
+func logSkippedMemberships(ctx context.Context, sampler *perKeySampledDebug, table string, resource *v2.Resource, skipped int) {
 	if skipped == 0 {
 		return
 	}
 
-	ctxzap.Extract(ctx).Warn(
+	sampler.log(ctx, table,
 		"baton-servicenow: skipping membership rows with empty principal reference",
 		zap.String("table", table),
 		zap.String("resource_type", resource.Id.ResourceType),
