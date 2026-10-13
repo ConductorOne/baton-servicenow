@@ -18,6 +18,8 @@ import (
 type groupResourceType struct {
 	resourceType *v2.ResourceType
 	client       *servicenow.Client
+
+	skippedMemberships perKeySampledDebug
 }
 
 func (g *groupResourceType) ResourceType(_ context.Context) *v2.ResourceType {
@@ -123,7 +125,8 @@ func (g *groupResourceType) Grants(ctx context.Context, resource *v2.Resource, p
 		return nil, "", annos, err
 	}
 
-	memberIDs := mapGroupMembers(groupMembers)
+	memberIDs, skipped := mapGroupMembers(groupMembers)
+	logSkippedMemberships(ctx, &g.skippedMemberships, "sys_user_grmember", resource, skipped)
 	if len(memberIDs) == 0 {
 		return []*v2.Grant{}, nextPage, annos, nil
 	}
