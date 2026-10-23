@@ -403,6 +403,39 @@ func prepareUserToGroupFilter(userId string, groupId string, domains []string) *
 	}
 }
 
+func prepareRosterFilters() *FilterVars {
+	return &FilterVars{
+		Fields: []string{"sys_id", "name", "rota"},
+	}
+}
+
+// prepareRotaMemberFilter builds the cmn_rota_member filter. When memberId is
+// empty (enumerating a roster's members, not a point existence check), it also
+// scopes member.email to the allowed domains, so schedule member grants stay
+// consistent with which users actually get synced -- see prepareUserToGroupFilter.
+func prepareRotaMemberFilter(rosterId string, memberId string, domains []string) *FilterVars {
+	var conditions []string
+
+	if rosterId != "" {
+		conditions = append(conditions, fmt.Sprintf("roster=%s", rosterId))
+	}
+
+	if memberId != "" {
+		conditions = append(conditions, fmt.Sprintf("member=%s", memberId))
+	}
+
+	if memberId == "" {
+		if domainQuery := buildDomainQuery("member.email", domains); domainQuery != "" {
+			conditions = append(conditions, domainQuery)
+		}
+	}
+
+	return &FilterVars{
+		Fields: []string{"sys_id", "roster", "member", "order"},
+		Query:  strings.Join(conditions, "^"),
+	}
+}
+
 // prepareUserToRoleFilter builds the sys_user_has_role filter. See
 // prepareUserToGroupFilter for why the domain filter is gated on userId=="".
 func prepareUserToRoleFilter(userId string, roleId string, domains []string) *FilterVars {
