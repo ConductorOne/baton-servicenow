@@ -101,3 +101,22 @@ func logSkippedMemberships(ctx context.Context, sampler *perKeySampledDebug, tab
 		zap.Int("skipped_count", skipped),
 	)
 }
+
+// normalizeTicketSchemaIDs trims each configured schema ID, drops blanks and
+// removes duplicates, keeping the first occurrence so configured order holds.
+func normalizeTicketSchemaIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}

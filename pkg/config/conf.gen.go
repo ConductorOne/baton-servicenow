@@ -9,6 +9,7 @@ type ServiceNow struct {
 	Deployment string `mapstructure:"deployment"`
 	CatalogId string `mapstructure:"catalog-id"`
 	CategoryId string `mapstructure:"category-id"`
+	TicketSchemaIds []string `mapstructure:"ticket-schema-ids"`
 	AllowedDomains []string `mapstructure:"allowed-domains"`
 	CustomUserFields []string `mapstructure:"custom-user-fields"`
 	Ticketing bool `mapstructure:"ticketing"`

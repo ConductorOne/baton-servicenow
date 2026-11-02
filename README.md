@@ -128,6 +128,7 @@ Flags:
       --password string                  required: Application password used to connect to the ServiceNow API. ($BATON_PASSWORD)
   -p, --provisioning                     This must be set in order for provisioning actions to be enabled ($BATON_PROVISIONING)
       --skip-full-sync                   This must be set to skip a full sync ($BATON_SKIP_FULL_SYNC)
+      --ticket-schema-ids strings        Optional list of ServiceNow catalog item (ticket schema) IDs; when set, only these schemas are offered and Catalog ID/Category ID are ignored ($BATON_TICKET_SCHEMA_IDS)
       --ticketing                        This must be set to enable ticketing support ($BATON_TICKETING)
       --username string                  required: Username of administrator used to connect to the ServiceNow API. ($BATON_USERNAME)
   -v, --version                          version for baton-servicenow

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"time"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -21,6 +22,10 @@ import (
 )
 
 func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token) ([]*v2.TicketSchema, string, annotations.Annotations, error) {
+	if len(s.ticketSchemaIDs) > 0 {
+		return s.listSelectedTicketSchemas(ctx, pt)
+	}
+
 	l := ctxzap.Extract(ctx)
 
 	offset, err := convertPageToken(pt.Token)
@@ -68,6 +73,75 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 		}
 		catalogItemSchema.Statuses = ticketStatuses
 		ret = append(ret, catalogItemSchema)
+	}
+
+	return ret, nextPageToken, annos, nil
+}
+
+// listSelectedTicketSchemas serves the explicit ticket-schema-ids mode: the
+// configured IDs are the whole result set, paged by position in that list. Each
+// item is fetched directly, so an ID's place in the list (or in ServiceNow's own
+// discovery order) does not matter, and there is no connector-side maximum.
+func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *pagination.Token) ([]*v2.TicketSchema, string, annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
+	total := len(s.ticketSchemaIDs)
+	offset, err := convertPageToken(pt.Token)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("baton-servicenow: invalid page token %q: %w", pt.Token, err)
+	}
+	if offset < 0 || offset > total {
+		return nil, "", nil, fmt.Errorf("baton-servicenow: invalid page token %q for %d configured ticket schema IDs", pt.Token, total)
+	}
+
+	pageSize := pt.Size
+	if pageSize <= 0 || pageSize > TicketSchemasPageSize {
+		pageSize = TicketSchemasPageSize
+	}
+	end := offset + pageSize
+	if end > total {
+		end = total
+	}
+	pageIDs := s.ticketSchemaIDs[offset:end]
+
+	var nextPageToken string
+	if end < total {
+		nextPageToken = strconv.Itoa(end)
+	}
+
+	l.Debug("listing selected ticket schemas",
+		zap.Int("configured_ids", total),
+		zap.Int("page_size", pageSize),
+		zap.Int("offset", offset),
+		zap.String("next_page_token", nextPageToken),
+	)
+
+	if len(pageIDs) == 0 {
+		return nil, nextPageToken, nil, nil
+	}
+
+	requestedItemStates, annos, err := s.client.GetServiceCatalogRequestedItemStates(ctx)
+	if err != nil {
+		return nil, "", annos, fmt.Errorf("baton-servicenow: failed to get catalog requested item states: %w", err)
+	}
+	ticketStatuses := requestedItemStatesToTicketStatus(requestedItemStates)
+
+	ret := make([]*v2.TicketSchema, 0, len(pageIDs))
+	for _, id := range pageIDs {
+		catalogItem, itemAnnos, err := s.client.GetCatalogItem(ctx, id)
+		annos = itemAnnos
+		if err != nil {
+			// ServiceNow answers not found, malformed, inactive and access-denied
+			// identically, so the message can only name the ID and list the causes.
+			return nil, "", annos, fmt.Errorf("baton-servicenow: configured ticket schema ID %q could not be fetched (not valid, inactive, or not accessible): %w", id, err)
+		}
+		schema, schemaAnnos, err := s.schemaForCatalogItem(ctx, catalogItem)
+		annos = schemaAnnos
+		if err != nil {
+			return nil, "", annos, err
+		}
+		schema.Statuses = ticketStatuses
+		ret = append(ret, schema)
 	}
 
 	return ret, nextPageToken, annos, nil

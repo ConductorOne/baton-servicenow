@@ -24,6 +24,13 @@ var (
 	categoryField = field.StringField("category-id",
 		field.WithDisplayName("Category ID"),
 		field.WithDescription("ServiceNow category id to filter catalog items to"))
+	ticketSchemaIDsField = field.StringSliceField("ticket-schema-ids",
+		field.WithDisplayName("Ticket schema IDs"),
+		field.WithDescription("Optional list of ServiceNow catalog item (ticket schema) IDs. When set, only these schemas are offered, in the order given, "+
+			"and Catalog ID and Category ID are ignored. Leave empty to discover schemas using Catalog ID and Category ID. "+
+			"C1 currently receives at most the first 100 schemas from the connector; this is a current transport limitation, not a limit of this field."),
+		field.WithDefaultValue([]string{}),
+	)
 	allowedDomainsField = field.StringSliceField("allowed-domains",
 		field.WithDisplayName("Allowed email domains"),
 		field.WithDescription("Limit syncing to users whose email ends with one of the specified domains"),
@@ -60,6 +67,7 @@ var configurationFields = []field.SchemaField{
 	deploymentField,
 	catalogField,
 	categoryField,
+	ticketSchemaIDsField,
 	allowedDomainsField,
 	customUserFieldsField,
 	externalTicketField,
@@ -70,7 +78,7 @@ var configurationFields = []field.SchemaField{
 
 var configRelations = []field.SchemaFieldRelationship{
 	field.FieldsDependentOn(
-		[]field.SchemaField{catalogField, categoryField, twoStepCheckoutField},
+		[]field.SchemaField{catalogField, categoryField, ticketSchemaIDsField, twoStepCheckoutField},
 		[]field.SchemaField{externalTicketField},
 	),
 }

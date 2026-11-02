@@ -139,6 +139,12 @@
       "stringField": {}
     },
     {
+      "name": "ticket-schema-ids",
+      "displayName": "Ticket schema IDs",
+      "description": "Optional list of ServiceNow catalog item (ticket schema) IDs. When set, only these schemas are offered, in the order given, and Catalog ID and Category ID are ignored. Leave empty to discover schemas using Catalog ID and Category ID. C1 currently receives at most the first 100 schemas from the connector; this is a current transport limitation, not a limit of this field.",
+      "stringSliceField": {}
+    },
+    {
       "name": "allowed-domains",
       "displayName": "Allowed email domains",
       "description": "Limit syncing to users whose email ends with one of the specified domains",
@@ -169,6 +175,7 @@
       "fieldNames": [
         "catalog-id",
         "category-id",
+        "ticket-schema-ids",
         "two-step-checkout"
       ],
       "secondaryFieldNames": [

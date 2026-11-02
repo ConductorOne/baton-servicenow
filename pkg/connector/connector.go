@@ -40,6 +40,9 @@ var (
 
 type ServiceNow struct {
 	client *servicenow.Client
+	// ticketSchemaIDs, when non-empty, is the exclusive set of catalog items
+	// offered as ticket schemas, in configured order.
+	ticketSchemaIDs []string
 }
 
 func (s *ServiceNow) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
@@ -118,7 +121,7 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 // New returns the ServiceNow connector.
 func New(
 	ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string,
-	allowedDomains []string, customUserFields []string, baseURL string, insecure bool, twoStepCheckout bool,
+	ticketSchemaIDs []string, allowedDomains []string, customUserFields []string, baseURL string, insecure bool, twoStepCheckout bool,
 ) (*ServiceNow, error) {
 	uhttpOpts := []uhttp.Option{uhttp.WithLogger(true, ctxzap.Extract(ctx))}
 	if insecure {
@@ -142,7 +145,13 @@ func New(
 	}
 	servicenowClient.TwoStepCheckout = twoStepCheckout
 
+	schemaIDs := normalizeTicketSchemaIDs(ticketSchemaIDs)
+	if len(schemaIDs) > 0 && len(ticketSchemaFilters) > 0 {
+		ctxzap.Extract(ctx).Warn("ticket-schema-ids is set; catalog-id and category-id are ignored")
+	}
+
 	return &ServiceNow{
-		client: servicenowClient,
+		client:          servicenowClient,
+		ticketSchemaIDs: schemaIDs,
 	}, nil
 }
