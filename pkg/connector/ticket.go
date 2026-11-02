@@ -17,6 +17,8 @@ import (
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -132,8 +134,14 @@ func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *paginati
 		annos = itemAnnos
 		if err != nil {
 			// ServiceNow answers not found, malformed, inactive and access-denied
-			// identically, so the message can only name the ID and list the causes.
-			return nil, "", annos, fmt.Errorf("baton-servicenow: configured ticket schema ID %q could not be fetched (not valid, inactive, or not accessible): %w", id, err)
+			// identically, so for those codes the message can only name the ID and
+			// list the causes. Transient failures must not read as a bad ID.
+			switch status.Code(err) {
+			case codes.InvalidArgument, codes.NotFound, codes.PermissionDenied, codes.Unauthenticated:
+				return nil, "", annos, fmt.Errorf("baton-servicenow: configured ticket schema ID %q could not be fetched (not valid, inactive, or not accessible): %w", id, err)
+			default:
+				return nil, "", annos, fmt.Errorf("baton-servicenow: failed to fetch configured ticket schema ID %q: %w", id, err)
+			}
 		}
 		schema, schemaAnnos, err := s.schemaForCatalogItem(ctx, catalogItem)
 		annos = schemaAnnos

@@ -26,6 +26,8 @@ type schemaStub struct {
 	mu sync.Mutex
 	// known item IDs, in the order discovery would list them.
 	items []string
+	// failID, when set, makes GET of that item return a 500.
+	failID string
 	// calls records every request path+query, in arrival order.
 	calls []string
 }
@@ -82,6 +84,10 @@ func (s *schemaStub) handler(t *testing.T) http.HandlerFunc {
 			payload = servicenow.CatalogItemsResponse{Result: result}
 		case strings.Contains(path, "/servicecatalog/items/"):
 			id := path[strings.Index(path, "/items/")+len("/items/"):]
+			if id == s.failID && id != "" {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			if !s.known(id) {
 				w.WriteHeader(http.StatusBadRequest)
 				_, _ = w.Write([]byte(`{"error":{"message":"Either Catalog Item is not valid or security constraints prevent access","detail":""},"status":"failure"}`))
@@ -297,4 +303,14 @@ func TestListTicketSchemas_ExplicitInvalidIDOnLaterPageFails(t *testing.T) {
 	_, _, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 4, Token: next})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `"bad"`)
+}
+
+func TestListTicketSchemas_ExplicitTransientFailureIsNotReportedAsBadID(t *testing.T) {
+	stub := &schemaStub{items: []string{"good1", "flaky"}, failID: "flaky"}
+	s := newSchemaTestConnector(t, stub, nil, []string{"good1", "flaky"})
+
+	_, _, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `"flaky"`)
+	require.NotContains(t, err.Error(), "not valid, inactive")
 }
