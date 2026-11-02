@@ -87,6 +87,11 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *pagination.Token) ([]*v2.TicketSchema, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
+	// Checked before any request: a malformed ID must not reach the URL path.
+	if err := validateTicketSchemaIDs(s.ticketSchemaIDs); err != nil {
+		return nil, "", nil, err
+	}
+
 	total := len(s.ticketSchemaIDs)
 	offset, err := convertPageToken(pt.Token)
 	if err != nil {

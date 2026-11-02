@@ -281,13 +281,13 @@ func TestListTicketSchemas_ExplicitIDOutsideDiscoveryFirstHundred(t *testing.T) 
 
 func TestListTicketSchemas_ExplicitInvalidIDFailsAndNamesID(t *testing.T) {
 	stub := &schemaStub{items: []string{"good1", "good2"}}
-	s := newSchemaTestConnector(t, stub, nil, []string{"good1", "missing-or-inactive", "good2"})
+	s := newSchemaTestConnector(t, stub, nil, []string{"good1", "missingorinactive", "good2"})
 
 	schemas, next, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
 	require.Error(t, err, "a requested invalid/inaccessible ID is never silently skipped")
 	require.Nil(t, schemas)
 	require.Empty(t, next)
-	require.Contains(t, err.Error(), `"missing-or-inactive"`)
+	require.Contains(t, err.Error(), `"missingorinactive"`)
 	require.Contains(t, err.Error(), "not accessible")
 	require.Equal(t, codes.InvalidArgument, status.Code(err), "underlying vendor status is preserved")
 }
@@ -314,4 +314,28 @@ func TestListTicketSchemas_ExplicitTransientFailureIsNotReportedAsBadID(t *testi
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `"flaky"`)
 	require.NotContains(t, err.Error(), "not valid, inactive")
+}
+
+func TestListTicketSchemas_RejectsUnsafeIDsBeforeAnyRequest(t *testing.T) {
+	for _, bad := range []string{"../variables", "abc/def", "abc?x=1", "..", "a%2Fb", "a#b", "a b", "a\\b", "a\nb"} {
+		t.Run(bad, func(t *testing.T) {
+			stub := &schemaStub{items: []string{"good1"}}
+			s := newSchemaTestConnector(t, stub, nil, []string{"good1", bad})
+
+			_, _, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			require.Contains(t, err.Error(), fmt.Sprintf("%q", bad), "error names the offending ID")
+			require.Empty(t, stub.calls, "no request is made, not even for the valid ID")
+		})
+	}
+
+	t.Run("sys_id shaped IDs are accepted", func(t *testing.T) {
+		id := "79c99042b7321010e54deb56ee11a907"
+		ids := []string{id, "MixedCase09", "with-hyphen_underscore"}
+		stub := &schemaStub{items: ids}
+		s := newSchemaTestConnector(t, stub, nil, ids)
+		got, _ := schemaIDsOf(t, s, 25, "")
+		require.Equal(t, ids, got)
+	})
 }

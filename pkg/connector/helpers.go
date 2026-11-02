@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -10,6 +11,8 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // ResourcesPageSize is the page size for the 6 keyset-paginated Table API
@@ -119,4 +122,21 @@ func normalizeTicketSchemaIDs(ids []string) []string {
 		out = append(out, id)
 	}
 	return out
+}
+
+// ticketSchemaIDPattern matches the shape of a ServiceNow sys_id. It is kept to
+// plain alphanumerics rather than 32 hex characters because non-canonical
+// sys_ids exist, but it excludes everything that could change the request path
+// ('/', '?', '#', '%', '.', whitespace).
+var ticketSchemaIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// validateTicketSchemaIDs returns the first configured ID that is not safe to
+// place in a catalog item URL path segment.
+func validateTicketSchemaIDs(ids []string) error {
+	for _, id := range ids {
+		if !ticketSchemaIDPattern.MatchString(id) {
+			return status.Errorf(codes.InvalidArgument, "baton-servicenow: configured ticket schema ID %q is not a valid ServiceNow sys_id (letters, digits, '_' and '-' only)", id)
+		}
+	}
+	return nil
 }
