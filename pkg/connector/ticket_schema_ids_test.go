@@ -72,7 +72,8 @@ func (s *schemaStub) handler(t *testing.T) http.HandlerFunc {
 		case strings.HasSuffix(path, "/io_set_item"):
 			payload = servicenow.VariableSetM2MResponse{}
 		case strings.HasSuffix(path, "/variables"):
-			id := strings.TrimSuffix(strings.TrimPrefix(path[strings.Index(path, "/items/"):], "/items/"), "/variables")
+			_, rest, _ := strings.Cut(path, "/items/")
+			id := strings.TrimSuffix(rest, "/variables")
 			payload = servicenow.CatalogItemVariablesResponse{Result: []servicenow.CatalogItemVariable{{
 				ID: "var-" + id, Name: "reason", Label: "Reason", Active: true, Type: servicenow.VariableTypeNew(servicenow.TypeSingleLineText), Mandatory: true,
 			}}}
@@ -83,7 +84,7 @@ func (s *schemaStub) handler(t *testing.T) http.HandlerFunc {
 			}
 			payload = servicenow.CatalogItemsResponse{Result: result}
 		case strings.Contains(path, "/servicecatalog/items/"):
-			id := path[strings.Index(path, "/items/")+len("/items/"):]
+			_, id, _ := strings.Cut(path, "/items/")
 			if id == s.failID && id != "" {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
