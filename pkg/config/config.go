@@ -29,6 +29,8 @@ var (
 		field.WithDescription("Optional list of ServiceNow catalog item (ticket schema) IDs. When set, only these schemas are offered, in the order given, "+
 			"and Catalog ID and Category ID are ignored. Leave empty to discover schemas using Catalog ID and Category ID. "+
 			"C1 currently receives at most the first 100 schemas from the connector; this is a current transport limitation, not a limit of this field."),
+		// C1's list-field form renders the display name and placeholder, not the description, so the placeholder carries the key rules.
+		field.WithPlaceholder("Ignores Catalog/Category ID. C1 currently gets the first 100, in order"),
 		field.WithDefaultValue([]string{}),
 	)
 	allowedDomainsField = field.StringSliceField("allowed-domains",

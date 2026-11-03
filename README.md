@@ -71,7 +71,7 @@ Beyond syncing, the connector supports:
 - **Account provisioning** — create a ServiceNow user account. Accounts are created without a password.
 - **Entitlement provisioning** — grant and revoke group membership (`sys_user_grmember`) and role membership (`sys_user_has_role`).
 - **Connector actions** — `enable_user` and `disable_user`, each taking a required `userId` argument (the user's `sys_id`).
-- **External ticketing** — create ServiceNow Service Catalog requests. Enabled with `--ticketing`.
+- **External ticketing** — create ServiceNow Service Catalog requests. Enabled with `--ticketing`. `--ticket-schema-ids` offers exactly the listed catalog items and ignores `--catalog-id`/`--category-id`; the connector sets no limit on the list, but the current SDK transport hands C1 only the first 100 schemas, in configured order.
 
 Full account deprovisioning is not supported. Accounts can be disabled via the `disable_user` action, but must be deleted directly in ServiceNow.
 

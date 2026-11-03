@@ -142,6 +142,7 @@
       "name": "ticket-schema-ids",
       "displayName": "Ticket schema IDs",
       "description": "Optional list of ServiceNow catalog item (ticket schema) IDs. When set, only these schemas are offered, in the order given, and Catalog ID and Category ID are ignored. Leave empty to discover schemas using Catalog ID and Category ID. C1 currently receives at most the first 100 schemas from the connector; this is a current transport limitation, not a limit of this field.",
+      "placeholder": "Ignores Catalog/Category ID. C1 currently gets the first 100, in order",
       "stringSliceField": {}
     },
     {

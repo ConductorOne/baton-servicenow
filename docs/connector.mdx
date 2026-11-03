@@ -292,8 +292,8 @@ In the **Password** and **Username** fields, enter the credentials for your Serv
    - When **Ticket schema IDs** is set, only those schemas are offered, in the order you list them. **Catalog ID** and **Category ID** are ignored. Leave the field empty to keep the existing behavior.
    - Entries are trimmed and duplicates are removed, keeping the first occurrence.
    - Each entry must contain only letters, digits, `_` or `-`, as a sys_id does. An entry with any other character (for example `/`, `?`, `.` or a space) fails the schema listing and names the entry, without sending a request to ServiceNow.
-   - Every listed ID must be a valid, active catalog item that the integration user can access. If one is not, the schema listing fails and names the ID; it is never skipped silently. ServiceNow gives the same response for an unknown, inactive, or inaccessible item.
    - The connector does not limit how many IDs you can list. However, C1 currently receives at most the first 100 schemas from the connector (in the order you listed them). This is a current limitation of the connector transport, not a maximum of the field, and it may change.
+   - Every ID in a page of schemas that C1 requests must be a valid, active catalog item that the integration user can access. If one is not, that page fails and names the ID; it is never skipped silently. ServiceNow gives the same response for an unknown, inactive, or inaccessible item. Because of the 100-schema limit above, a nonexistent ID listed after position 100 may currently never be fetched, so it is not reported. The character check above covers the whole list.
 </Step>
 <Step>
 Click **Save**.
