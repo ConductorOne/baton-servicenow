@@ -786,14 +786,14 @@ func TestListTicketSchemas_SkipWarningsAreSampledPerPage(t *testing.T) {
 
 	warns := logs.skipEntries(zapcore.WarnLevel)
 	require.Len(t, warns, 2, "Warn only at occurrences 1 and 10")
-	require.EqualValues(t, 1, warns[0].fields["page_skip_count"])
+	require.EqualValues(t, 1, warns[0].fields["total_occurrences"])
 	require.Equal(t, "bad00", warns[0].fields["ticket_schema_id"])
-	require.EqualValues(t, 10, warns[1].fields["page_skip_count"])
+	require.EqualValues(t, 10, warns[1].fields["total_occurrences"])
 	require.Equal(t, "bad09", warns[1].fields["ticket_schema_id"])
 
 	debugs := logs.skipEntries(zapcore.DebugLevel)
 	require.Len(t, debugs, 11, "every other skip stays visible at debug with its ID")
-	require.EqualValues(t, 13, debugs[len(debugs)-1].fields["page_skip_count"])
+	require.EqualValues(t, 13, debugs[len(debugs)-1].fields["total_occurrences"])
 	require.Equal(t, "good12", debugs[len(debugs)-1].fields["ticket_schema_id"], "build skips share the counter")
 
 	var summary *capturedEntry
@@ -816,7 +816,7 @@ func TestListTicketSchemas_SingleSkipAmongSuccessesWarnsWithoutSummary(t *testin
 	require.Equal(t, []string{"a", "b"}, got)
 	warns := logs.skipEntries(zapcore.WarnLevel)
 	require.Len(t, warns, 1)
-	require.EqualValues(t, 1, warns[0].fields["page_skip_count"])
+	require.EqualValues(t, 1, warns[0].fields["total_occurrences"])
 	require.Empty(t, logs.skipEntries(zapcore.DebugLevel))
 	require.Len(t, logs.warnings(), 1, "no extra summary when nothing was suppressed")
 }
@@ -832,7 +832,7 @@ func TestListTicketSchemas_SkipSamplingRestartsEachPage(t *testing.T) {
 	require.Equal(t, "x1", warns[0].fields["ticket_schema_id"])
 	require.Equal(t, "x3", warns[1].fields["ticket_schema_id"])
 	for _, w := range warns {
-		require.EqualValues(t, 1, w.fields["page_skip_count"])
+		require.EqualValues(t, 1, w.fields["total_occurrences"])
 	}
 	require.Len(t, logs.skipEntries(zapcore.DebugLevel), 2)
 }
