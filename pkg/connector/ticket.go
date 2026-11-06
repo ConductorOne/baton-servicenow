@@ -24,7 +24,7 @@ import (
 )
 
 func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token) ([]*v2.TicketSchema, string, annotations.Annotations, error) {
-	if len(s.ticketSchemaIDs) > 0 {
+	if s.ticketSchemaIDsSelected {
 		return s.listSelectedTicketSchemas(ctx, pt)
 	}
 
@@ -82,17 +82,26 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 
 // listSelectedTicketSchemas serves the explicit ticket-schema-ids mode: the
 // configured IDs are the whole result set, paged by position in that list. Each
-// item is fetched directly, so an ID's place in the list (or in ServiceNow's own
-// discovery order) does not matter, and there is no connector-side maximum.
+// item is fetched directly, so ServiceNow's catalog discovery position does not
+// matter; the configured order does, as it decides which page an ID lands on
+// and which IDs fall within the SDK's first-100 cutoff (the list is capped at
+// 100 distinct IDs).
+//
+// Pagination advances by the configured positions attempted, not by schemas
+// returned: an item that is skipped still consumes its position, so a page can
+// be empty while a next page token remains.
+//
+// An item that is confirmed missing or inaccessible is warned about and
+// skipped. Every other failure (auth, rate limit, timeout, 5xx, unrecognized
+// 400) is returned with its status code, and annotations from every call made so
+// far are kept on both the success and error paths.
 func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *pagination.Token) ([]*v2.TicketSchema, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
-	// Checked before any request: a malformed ID must not reach the URL path.
-	if err := validateTicketSchemaIDs(s.ticketSchemaIDs); err != nil {
+	total := len(s.ticketSchemaIDs)
+	if err := validateTicketSchemaIDCount(s.ticketSchemaIDs); err != nil {
 		return nil, "", nil, err
 	}
-
-	total := len(s.ticketSchemaIDs)
 	offset, err := convertPageToken(pt.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("baton-servicenow: invalid page token %q: %w", pt.Token, err)
@@ -127,34 +136,49 @@ func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *paginati
 		return nil, nextPageToken, nil, nil
 	}
 
-	requestedItemStates, annos, err := s.client.GetServiceCatalogRequestedItemStates(ctx)
+	var annos annotations.Annotations
+	requestedItemStates, stateAnnos, err := s.client.GetServiceCatalogRequestedItemStates(ctx)
+	servicenow.MergeAnnotations(&annos, stateAnnos)
 	if err != nil {
 		return nil, "", annos, fmt.Errorf("baton-servicenow: failed to get catalog requested item states: %w", err)
 	}
 	ticketStatuses := requestedItemStatesToTicketStatus(requestedItemStates)
 
 	ret := make([]*v2.TicketSchema, 0, len(pageIDs))
+	skipped := 0
 	for _, id := range pageIDs {
 		catalogItem, itemAnnos, err := s.client.GetCatalogItem(ctx, id)
-		annos = itemAnnos
+		servicenow.MergeAnnotations(&annos, itemAnnos)
 		if err != nil {
-			// ServiceNow answers not found, malformed, inactive and access-denied
-			// identically, so for those codes the message can only name the ID and
-			// list the causes. Transient failures must not read as a bad ID.
-			switch status.Code(err) {
-			case codes.InvalidArgument, codes.NotFound, codes.PermissionDenied, codes.Unauthenticated:
-				return nil, "", annos, fmt.Errorf("baton-servicenow: configured ticket schema ID %q could not be fetched (not valid, inactive, or not accessible): %w", id, err)
-			default:
-				return nil, "", annos, fmt.Errorf("baton-servicenow: failed to fetch configured ticket schema ID %q: %w", id, err)
+			if reason, skip := itemSkipReason(err); skip {
+				skipped++
+				l.Warn("baton-servicenow: skipping configured ticket schema ID",
+					zap.String("ticket_schema_id", loggableID(id)), zap.String("reason", reason))
+				continue
 			}
+			return nil, "", annos, fmt.Errorf("baton-servicenow: failed to fetch configured ticket schema ID %q: %w", id, err)
 		}
 		schema, schemaAnnos, err := s.schemaForCatalogItem(ctx, catalogItem)
-		annos = schemaAnnos
+		servicenow.MergeAnnotations(&annos, schemaAnnos)
 		if err != nil {
+			// Only the vendor's item-specific 400 is treated as this item being
+			// unusable; any other failure while building the schema is operational.
+			if status.Code(err) == codes.InvalidArgument && isVendorItemUnavailable(err) {
+				skipped++
+				l.Warn("baton-servicenow: skipping configured ticket schema ID whose schema could not be built",
+					zap.String("ticket_schema_id", loggableID(id)),
+					zap.String("reason", "ServiceNow reported the item is not valid or not accessible (HTTP 400)"))
+				continue
+			}
 			return nil, "", annos, err
 		}
 		schema.Statuses = ticketStatuses
 		ret = append(ret, schema)
+	}
+
+	if skipped > 0 && len(ret) == 0 {
+		l.Warn("baton-servicenow: every configured ticket schema ID on this page was skipped",
+			zap.Int("skipped", skipped), zap.Int("offset", offset), zap.Bool("last_page", nextPageToken == ""))
 	}
 
 	return ret, nextPageToken, annos, nil

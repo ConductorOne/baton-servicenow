@@ -141,8 +141,8 @@
     {
       "name": "ticket-schema-ids",
       "displayName": "Ticket schema IDs",
-      "description": "Optional list of ServiceNow catalog item (ticket schema) IDs. When set, only these schemas are offered, in the order given. Cannot be combined with Catalog ID or Category ID: remove those filters before selecting IDs. Leave this field unset to discover schemas using Catalog ID and Category ID. C1 currently receives at most the first 100 schemas from the connector; this is a current transport limitation, not a limit of this field.",
-      "placeholder": "Cannot be used with Catalog/Category ID. C1 currently gets the first 100, in order",
+      "description": "Optional list of ServiceNow catalog item (ticket schema) IDs; when set, only these schemas are offered, in the order given. At most 100 distinct IDs (after trimming blanks and removing duplicates); a longer list is rejected, never truncated. An ID that is malformed, missing, inactive or not accessible is skipped with a warning in the connector logs and the rest are still offered; if none is usable, no schemas are offered. Other errors (authentication, rate limiting, timeouts, server errors) still fail the listing. Cannot be combined with Catalog ID or Category ID. Leave unset to discover schemas using Catalog ID and Category ID.",
+      "placeholder": "Max 100 IDs; cannot be used with Catalog/Category ID",
       "stringSliceField": {}
     },
     {

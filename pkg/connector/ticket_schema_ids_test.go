@@ -11,12 +11,18 @@ import (
 	"sync"
 	"testing"
 
+	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/uhttp"
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // schemaStub is a ServiceNow stand-in for the ticket schema listing paths. Known
@@ -28,9 +34,22 @@ type schemaStub struct {
 	items []string
 	// failID, when set, makes GET of that item return a 500.
 	failID string
+	// itemStatus overrides the response to GET of an item: status -> body.
+	itemStatus map[string]stubResponse
+	// variablesStatus overrides the response to GET of an item's variables.
+	variablesStatus map[string]stubResponse
+	// statesStatus, when nonzero, is returned for the requested-item states call.
+	statesStatus int
 	// calls records every request path+query, in arrival order.
 	calls []string
 }
+
+type stubResponse struct {
+	code int
+	body string
+}
+
+const vendor400Body = `{"error":{"message":"Either Catalog Item is not valid or security constraints prevent access","detail":""},"status":"failure"}`
 
 func (s *schemaStub) record(r *http.Request) {
 	s.mu.Lock()
@@ -68,12 +87,21 @@ func (s *schemaStub) handler(t *testing.T) http.HandlerFunc {
 		var payload any
 		switch {
 		case strings.HasSuffix(path, "/sys_choice"):
+			if s.statesStatus != 0 {
+				w.WriteHeader(s.statesStatus)
+				return
+			}
 			payload = servicenow.RequestedItemStateResponse{Result: []servicenow.RequestItemState{{Label: "Open", Value: "1"}, {Label: "Closed Complete", Value: "3"}}}
 		case strings.HasSuffix(path, "/io_set_item"):
 			payload = servicenow.VariableSetM2MResponse{}
 		case strings.HasSuffix(path, "/variables"):
 			_, rest, _ := strings.Cut(path, "/items/")
 			id := strings.TrimSuffix(rest, "/variables")
+			if resp, ok := s.variablesStatus[id]; ok {
+				w.WriteHeader(resp.code)
+				_, _ = w.Write([]byte(resp.body))
+				return
+			}
 			payload = servicenow.CatalogItemVariablesResponse{Result: []servicenow.CatalogItemVariable{{
 				ID: "var-" + id, Name: "reason", Label: "Reason", Active: true, Type: servicenow.VariableTypeNew(servicenow.TypeSingleLineText), Mandatory: true,
 			}}}
@@ -85,13 +113,18 @@ func (s *schemaStub) handler(t *testing.T) http.HandlerFunc {
 			payload = servicenow.CatalogItemsResponse{Result: result}
 		case strings.Contains(path, "/servicecatalog/items/"):
 			_, id, _ := strings.Cut(path, "/items/")
+			if resp, ok := s.itemStatus[id]; ok {
+				w.WriteHeader(resp.code)
+				_, _ = w.Write([]byte(resp.body))
+				return
+			}
 			if id == s.failID && id != "" {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
 			if !s.known(id) {
 				w.WriteHeader(http.StatusBadRequest)
-				_, _ = w.Write([]byte(`{"error":{"message":"Either Catalog Item is not valid or security constraints prevent access","detail":""},"status":"failure"}`))
+				_, _ = w.Write([]byte(vendor400Body))
 				return
 			}
 			payload = servicenow.CatalogItemResponse{Result: servicenow.CatalogItem{BaseResource: servicenow.BaseResource{Id: id}, Name: "item " + id}}
@@ -113,7 +146,83 @@ func newSchemaTestConnector(t *testing.T, stub *schemaStub, filters map[string]s
 
 	client, err := servicenow.NewClient(uhttp.NewBaseHttpClient(server.Client()), "Basic dGVzdDp0ZXN0", "dev0", filters, nil, nil, server.URL)
 	require.NoError(t, err)
-	return &ServiceNow{client: client, ticketSchemaIDs: normalizeTicketSchemaIDs(ids)}
+	normalized := normalizeTicketSchemaIDs(ids)
+	valid, _ := splitTicketSchemaIDs(normalized)
+	return &ServiceNow{client: client, ticketSchemaIDs: valid, ticketSchemaIDsSelected: len(normalized) > 0}
+}
+
+// capturedLogs is a minimal zapcore.Core that records entries (zaptest/observer
+// is not vendored).
+type capturedLogs struct {
+	mu      sync.Mutex
+	entries []capturedEntry
+}
+
+type capturedEntry struct {
+	level  zapcore.Level
+	msg    string
+	fields map[string]any
+}
+
+func (c *capturedLogs) Enabled(zapcore.Level) bool        { return true }
+func (c *capturedLogs) With([]zapcore.Field) zapcore.Core { return c }
+func (c *capturedLogs) Check(e zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
+	return ce.AddCore(e, c)
+}
+func (c *capturedLogs) Sync() error { return nil }
+func (c *capturedLogs) Write(e zapcore.Entry, fields []zapcore.Field) error {
+	enc := zapcore.NewMapObjectEncoder()
+	for _, f := range fields {
+		f.AddTo(enc)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries = append(c.entries, capturedEntry{level: e.Level, msg: e.Message, fields: enc.Fields})
+	return nil
+}
+
+func (c *capturedLogs) warnings() []capturedEntry {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []capturedEntry
+	for _, e := range c.entries {
+		if e.level == zapcore.WarnLevel && strings.HasPrefix(e.msg, "baton-servicenow:") {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func logCtx(logs *capturedLogs) context.Context {
+	return ctxzap.ToContext(context.Background(), zap.New(logs))
+}
+
+// newViaNew builds the connector through New, as the CLI does, against the stub.
+func newViaNew(t *testing.T, ctx context.Context, stub *schemaStub, filters map[string]string, ids []string) (*ServiceNow, error) {
+	t.Helper()
+	server := httptest.NewServer(stub.handler(t))
+	t.Cleanup(server.Close)
+	return New(ctx, "Basic dGVzdDp0ZXN0", "dev0", filters, ids, nil, nil, server.URL, false, false)
+}
+
+func listAll(t *testing.T, ctx context.Context, s *ServiceNow, size int) ([]string, int) {
+	t.Helper()
+	var got []string
+	token := ""
+	pages := 0
+	for {
+		schemas, next, _, err := s.ListTicketSchemas(ctx, &pagination.Token{Size: size, Token: token})
+		require.NoError(t, err)
+		for _, sc := range schemas {
+			got = append(got, sc.GetId())
+		}
+		pages++
+		if next == "" {
+			return got, pages
+		}
+		require.Less(t, pages, 1000)
+		token = next
+	}
 }
 
 func makeIDs(n int) []string {
@@ -242,30 +351,48 @@ func TestListTicketSchemas_ExplicitIDsInvalidPageTokens(t *testing.T) {
 	require.Empty(t, next)
 }
 
-// The configured list is not capped by the connector: IDs past position 100 are
-// fetched directly and a list longer than 100 is traversed to its end.
-func TestListTicketSchemas_ExplicitIDsBeyondOneHundred(t *testing.T) {
-	const total = 130
-	all := makeIDs(total)
+// A selection at the maximum is traversed to its end by small pages.
+func TestListTicketSchemas_ExplicitIDsAtMaximumTraverse(t *testing.T) {
+	all := makeIDs(MaxTicketSchemaIDs)
 	stub := &schemaStub{items: all}
 	s := newSchemaTestConnector(t, stub, nil, all)
 
-	var got []string
-	token := ""
-	pages := 0
-	for {
-		ids, next := schemaIDsOf(t, s, 0, token)
-		got = append(got, ids...)
-		pages++
-		if next == "" {
-			break
-		}
-		require.Less(t, pages, total, "traversal must terminate")
-		token = next
-	}
-	require.Equal(t, all, got, "all %d configured schemas are reachable in order", total)
-	require.Equal(t, 6, pages, "130 IDs at the default page size of 25")
+	got, pages := listAll(t, context.Background(), s, 0)
+	require.Equal(t, all, got)
+	require.Equal(t, 4, pages, "100 IDs at the default page size of 25")
 	require.Zero(t, stub.count("/servicecatalog/items?"))
+}
+
+func TestNew_RejectsMoreThanMaximumDistinctIDs(t *testing.T) {
+	over := makeIDs(MaxTicketSchemaIDs + 1)
+	stub := &schemaStub{items: over}
+
+	_, err := newViaNew(t, context.Background(), stub, nil, over)
+	require.Error(t, err, "never truncated silently")
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "101")
+	require.Contains(t, err.Error(), "at most 100")
+	require.Empty(t, stub.calls, "no remote call is made to enforce the maximum")
+
+	// Blanks, whitespace and duplicates do not count toward the maximum.
+	padded := append(append([]string{" ", ""}, makeIDs(MaxTicketSchemaIDs)...), " id000 ", "id001")
+	s, err := newViaNew(t, context.Background(), stub, nil, padded)
+	require.NoError(t, err)
+	require.Len(t, s.ticketSchemaIDs, MaxTicketSchemaIDs)
+
+	// Malformed entries still count: the maximum applies before format filtering.
+	malformed := append(makeIDs(MaxTicketSchemaIDs), "bad/id")
+	_, err = newViaNew(t, context.Background(), stub, nil, malformed)
+	require.Error(t, err)
+}
+
+func TestListTicketSchemas_DirectCallerOverMaximumIsRejected(t *testing.T) {
+	over := makeIDs(MaxTicketSchemaIDs + 1)
+	// No client is set: any remote call would panic, so this also proves none is made.
+	s := &ServiceNow{ticketSchemaIDs: over, ticketSchemaIDsSelected: true}
+	_, _, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 func TestListTicketSchemas_ExplicitIDOutsideDiscoveryFirstHundred(t *testing.T) {
@@ -279,63 +406,234 @@ func TestListTicketSchemas_ExplicitIDOutsideDiscoveryFirstHundred(t *testing.T) 
 	require.Empty(t, next)
 }
 
-func TestListTicketSchemas_ExplicitInvalidIDFailsAndNamesID(t *testing.T) {
-	stub := &schemaStub{items: []string{"good1", "good2"}}
-	s := newSchemaTestConnector(t, stub, nil, []string{"good1", "missingorinactive", "good2"})
+func TestListTicketSchemas_ItemSpecificFailuresAreSkippedWithWarning(t *testing.T) {
+	cases := map[string]stubResponse{
+		"vendor400": {http.StatusBadRequest, vendor400Body},
+		"notfound":  {http.StatusNotFound, `{"error":{"message":"No Record found"}}`},
+		"forbidden": {http.StatusForbidden, `{"error":{"message":"Insufficient rights"}}`},
+	}
+	for name, resp := range cases {
+		t.Run(name, func(t *testing.T) {
+			stub := &schemaStub{items: []string{"good1", "good2"}, itemStatus: map[string]stubResponse{"bad": resp}}
+			logs := &capturedLogs{}
+			s, err := newViaNew(t, logCtx(logs), stub, nil, []string{"good1", "bad", "good2"})
+			require.NoError(t, err)
 
-	schemas, next, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
-	require.Error(t, err, "a requested invalid/inaccessible ID is never silently skipped")
-	require.Nil(t, schemas)
-	require.Empty(t, next)
-	require.Contains(t, err.Error(), `"missingorinactive"`)
-	require.Contains(t, err.Error(), "not accessible")
-	require.Equal(t, codes.InvalidArgument, status.Code(err), "underlying vendor status is preserved")
+			got, pages := listAll(t, logCtx(logs), s, 25)
+			require.Equal(t, []string{"good1", "good2"}, got, "bad item skipped, listing continues")
+			require.Equal(t, 1, pages)
+			warns := logs.warnings()
+			require.Len(t, warns, 1)
+			require.Equal(t, "bad", warns[0].fields["ticket_schema_id"])
+			require.NotEmpty(t, warns[0].fields["reason"])
+		})
+	}
 }
 
-func TestListTicketSchemas_ExplicitInvalidIDOnLaterPageFails(t *testing.T) {
-	all := makeIDs(4)
-	stub := &schemaStub{items: all}
-	s := newSchemaTestConnector(t, stub, nil, append(append([]string{}, all...), "bad"))
+func TestListTicketSchemas_SkipReasonsAreTruthful(t *testing.T) {
+	for code, want := range map[int]string{http.StatusNotFound: "404", http.StatusForbidden: "403", http.StatusBadRequest: "HTTP 400"} {
+		body := vendor400Body
+		stub := &schemaStub{items: []string{"good"}, itemStatus: map[string]stubResponse{"bad": {code, body}}}
+		logs := &capturedLogs{}
+		s := newSchemaTestConnector(t, stub, nil, []string{"bad", "good"})
+		listAll(t, logCtx(logs), s, 25)
+		require.Contains(t, logs.warnings()[0].fields["reason"], want)
+	}
+}
 
-	ids, next := schemaIDsOf(t, s, 4, "")
-	require.Equal(t, all, ids)
-	require.Equal(t, "4", next)
+func TestListTicketSchemas_OperationalFailuresAreNotSkipped(t *testing.T) {
+	cases := map[string]struct {
+		resp stubResponse
+		code codes.Code
+	}{
+		"401":        {stubResponse{http.StatusUnauthorized, `{"error":{"message":"User Not Authenticated"}}`}, codes.Unauthenticated},
+		"429":        {stubResponse{http.StatusTooManyRequests, ``}, codes.Unavailable},
+		"500":        {stubResponse{http.StatusInternalServerError, ``}, codes.Unknown},
+		"503":        {stubResponse{http.StatusServiceUnavailable, ``}, codes.Unavailable},
+		"global 400": {stubResponse{http.StatusBadRequest, `{"error":{"message":"Invalid query parameter"}}`}, codes.InvalidArgument},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			stub := &schemaStub{items: []string{"good1", "good2"}, itemStatus: map[string]stubResponse{"flaky": tc.resp}}
+			s := newSchemaTestConnector(t, stub, nil, []string{"good1", "flaky", "good2"})
 
-	_, _, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 4, Token: next})
+			schemas, _, annos, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
+			require.Error(t, err)
+			require.Nil(t, schemas)
+			require.Contains(t, err.Error(), `"flaky"`)
+			require.NotContains(t, err.Error(), "not valid, inactive")
+			if tc.code != codes.Unknown {
+				require.Equal(t, tc.code, status.Code(err), "vendor status preserved")
+			}
+			require.Zero(t, stub.count("/items/good2"), "stops at the operational failure")
+			require.NotEmpty(t, annos, "annotations from calls made so far are returned on the error path")
+		})
+	}
+}
+
+func TestListTicketSchemas_SchemaBuildFailureClassification(t *testing.T) {
+	t.Run("vendor item 400 while building the schema is item-specific", func(t *testing.T) {
+		stub := &schemaStub{items: []string{"good", "gone"}, variablesStatus: map[string]stubResponse{"gone": {http.StatusBadRequest, vendor400Body}}}
+		s := newSchemaTestConnector(t, stub, nil, []string{"gone", "good"})
+		got, _ := schemaIDsOf(t, s, 25, "")
+		require.Equal(t, []string{"good"}, got)
+	})
+	for name, resp := range map[string]stubResponse{
+		"global 400": {http.StatusBadRequest, `{"error":{"message":"bad request"}}`},
+		"403":        {http.StatusForbidden, ``},
+		"404":        {http.StatusNotFound, ``},
+		"500":        {http.StatusInternalServerError, ``},
+	} {
+		t.Run(name+" while building the schema is operational", func(t *testing.T) {
+			stub := &schemaStub{items: []string{"good", "x"}, variablesStatus: map[string]stubResponse{"x": resp}}
+			s := newSchemaTestConnector(t, stub, nil, []string{"x", "good"})
+			_, _, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "x")
+		})
+	}
+}
+
+func TestListTicketSchemas_StatesFailureIsOperational(t *testing.T) {
+	stub := &schemaStub{items: []string{"a"}, statesStatus: http.StatusServiceUnavailable}
+	s := newSchemaTestConnector(t, stub, nil, []string{"a"})
+	_, _, annos, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `"bad"`)
+	require.Equal(t, codes.Unavailable, status.Code(err))
+	require.NotEmpty(t, annos)
 }
 
-func TestListTicketSchemas_ExplicitTransientFailureIsNotReportedAsBadID(t *testing.T) {
-	stub := &schemaStub{items: []string{"good1", "flaky"}, failID: "flaky"}
-	s := newSchemaTestConnector(t, stub, nil, []string{"good1", "flaky"})
+// A page whose items were all skipped is empty but must still hand out the next
+// token: pagination follows attempted positions, not successful results.
+func TestListTicketSchemas_EmptyPageKeepsPaging(t *testing.T) {
+	bad := map[string]stubResponse{}
+	var ids []string
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("bad%d", i)
+		bad[id] = stubResponse{http.StatusBadRequest, vendor400Body}
+		ids = append(ids, id)
+	}
+	ids = append(ids, "good")
+	stub := &schemaStub{items: []string{"good"}, itemStatus: bad}
+	s := newSchemaTestConnector(t, stub, nil, ids)
 
-	_, _, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), `"flaky"`)
-	require.NotContains(t, err.Error(), "not valid, inactive")
+	schemas, next, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 5})
+	require.NoError(t, err)
+	require.Empty(t, schemas)
+	require.Equal(t, "5", next, "next page remains reachable after an all-skipped page")
+
+	got, _ := schemaIDsOf(t, s, 5, next)
+	require.Equal(t, []string{"good"}, got)
 }
 
-func TestListTicketSchemas_RejectsUnsafeIDsBeforeAnyRequest(t *testing.T) {
+func TestListTicketSchemas_AnnotationsKeepSingleMostRestrictiveRateLimit(t *testing.T) {
+	stub := &schemaStub{items: []string{"a", "b", "c"}}
+	s := newSchemaTestConnector(t, stub, nil, []string{"a", "b", "c"})
+	_, _, annos, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
+	require.NoError(t, err)
+	require.Len(t, stub.calls, 1+3*3, "states + (item, variables, set links) per item")
+	require.Len(t, annos, 1, "a single-value annotation type appears once")
+	require.True(t, annos[0].MessageIs(&v2.RateLimitDescription{}))
+}
+
+func TestMergeAnnotations(t *testing.T) {
+	rl := func(status v2.RateLimitDescription_Status, remaining int64) *anypb.Any {
+		a, err := anypb.New(v2.RateLimitDescription_builder{Status: status, Remaining: remaining}.Build())
+		require.NoError(t, err)
+		return a
+	}
+	other, err := anypb.New(&v2.GrantAlreadyExists{})
+	require.NoError(t, err)
+	remaining := func(a *anypb.Any) (v2.RateLimitDescription_Status, int64) {
+		var d v2.RateLimitDescription
+		require.NoError(t, a.UnmarshalTo(&d))
+		return d.GetStatus(), d.GetRemaining()
+	}
+
+	var dst annotations.Annotations
+	servicenow.MergeAnnotations(&dst, annotations.Annotations{rl(v2.RateLimitDescription_STATUS_OK, 50), other})
+	servicenow.MergeAnnotations(&dst, annotations.Annotations{rl(v2.RateLimitDescription_STATUS_OVERLIMIT, 0)})
+	servicenow.MergeAnnotations(&dst, annotations.Annotations{rl(v2.RateLimitDescription_STATUS_OK, 90)})
+	require.Len(t, dst, 2, "one rate limit plus the other annotation, nothing dropped")
+	st, _ := remaining(dst[0])
+	require.Equal(t, v2.RateLimitDescription_STATUS_OVERLIMIT, st, "a later healthy call does not hide an earlier overlimit")
+
+	var low annotations.Annotations
+	servicenow.MergeAnnotations(&low, annotations.Annotations{rl(v2.RateLimitDescription_STATUS_OK, 50)})
+	servicenow.MergeAnnotations(&low, annotations.Annotations{rl(v2.RateLimitDescription_STATUS_OK, 5)})
+	servicenow.MergeAnnotations(&low, annotations.Annotations{rl(v2.RateLimitDescription_STATUS_OK, 80)})
+	_, rem := remaining(low[0])
+	require.Equal(t, int64(5), rem, "lowest remaining quota is kept")
+}
+
+func TestNew_MalformedIDsWarnOnceAndAreOmitted(t *testing.T) {
 	for _, bad := range []string{"../variables", "abc/def", "abc?x=1", "..", "a%2Fb", "a#b", "a b", "a\\b", "a\nb"} {
 		t.Run(bad, func(t *testing.T) {
 			stub := &schemaStub{items: []string{"good1"}}
-			s := newSchemaTestConnector(t, stub, nil, []string{"good1", bad})
+			logs := &capturedLogs{}
+			s, err := newViaNew(t, logCtx(logs), stub, nil, []string{"good1", bad})
+			require.NoError(t, err, "a malformed ID must not fail construction")
+			require.Len(t, logs.warnings(), 1)
+			require.NotContains(t, logs.warnings()[0].fields["ticket_schema_id"], "\n")
 
-			_, _, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
-			require.Error(t, err)
-			require.Equal(t, codes.InvalidArgument, status.Code(err))
-			require.Contains(t, err.Error(), fmt.Sprintf("%q", bad), "error names the offending ID")
-			require.Empty(t, stub.calls, "no request is made, not even for the valid ID")
+			got, _ := schemaIDsOf(t, s, 25, "")
+			require.Equal(t, []string{"good1"}, got)
+			require.Zero(t, stub.count(strings.TrimSpace(bad)+"?"), "malformed ID never reaches the URL")
+			require.Len(t, logs.warnings(), 1, "listing adds no repeated warning")
 		})
 	}
 
 	t.Run("sys_id shaped IDs are accepted", func(t *testing.T) {
-		id := "79c99042b7321010e54deb56ee11a907"
-		ids := []string{id, "MixedCase09", "with-hyphen_underscore"}
+		ids := []string{"79c99042b7321010e54deb56ee11a907", "MixedCase09", "with-hyphen_underscore"}
 		stub := &schemaStub{items: ids}
 		s := newSchemaTestConnector(t, stub, nil, ids)
 		got, _ := schemaIDsOf(t, s, 25, "")
 		require.Equal(t, ids, got)
 	})
+}
+
+func TestNew_LongMalformedIDIsTruncatedInLog(t *testing.T) {
+	logs := &capturedLogs{}
+	_, err := newViaNew(t, logCtx(logs), &schemaStub{}, nil, []string{strings.Repeat("x/", 200)})
+	require.NoError(t, err)
+	logged := logs.warnings()[0].fields["ticket_schema_id"].(string)
+	require.LessOrEqual(t, len(logged), maxLoggedIDLength+3)
+}
+
+// Configured but entirely unusable must offer nothing, never fall back to
+// discovery, and warn that the whole selection is unusable.
+func TestListTicketSchemas_AllMalformedReturnsZeroSchemasWithoutDiscovery(t *testing.T) {
+	stub := &schemaStub{items: []string{"disc1", "disc2"}}
+	logs := &capturedLogs{}
+	s, err := newViaNew(t, logCtx(logs), stub, map[string]string{"sysparm_catalog": "cat"}, []string{"a/b", "c?d"})
+	require.NoError(t, err)
+
+	schemas, next, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
+	require.NoError(t, err)
+	require.Empty(t, schemas)
+	require.Empty(t, next)
+	require.Empty(t, stub.calls, "no discovery and no item calls")
+	var summary bool
+	for _, w := range logs.warnings() {
+		if strings.Contains(w.msg, "none of the configured ticket schema IDs is usable") {
+			summary = true
+		}
+	}
+	require.True(t, summary, "summary warning when every ID is unusable")
+}
+
+func TestListTicketSchemas_AllSkippedWarnsSummary(t *testing.T) {
+	stub := &schemaStub{itemStatus: map[string]stubResponse{
+		"a": {http.StatusBadRequest, vendor400Body}, "b": {http.StatusNotFound, ``}}}
+	logs := &capturedLogs{}
+	s := newSchemaTestConnector(t, stub, nil, []string{"a", "b"})
+	got, _ := listAll(t, logCtx(logs), s, 25)
+	require.Empty(t, got)
+	var summary bool
+	for _, w := range logs.warnings() {
+		if strings.Contains(w.msg, "every configured ticket schema ID on this page was skipped") {
+			summary = true
+		}
+	}
+	require.True(t, summary)
 }
