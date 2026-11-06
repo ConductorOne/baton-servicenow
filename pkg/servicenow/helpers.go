@@ -14,7 +14,8 @@ import (
 // kept. RateLimitDescription is a single-value annotation, so it is not
 // appended: dst keeps one, the most restrictive seen (an overlimit status wins,
 // otherwise the lowest remaining quota), so a throttled call is never hidden by
-// a later healthy one.
+// a later healthy one. An empty description (what the SDK parser yields for a
+// response without rate-limit headers) never displaces a populated one.
 func MergeAnnotations(dst *annotations.Annotations, src annotations.Annotations) {
 	for _, a := range src {
 		if !a.MessageIs(&v2.RateLimitDescription{}) {
@@ -42,7 +43,24 @@ func mergeRateLimit(dst *annotations.Annotations, incoming *anypb.Any) {
 	dst.Merge(incoming)
 }
 
+// isEmptyRateLimit reports whether d carries no information. The SDK parser
+// returns STATUS_UNSPECIFIED with zero limit/remaining and a zero-time ResetAt
+// for a response without rate-limit headers. A real zero quota is not empty: it
+// carries a limit, a reset time or an overlimit status.
+func isEmptyRateLimit(d *v2.RateLimitDescription) bool {
+	return d.GetStatus() == v2.RateLimitDescription_STATUS_UNSPECIFIED &&
+		d.GetLimit() == 0 &&
+		d.GetRemaining() == 0 &&
+		(!d.HasResetAt() || d.GetResetAt().AsTime().IsZero())
+}
+
 func moreRestrictive(next, cur *v2.RateLimitDescription) bool {
+	if isEmptyRateLimit(next) {
+		return false
+	}
+	if isEmptyRateLimit(cur) {
+		return true
+	}
 	nextOver := next.GetStatus() == v2.RateLimitDescription_STATUS_OVERLIMIT
 	curOver := cur.GetStatus() == v2.RateLimitDescription_STATUS_OVERLIMIT
 	if nextOver != curOver {

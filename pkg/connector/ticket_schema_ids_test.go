@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -23,6 +24,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // schemaStub is a ServiceNow stand-in for the ticket schema listing paths. Known
@@ -564,6 +566,72 @@ func TestMergeAnnotations(t *testing.T) {
 	servicenow.MergeAnnotations(&low, annotations.Annotations{rl(v2.RateLimitDescription_STATUS_OK, 80)})
 	_, rem := remaining(low[0])
 	require.Equal(t, int64(5), rem, "lowest remaining quota is kept")
+
+	// What uhttp yields for a response with no rate-limit headers: unspecified,
+	// zero limit/remaining and a zero-time ResetAt (not nil).
+	noHeaders := func() *anypb.Any {
+		a, err := anypb.New(v2.RateLimitDescription_builder{ResetAt: timestamppb.New(time.Time{})}.Build())
+		require.NoError(t, err)
+		return a
+	}
+	full := func(status v2.RateLimitDescription_Status, limit, remaining int64) *anypb.Any {
+		a, err := anypb.New(v2.RateLimitDescription_builder{Status: status, Limit: limit, Remaining: remaining, ResetAt: timestamppb.New(time.Unix(1700000000, 0))}.Build())
+		require.NoError(t, err)
+		return a
+	}
+	merge := func(in ...*anypb.Any) *anypb.Any {
+		var d annotations.Annotations
+		for _, a := range in {
+			servicenow.MergeAnnotations(&d, annotations.Annotations{a})
+		}
+		require.Len(t, d, 1)
+		return d[0]
+	}
+
+	t.Run("empty incoming does not replace populated existing", func(t *testing.T) {
+		st, rem := remaining(merge(rl(v2.RateLimitDescription_STATUS_OK, 50), noHeaders()))
+		require.Equal(t, v2.RateLimitDescription_STATUS_OK, st)
+		require.Equal(t, int64(50), rem)
+	})
+	t.Run("populated incoming replaces empty existing", func(t *testing.T) {
+		st, rem := remaining(merge(noHeaders(), rl(v2.RateLimitDescription_STATUS_OK, 50)))
+		require.Equal(t, v2.RateLimitDescription_STATUS_OK, st)
+		require.Equal(t, int64(50), rem)
+	})
+	t.Run("two empty descriptions stay a single empty one", func(t *testing.T) {
+		st, rem := remaining(merge(noHeaders(), noHeaders()))
+		require.Equal(t, v2.RateLimitDescription_STATUS_UNSPECIFIED, st)
+		require.Zero(t, rem)
+	})
+	t.Run("real zero quota is kept in both orders", func(t *testing.T) {
+		// Parser output for limit=100, remaining=0 headers: status stays unspecified.
+		for name, in := range map[string][]*anypb.Any{
+			"after healthy":  {full(v2.RateLimitDescription_STATUS_OK, 100, 50), full(v2.RateLimitDescription_STATUS_UNSPECIFIED, 100, 0)},
+			"before healthy": {full(v2.RateLimitDescription_STATUS_UNSPECIFIED, 100, 0), full(v2.RateLimitDescription_STATUS_OK, 100, 50)},
+			"after empty":    {noHeaders(), full(v2.RateLimitDescription_STATUS_UNSPECIFIED, 100, 0)},
+			"before empty":   {full(v2.RateLimitDescription_STATUS_UNSPECIFIED, 100, 0), noHeaders()},
+		} {
+			t.Run(name, func(t *testing.T) {
+				_, rem := remaining(merge(in...))
+				require.Zero(t, rem)
+			})
+		}
+	})
+	t.Run("no-header 429 overlimit survives an empty and a healthy response", func(t *testing.T) {
+		// Parser output for a bare 429: overlimit, limit 1, remaining 0, reset in 60s.
+		over := full(v2.RateLimitDescription_STATUS_OVERLIMIT, 1, 0)
+		for name, in := range map[string][]*anypb.Any{
+			"over then empty":   {over, noHeaders()},
+			"empty then over":   {noHeaders(), over},
+			"over then healthy": {over, rl(v2.RateLimitDescription_STATUS_OK, 90)},
+			"healthy then over": {rl(v2.RateLimitDescription_STATUS_OK, 90), over},
+		} {
+			t.Run(name, func(t *testing.T) {
+				st, _ := remaining(merge(in...))
+				require.Equal(t, v2.RateLimitDescription_STATUS_OVERLIMIT, st)
+			})
+		}
+	})
 }
 
 func TestNew_MalformedIDsWarnOnceAndAreOmitted(t *testing.T) {
