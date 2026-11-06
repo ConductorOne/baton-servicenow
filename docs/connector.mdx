@@ -285,7 +285,17 @@ In the **Password** and **Username** fields, enter the credentials for your Serv
 <Step>
 **Optional.** If you want to automatically create ServiceNow tickets to track provisioning tasks, click to **Enable external ticket processing**. [Read more about external ticketing system integrations here.](/product/admin/external-ticketing) 
 
-   If you enable this option, you can add a **Catalog ID** or **Category ID** in the relevant fields to filter down catalog items. These fields are optional, but C1 only syncs 100 catalog items, so filtering is recommended.
+   If you enable this option, you can add a **Catalog ID** or **Category ID** in the relevant fields to filter down catalog items. These fields are optional, but C1 currently only receives 100 catalog items from the connector, so filtering is recommended.
+
+   Alternatively, enter catalog item (ticket schema) sys_ids in **Ticket schema IDs** to offer exactly those schemas, in the order you list them:
+
+   - **Ticket schema IDs** cannot be combined with **Catalog ID** or **Category ID**. If the connector already has either saved, remove it before you add IDs. **Catalog ID** and **Category ID** can still be used together.
+   - You can list at most **100** distinct IDs. Blank entries and duplicates are ignored; a longer list is rejected with a configuration error, never truncated.
+   - An ID that is malformed, missing, inactive or that ServiceNow reports as not valid or not accessible is skipped with a warning in the connector logs, and the remaining IDs are still offered. If no ID is usable, no ticket schemas are offered; the connector does not fall back to the catalog or category filters.
+   - Other errors, including permission denied (403), authentication failures, rate limiting, timeouts and ServiceNow server errors, are not skipped and fail the schema listing. User and group sync are not affected.
+   - These fields require external ticket processing to be enabled.
+
+   To run the connector from the command line, see [Ticket schema IDs](https://github.com/ConductorOne/baton-servicenow#ticket-schema-ids) in the connector README.
 </Step>
 <Step>
 Click **Save**.

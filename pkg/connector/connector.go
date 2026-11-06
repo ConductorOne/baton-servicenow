@@ -11,6 +11,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/uhttp"
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 )
 
 var (
@@ -40,6 +41,14 @@ var (
 
 type ServiceNow struct {
 	client *servicenow.Client
+	// ticketSchemaIDs is the exclusive set of well-formed catalog item IDs
+	// offered as ticket schemas, in configured order. Set once in New and never
+	// mutated, so concurrent list calls can share it.
+	ticketSchemaIDs []string
+	// ticketSchemaIDsSelected records that ticket-schema-ids was configured, even
+	// if every entry was blank or malformed: an explicit selection that yields
+	// nothing must return no schemas, never fall back to broad discovery.
+	ticketSchemaIDsSelected bool
 }
 
 func (s *ServiceNow) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
@@ -118,7 +127,7 @@ func (s *ServiceNow) Validate(ctx context.Context) (annotations.Annotations, err
 // New returns the ServiceNow connector.
 func New(
 	ctx context.Context, auth string, deployment string, ticketSchemaFilters map[string]string,
-	allowedDomains []string, customUserFields []string, baseURL string, insecure bool, twoStepCheckout bool,
+	ticketSchemaIDs []string, allowedDomains []string, customUserFields []string, baseURL string, insecure bool, twoStepCheckout bool,
 ) (*ServiceNow, error) {
 	uhttpOpts := []uhttp.Option{uhttp.WithLogger(true, ctxzap.Extract(ctx))}
 	if insecure {
@@ -142,7 +151,30 @@ func New(
 	}
 	servicenowClient.TwoStepCheckout = twoStepCheckout
 
+	configuredIDs := normalizeTicketSchemaIDs(ticketSchemaIDs)
+	// Counted before malformed entries are filtered: the limit applies to what
+	// the operator configured, and no remote call is needed to enforce it.
+	if err := validateTicketSchemaIDCount(configuredIDs); err != nil {
+		return nil, err
+	}
+	// A malformed ID must not fail Validate or sync: warn once here and omit it.
+	// No remote lookup is made to check the rest.
+	schemaIDs, malformed := splitTicketSchemaIDs(configuredIDs)
+	l := ctxzap.Extract(ctx)
+	for _, id := range malformed {
+		l.Warn("baton-servicenow: ignoring configured ticket schema ID that is not a valid ServiceNow sys_id (letters, digits, '_' and '-' only)",
+			zap.String("ticket_schema_id", loggableID(id)))
+	}
+	if len(ticketSchemaIDs) > 0 && len(schemaIDs) == 0 {
+		l.Warn("baton-servicenow: none of the configured ticket schema IDs is usable; no ticket schemas will be offered",
+			zap.Int("configured_ids", len(configuredIDs)))
+	}
+
 	return &ServiceNow{
-		client: servicenowClient,
+		client:                  servicenowClient,
+		ticketSchemaIDs:         schemaIDs,
+		// Judged on the slice as provided, before normalization, to match config
+		// validation: a blank entry counts as set, nil or empty as unset.
+		ticketSchemaIDsSelected: len(ticketSchemaIDs) > 0,
 	}, nil
 }

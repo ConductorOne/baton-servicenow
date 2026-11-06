@@ -3,13 +3,17 @@ package connector
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
+	"unicode"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-servicenow/pkg/servicenow"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // ResourcesPageSize is the page size for the 6 keyset-paginated Table API
@@ -100,4 +104,110 @@ func logSkippedMemberships(ctx context.Context, sampler *perKeySampledDebug, tab
 		zap.String("resource_id", resource.Id.Resource),
 		zap.Int("skipped_count", skipped),
 	)
+}
+
+// normalizeTicketSchemaIDs trims each configured schema ID, drops blanks and
+// removes duplicates, keeping the first occurrence so configured order holds.
+func normalizeTicketSchemaIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+// MaxTicketSchemaIDs is the most distinct ticket-schema-ids entries accepted,
+// counted after trimming and removing blanks and duplicates. It keeps a
+// selection within the 100 schemas the SDK currently hands to C1, so the
+// connector never silently drops configured IDs.
+const MaxTicketSchemaIDs = 100
+
+// maxLoggedIDLength bounds how much of a configured ID is echoed into a log line.
+const maxLoggedIDLength = 64
+
+// ticketSchemaIDPattern matches the shape of a ServiceNow sys_id. It is kept to
+// plain alphanumerics rather than 32 hex characters because non-canonical
+// sys_ids exist, but it excludes everything that could change the request path
+// ('/', '?', '#', '%', '.', whitespace).
+var ticketSchemaIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// validateTicketSchemaIDCount rejects a normalized selection larger than
+// MaxTicketSchemaIDs. It never truncates.
+func validateTicketSchemaIDCount(ids []string) error {
+	if len(ids) <= MaxTicketSchemaIDs {
+		return nil
+	}
+	return status.Errorf(codes.InvalidArgument,
+		"baton-servicenow: ticket-schema-ids lists %d distinct IDs (after trimming blanks and removing duplicates) but at most %d are supported; remove at least %d",
+		len(ids), MaxTicketSchemaIDs, len(ids)-MaxTicketSchemaIDs)
+}
+
+// splitTicketSchemaIDs separates IDs that are safe to place in a catalog item
+// URL path segment from those that are not, keeping the configured order.
+func splitTicketSchemaIDs(ids []string) ([]string, []string) {
+	valid := make([]string, 0, len(ids))
+	var malformed []string
+	for _, id := range ids {
+		if ticketSchemaIDPattern.MatchString(id) {
+			valid = append(valid, id)
+		} else {
+			malformed = append(malformed, id)
+		}
+	}
+	return valid, malformed
+}
+
+// loggableID makes a configured value safe to echo into a log line: bounded
+// length and no control characters. zap escapes the rest.
+func loggableID(id string) string {
+	var b strings.Builder
+	n := 0
+	for _, r := range id {
+		if n >= maxLoggedIDLength {
+			b.WriteString("...")
+			break
+		}
+		if unicode.IsControl(r) {
+			r = '?'
+		}
+		b.WriteRune(r)
+		n++
+	}
+	return b.String()
+}
+
+// vendorItemUnavailableMessage is the body ServiceNow returns, with HTTP 400,
+// for a catalog item that does not exist, is malformed, is inactive or is not
+// accessible to the caller (observed live).
+const vendorItemUnavailableMessage = "catalog item is not valid or security constraints prevent access"
+
+// itemSkipReason reports whether err from a request scoped to one configured
+// catalog item means that item alone is unusable, and if so why. Only
+// confirmed item-specific responses qualify: 404 and the known vendor 400 body.
+// Anything else (401, 403, 429, timeouts, 5xx, transport errors, other 400s) is
+// operational and must be returned to the caller; 403 in particular may be a
+// systemic permission problem, so skipping it could turn into an empty listing.
+func itemSkipReason(err error) (string, bool) {
+	code := status.Code(err)
+	if code == codes.NotFound {
+		return "not found (HTTP 404)", true
+	}
+	if code == codes.InvalidArgument && isVendorItemUnavailable(err) {
+		return "ServiceNow reported the item is not valid or not accessible (HTTP 400: it may not exist, be inactive, or be restricted)", true
+	}
+	return "", false
+}
+
+// isVendorItemUnavailable matches the item-specific vendor 400 body.
+func isVendorItemUnavailable(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), vendorItemUnavailableMessage)
 }

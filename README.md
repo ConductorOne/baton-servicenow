@@ -71,11 +71,20 @@ Beyond syncing, the connector supports:
 - **Account provisioning** — create a ServiceNow user account. Accounts are created without a password.
 - **Entitlement provisioning** — grant and revoke group membership (`sys_user_grmember`) and role membership (`sys_user_has_role`).
 - **Connector actions** — `enable_user` and `disable_user`, each taking a required `userId` argument (the user's `sys_id`).
-- **External ticketing** — create ServiceNow Service Catalog requests. Enabled with `--ticketing`.
+- **External ticketing** — create ServiceNow Service Catalog requests. Enabled with `--ticketing`. Use `--ticket-schema-ids` to offer a specific list of up to 100 catalog items as ticket schemas; see [Ticket schema IDs](#ticket-schema-ids).
 
 Full account deprovisioning is not supported. Accounts can be disabled via the `disable_user` action, but must be deleted directly in ServiceNow.
 
 See [`docs/connector.mdx`](./docs/connector.mdx) for the customer-facing setup walkthrough and the required ServiceNow permissions.
+
+## Ticket schema IDs
+
+`--ticket-schema-ids` (`BATON_TICKET_SCHEMA_IDS`) takes catalog item sys_ids and offers exactly those ticket schemas, in the order given. For the setup walkthrough see [`docs/connector.mdx`](./docs/connector.mdx).
+
+- At most 100 distinct IDs (blanks and duplicates ignored). A longer list is rejected, not truncated.
+- Cannot be combined with `--catalog-id` or `--category-id`.
+- An ID that is malformed, missing (404), or that ServiceNow reports as not valid or not accessible (the 400 "Catalog Item is not valid or security constraints prevent access" body) is skipped with a warning and the rest are listed. If no ID is usable, no schemas are offered; the connector does not fall back to discovery.
+- Any other error fails the listing with its original status, including 403 (permission denied), 401, 429, timeouts and 5xx.
 
 ## Custom User Fields
 
@@ -128,6 +137,7 @@ Flags:
       --password string                  required: Application password used to connect to the ServiceNow API. ($BATON_PASSWORD)
   -p, --provisioning                     This must be set in order for provisioning actions to be enabled ($BATON_PROVISIONING)
       --skip-full-sync                   This must be set to skip a full sync ($BATON_SKIP_FULL_SYNC)
+      --ticket-schema-ids strings        Optional ServiceNow catalog item (ticket schema) sys_IDs to offer as ticket schemas, in the order given; at most 100. Cannot be combined with Catalog ID or Category ID. ($BATON_TICKET_SCHEMA_IDS)
       --ticketing                        This must be set to enable ticketing support ($BATON_TICKETING)
       --username string                  required: Username of administrator used to connect to the ServiceNow API. ($BATON_USERNAME)
   -v, --version                          version for baton-servicenow
