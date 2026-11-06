@@ -46,8 +46,8 @@ type ServiceNow struct {
 	// mutated, so concurrent list calls can share it.
 	ticketSchemaIDs []string
 	// ticketSchemaIDsSelected records that ticket-schema-ids was configured, even
-	// if every entry was malformed: an explicit selection that yields nothing
-	// must return no schemas, never fall back to broad discovery.
+	// if every entry was blank or malformed: an explicit selection that yields
+	// nothing must return no schemas, never fall back to broad discovery.
 	ticketSchemaIDsSelected bool
 }
 
@@ -165,7 +165,7 @@ func New(
 		l.Warn("baton-servicenow: ignoring configured ticket schema ID that is not a valid ServiceNow sys_id (letters, digits, '_' and '-' only)",
 			zap.String("ticket_schema_id", loggableID(id)))
 	}
-	if len(configuredIDs) > 0 && len(schemaIDs) == 0 {
+	if len(ticketSchemaIDs) > 0 && len(schemaIDs) == 0 {
 		l.Warn("baton-servicenow: none of the configured ticket schema IDs is usable; no ticket schemas will be offered",
 			zap.Int("configured_ids", len(configuredIDs)))
 	}
@@ -173,6 +173,8 @@ func New(
 	return &ServiceNow{
 		client:                  servicenowClient,
 		ticketSchemaIDs:         schemaIDs,
-		ticketSchemaIDsSelected: len(configuredIDs) > 0,
+		// Judged on the slice as provided, before normalization, to match config
+		// validation: a blank entry counts as set, nil or empty as unset.
+		ticketSchemaIDsSelected: len(ticketSchemaIDs) > 0,
 	}, nil
 }

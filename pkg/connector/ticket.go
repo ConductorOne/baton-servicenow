@@ -84,8 +84,8 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 // configured IDs are the whole result set, paged by position in that list. Each
 // item is fetched directly, so ServiceNow's catalog discovery position does not
 // matter; the configured order does, as it decides which page an ID lands on
-// and which IDs fall within the SDK's first-100 cutoff (the list is capped at
-// 100 distinct IDs).
+// and which IDs fall within the SDK's first-100 cutoff. New caps the list at
+// 100 distinct IDs.
 //
 // Pagination advances by the configured positions attempted, not by schemas
 // returned: an item that is skipped still consumes its position, so a page can
@@ -99,9 +99,6 @@ func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *paginati
 	l := ctxzap.Extract(ctx)
 
 	total := len(s.ticketSchemaIDs)
-	if err := validateTicketSchemaIDCount(s.ticketSchemaIDs); err != nil {
-		return nil, "", nil, err
-	}
 	offset, err := convertPageToken(pt.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("baton-servicenow: invalid page token %q: %w", pt.Token, err)
@@ -146,17 +143,19 @@ func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *paginati
 
 	ret := make([]*v2.TicketSchema, 0, len(pageIDs))
 	// skipped counts item lookup and schema-build skips together. It is local to
-	// this page, so there is no shared mutable state; suppressed per-ID warnings
-	// are still logged at Debug and covered by the page summary below.
+	// this page (at most TicketSchemasPageSize IDs), so there is no shared mutable
+	// state and no need for the shared sampler's 100th/1000th thresholds. Only the
+	// 1st and 10th skip warn per ID; the rest log at Debug and the page summary
+	// below reports the true count.
 	var skipped uint64
 	logSkip := func(id, reason string) {
 		skipped++
 		fields := []zap.Field{
 			zap.String("ticket_schema_id", loggableID(id)),
 			zap.String("reason", reason),
-			zap.Uint64("total_occurrences", skipped),
+			zap.Uint64("page_skip_count", skipped),
 		}
-		if shouldLogSample(skipped) {
+		if skipped == 1 || skipped == 10 {
 			l.Warn("baton-servicenow: skipping configured ticket schema ID", fields...)
 			return
 		}
@@ -188,7 +187,7 @@ func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *paginati
 	}
 
 	if skipped > 1 && len(ret) > 0 {
-		// Sampling suppresses the Warn for skip #2 onward (apart from 10 and 100); say how many there were so the
+		// Sampling suppresses the Warn for skip #2 onward (apart from 10); say how many there were so the
 		// sampling cannot hide the extent of the problem.
 		l.Warn("baton-servicenow: some configured ticket schema IDs on this page were skipped; per-ID warnings are sampled (all are logged at debug level)",
 			zap.Uint64("skipped", skipped), zap.Int("listed", len(ret)), zap.Int("offset", offset))

@@ -150,7 +150,7 @@ func newSchemaTestConnector(t *testing.T, stub *schemaStub, filters map[string]s
 	require.NoError(t, err)
 	normalized := normalizeTicketSchemaIDs(ids)
 	valid, _ := splitTicketSchemaIDs(normalized)
-	return &ServiceNow{client: client, ticketSchemaIDs: valid, ticketSchemaIDsSelected: len(normalized) > 0}
+	return &ServiceNow{client: client, ticketSchemaIDs: valid, ticketSchemaIDsSelected: len(ids) > 0}
 }
 
 // capturedLogs is a minimal zapcore.Core that records entries (zaptest/observer
@@ -273,7 +273,7 @@ func TestListTicketSchemas_ExplicitIDsAreExclusiveAndIgnoreFilters(t *testing.T)
 
 func TestListTicketSchemas_EmptyIDsKeepDiscoveryWithFilters(t *testing.T) {
 	stub := &schemaStub{items: []string{"disc1", "disc2"}}
-	s := newSchemaTestConnector(t, stub, map[string]string{"sysparm_catalog": "cat", "sysparm_category": "cat2"}, []string{" ", ""})
+	s := newSchemaTestConnector(t, stub, map[string]string{"sysparm_catalog": "cat", "sysparm_category": "cat2"}, nil)
 
 	ids, _ := schemaIDsOf(t, s, 25, "")
 	require.Equal(t, []string{"disc1", "disc2"}, ids)
@@ -388,15 +388,6 @@ func TestNew_RejectsMoreThanMaximumDistinctIDs(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestListTicketSchemas_DirectCallerOverMaximumIsRejected(t *testing.T) {
-	over := makeIDs(MaxTicketSchemaIDs + 1)
-	// No client is set: any remote call would panic, so this also proves none is made.
-	s := &ServiceNow{ticketSchemaIDs: over, ticketSchemaIDsSelected: true}
-	_, _, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
-	require.Error(t, err)
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
 func TestListTicketSchemas_ExplicitIDOutsideDiscoveryFirstHundred(t *testing.T) {
 	// Item 120 is past where discovery (and the SDK cutoff) would reach.
 	all := makeIDs(145)
@@ -412,7 +403,6 @@ func TestListTicketSchemas_ItemSpecificFailuresAreSkippedWithWarning(t *testing.
 	cases := map[string]stubResponse{
 		"vendor400": {http.StatusBadRequest, vendor400Body},
 		"notfound":  {http.StatusNotFound, `{"error":{"message":"No Record found"}}`},
-		"forbidden": {http.StatusForbidden, `{"error":{"message":"Insufficient rights"}}`},
 	}
 	for name, resp := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -433,7 +423,7 @@ func TestListTicketSchemas_ItemSpecificFailuresAreSkippedWithWarning(t *testing.
 }
 
 func TestListTicketSchemas_SkipReasonsAreTruthful(t *testing.T) {
-	for code, want := range map[int]string{http.StatusNotFound: "404", http.StatusForbidden: "403", http.StatusBadRequest: "HTTP 400"} {
+	for code, want := range map[int]string{http.StatusNotFound: "404", http.StatusBadRequest: "HTTP 400"} {
 		body := vendor400Body
 		stub := &schemaStub{items: []string{"good"}, itemStatus: map[string]stubResponse{"bad": {code, body}}}
 		logs := &capturedLogs{}
@@ -449,6 +439,7 @@ func TestListTicketSchemas_OperationalFailuresAreNotSkipped(t *testing.T) {
 		code codes.Code
 	}{
 		"401":        {stubResponse{http.StatusUnauthorized, `{"error":{"message":"User Not Authenticated"}}`}, codes.Unauthenticated},
+		"403":        {stubResponse{http.StatusForbidden, `{"error":{"message":"Insufficient rights"}}`}, codes.PermissionDenied},
 		"429":        {stubResponse{http.StatusTooManyRequests, ``}, codes.Unavailable},
 		"500":        {stubResponse{http.StatusInternalServerError, ``}, codes.Unknown},
 		"503":        {stubResponse{http.StatusServiceUnavailable, ``}, codes.Unavailable},
@@ -690,6 +681,53 @@ func TestListTicketSchemas_AllMalformedReturnsZeroSchemasWithoutDiscovery(t *tes
 	require.True(t, summary, "summary warning when every ID is unusable")
 }
 
+// An explicit selection is decided by what was provided, before normalization,
+// matching config validation (a blank entry counts as set; nil/empty is unset).
+func TestNew_BlankOnlySelectionIsExplicitAndNeverFallsBackToDiscovery(t *testing.T) {
+	for name, ids := range map[string][]string{
+		"empty string":  {""},
+		"whitespace":    {"  ", "\t"},
+		"mixed blanks":  {"", " ", ""},
+		"blank + dupes": {" ", " "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stub := &schemaStub{items: []string{"disc1", "disc2"}}
+			s, err := newViaNew(t, context.Background(), stub, map[string]string{"sysparm_catalog": "cat"}, ids)
+			require.NoError(t, err)
+
+			schemas, next, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
+			require.NoError(t, err)
+			require.Empty(t, schemas)
+			require.Empty(t, next)
+			require.Empty(t, stub.calls, "no discovery, states or item calls")
+		})
+	}
+}
+
+func TestNew_BlanksMixedWithValidIDsListOnlyTheValidOnes(t *testing.T) {
+	stub := &schemaStub{items: []string{"a", "b", "disc"}}
+	s, err := newViaNew(t, context.Background(), stub, nil, []string{"", " a ", "  ", "b", ""})
+	require.NoError(t, err)
+	got, _ := schemaIDsOf(t, s, 25, "")
+	require.Equal(t, []string{"a", "b"}, got)
+	require.Zero(t, stub.count("/servicecatalog/items?"), "no discovery")
+	require.Zero(t, stub.count("/items/disc"))
+}
+
+func TestNew_UnsetSelectionKeepsDiscovery(t *testing.T) {
+	for name, ids := range map[string][]string{"nil": nil, "empty": {}} {
+		t.Run(name, func(t *testing.T) {
+			stub := &schemaStub{items: []string{"disc1", "disc2"}}
+			s, err := newViaNew(t, context.Background(), stub, nil, ids)
+			require.NoError(t, err)
+			require.False(t, s.ticketSchemaIDsSelected)
+			got, _ := schemaIDsOf(t, s, 25, "")
+			require.Equal(t, []string{"disc1", "disc2"}, got)
+			require.Positive(t, stub.count("/servicecatalog/items?"))
+		})
+	}
+}
+
 func TestListTicketSchemas_AllSkippedWarnsSummary(t *testing.T) {
 	stub := &schemaStub{itemStatus: map[string]stubResponse{
 		"a": {http.StatusBadRequest, vendor400Body}, "b": {http.StatusNotFound, ``}}}
@@ -748,14 +786,14 @@ func TestListTicketSchemas_SkipWarningsAreSampledPerPage(t *testing.T) {
 
 	warns := logs.skipEntries(zapcore.WarnLevel)
 	require.Len(t, warns, 2, "Warn only at occurrences 1 and 10")
-	require.EqualValues(t, 1, warns[0].fields["total_occurrences"])
+	require.EqualValues(t, 1, warns[0].fields["page_skip_count"])
 	require.Equal(t, "bad00", warns[0].fields["ticket_schema_id"])
-	require.EqualValues(t, 10, warns[1].fields["total_occurrences"])
+	require.EqualValues(t, 10, warns[1].fields["page_skip_count"])
 	require.Equal(t, "bad09", warns[1].fields["ticket_schema_id"])
 
 	debugs := logs.skipEntries(zapcore.DebugLevel)
 	require.Len(t, debugs, 11, "every other skip stays visible at debug with its ID")
-	require.EqualValues(t, 13, debugs[len(debugs)-1].fields["total_occurrences"])
+	require.EqualValues(t, 13, debugs[len(debugs)-1].fields["page_skip_count"])
 	require.Equal(t, "good12", debugs[len(debugs)-1].fields["ticket_schema_id"], "build skips share the counter")
 
 	var summary *capturedEntry
@@ -778,7 +816,7 @@ func TestListTicketSchemas_SingleSkipAmongSuccessesWarnsWithoutSummary(t *testin
 	require.Equal(t, []string{"a", "b"}, got)
 	warns := logs.skipEntries(zapcore.WarnLevel)
 	require.Len(t, warns, 1)
-	require.EqualValues(t, 1, warns[0].fields["total_occurrences"])
+	require.EqualValues(t, 1, warns[0].fields["page_skip_count"])
 	require.Empty(t, logs.skipEntries(zapcore.DebugLevel))
 	require.Len(t, logs.warnings(), 1, "no extra summary when nothing was suppressed")
 }
@@ -794,7 +832,7 @@ func TestListTicketSchemas_SkipSamplingRestartsEachPage(t *testing.T) {
 	require.Equal(t, "x1", warns[0].fields["ticket_schema_id"])
 	require.Equal(t, "x3", warns[1].fields["ticket_schema_id"])
 	for _, w := range warns {
-		require.EqualValues(t, 1, w.fields["total_occurrences"])
+		require.EqualValues(t, 1, w.fields["page_skip_count"])
 	}
 	require.Len(t, logs.skipEntries(zapcore.DebugLevel), 2)
 }

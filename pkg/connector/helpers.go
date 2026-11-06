@@ -187,21 +187,19 @@ func loggableID(id string) string {
 
 // vendorItemUnavailableMessage is the body ServiceNow returns, with HTTP 400,
 // for a catalog item that does not exist, is malformed, is inactive or is not
-// accessible to the caller (observed live; see tickets/CXH-1166 evidence).
+// accessible to the caller (observed live).
 const vendorItemUnavailableMessage = "catalog item is not valid or security constraints prevent access"
 
 // itemSkipReason reports whether err from a request scoped to one configured
 // catalog item means that item alone is unusable, and if so why. Only
-// confirmed item-specific responses qualify: 404, 403, and the known vendor 400
-// body. Anything else (401, 429, timeouts, 5xx, transport errors, other 400s)
-// is operational and must be returned to the caller.
+// confirmed item-specific responses qualify: 404 and the known vendor 400 body.
+// Anything else (401, 403, 429, timeouts, 5xx, transport errors, other 400s) is
+// operational and must be returned to the caller; 403 in particular may be a
+// systemic permission problem, so skipping it could turn into an empty listing.
 func itemSkipReason(err error) (string, bool) {
 	code := status.Code(err)
 	if code == codes.NotFound {
 		return "not found (HTTP 404)", true
-	}
-	if code == codes.PermissionDenied {
-		return "access denied (HTTP 403); the integration user may lack access to this item", true
 	}
 	if code == codes.InvalidArgument && isVendorItemUnavailable(err) {
 		return "ServiceNow reported the item is not valid or not accessible (HTTP 400: it may not exist, be inactive, or be restricted)", true

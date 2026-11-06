@@ -291,8 +291,8 @@ In the **Password** and **Username** fields, enter the credentials for your Serv
 
    - **Ticket schema IDs** cannot be combined with **Catalog ID** or **Category ID**. If the connector already has either saved, remove it before you add IDs. **Catalog ID** and **Category ID** can still be used together.
    - You can list at most **100** distinct IDs. Blank entries and duplicates are ignored; a longer list is rejected with a configuration error, never truncated.
-   - An ID that is malformed, missing, inactive or not accessible to the integration user is skipped with a warning in the connector logs, and the remaining IDs are still offered. If no ID is usable, no ticket schemas are offered; the connector does not fall back to the catalog or category filters.
-   - Other errors, such as authentication failures, rate limiting, timeouts and ServiceNow server errors, are not skipped and fail the schema listing. If the integration user lacks a required role, every ID can be skipped, and C1's schema loading then reports that the connector returned no ticket schemas. User and group sync are not affected.
+   - An ID that is malformed, missing, inactive or that ServiceNow reports as not valid or not accessible is skipped with a warning in the connector logs, and the remaining IDs are still offered. If no ID is usable, no ticket schemas are offered; the connector does not fall back to the catalog or category filters.
+   - Other errors, including permission denied (403), authentication failures, rate limiting, timeouts and ServiceNow server errors, are not skipped and fail the schema listing. User and group sync are not affected.
    - These fields require external ticket processing to be enabled.
 
    To run the connector from the command line, see [Ticket schema IDs](https://github.com/ConductorOne/baton-servicenow#ticket-schema-ids) in the connector README.

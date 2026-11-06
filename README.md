@@ -81,13 +81,10 @@ See [`docs/connector.mdx`](./docs/connector.mdx) for the customer-facing setup w
 
 `--ticket-schema-ids` (`BATON_TICKET_SCHEMA_IDS`) takes catalog item sys_ids and offers exactly those ticket schemas, in the order given. For the setup walkthrough see [`docs/connector.mdx`](./docs/connector.mdx).
 
-- At most 100 distinct IDs after trimming whitespace, dropping blank entries and removing duplicates (first occurrence kept). A longer list is rejected, not truncated.
-- Mutually exclusive with `--catalog-id` and with `--category-id`; `--catalog-id` with `--category-id` is still allowed. An empty list counts as unset, but a list containing a blank entry (for example `--ticket-schema-ids ""`) counts as set. An empty `BATON_TICKET_SCHEMA_IDS=` environment variable counts as unset; a whitespace-only value counts as set. Omit the flag when not selecting IDs.
-- An ID may contain only letters, digits, `_` and `-`. A malformed ID does not fail setup or sync: it is warned about once at startup, omitted, and never sent to ServiceNow. If every ID is unusable, no schemas are offered (no fallback to discovery).
-- When schemas are listed, each ID is fetched directly. An ID ServiceNow reports as missing (404), forbidden (403), or not valid or accessible (the 400 "Catalog Item is not valid or security constraints prevent access" body) is skipped with a warning and the rest are listed. Any other 400, and 401, 429, timeouts, network and 5xx errors, fail the listing with the original status. If a later request while building an item's schema fails, only that same 400 is skipped; other errors, including permission errors, fail the listing.
-- Per-ID skip warnings are sampled within each listed page: logged at Warn for the 1st, 10th and 100th skip with a `total_occurrences` field, and the rest at Debug. A page where some IDs were skipped, but not all, also gets a Warn with the skip count; a page where all were skipped gets a Warn summary.
-- Warnings are connector logs. If every ID is skipped the listing is empty, and the SDK's ticket schema task reports that the connector returned no ticket schemas; this does not affect user or group sync.
-- The 403 skip is covered by mocked unit tests only; it has not been exercised against an ACL-restricted ServiceNow instance.
+- At most 100 distinct IDs (blanks and duplicates ignored). A longer list is rejected, not truncated.
+- Cannot be combined with `--catalog-id` or `--category-id`.
+- An ID that is malformed, missing (404), or that ServiceNow reports as not valid or not accessible (the 400 "Catalog Item is not valid or security constraints prevent access" body) is skipped with a warning and the rest are listed. If no ID is usable, no schemas are offered; the connector does not fall back to discovery.
+- Any other error fails the listing with its original status, including 403 (permission denied), 401, 429, timeouts and 5xx.
 
 ## Custom User Fields
 
