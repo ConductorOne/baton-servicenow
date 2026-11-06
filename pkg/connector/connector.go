@@ -146,6 +146,9 @@ func New(
 	servicenowClient.TwoStepCheckout = twoStepCheckout
 
 	schemaIDs := normalizeTicketSchemaIDs(ticketSchemaIDs)
+	// Config validation rejects ticket-schema-ids combined with catalog-id or
+	// category-id before New is called. This only guards direct callers that
+	// bypass it: explicit IDs still win and the filters stay ignored.
 	if len(schemaIDs) > 0 && len(ticketSchemaFilters) > 0 {
 		ctxzap.Extract(ctx).Warn("ticket-schema-ids is set; catalog-id and category-id are ignored")
 	}

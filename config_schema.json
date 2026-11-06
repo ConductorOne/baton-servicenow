@@ -141,8 +141,8 @@
     {
       "name": "ticket-schema-ids",
       "displayName": "Ticket schema IDs",
-      "description": "Optional list of ServiceNow catalog item (ticket schema) IDs. When set, only these schemas are offered, in the order given, and Catalog ID and Category ID are ignored. Leave empty to discover schemas using Catalog ID and Category ID. C1 currently receives at most the first 100 schemas from the connector; this is a current transport limitation, not a limit of this field.",
-      "placeholder": "Ignores Catalog/Category ID. C1 currently gets the first 100, in order",
+      "description": "Optional list of ServiceNow catalog item (ticket schema) IDs. When set, only these schemas are offered, in the order given. Cannot be combined with Catalog ID or Category ID: remove those filters before selecting IDs. Leave this field unset to discover schemas using Catalog ID and Category ID. C1 currently receives at most the first 100 schemas from the connector; this is a current transport limitation, not a limit of this field.",
+      "placeholder": "Cannot be used with Catalog/Category ID. C1 currently gets the first 100, in order",
       "stringSliceField": {}
     },
     {
@@ -181,6 +181,20 @@
       ],
       "secondaryFieldNames": [
         "ticketing"
+      ]
+    },
+    {
+      "kind": "CONSTRAINT_KIND_MUTUALLY_EXCLUSIVE",
+      "fieldNames": [
+        "ticket-schema-ids",
+        "catalog-id"
+      ]
+    },
+    {
+      "kind": "CONSTRAINT_KIND_MUTUALLY_EXCLUSIVE",
+      "fieldNames": [
+        "ticket-schema-ids",
+        "category-id"
       ]
     }
   ],

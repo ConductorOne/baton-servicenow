@@ -26,11 +26,11 @@ var (
 		field.WithDescription("ServiceNow category id to filter catalog items to"))
 	ticketSchemaIDsField = field.StringSliceField("ticket-schema-ids",
 		field.WithDisplayName("Ticket schema IDs"),
-		field.WithDescription("Optional list of ServiceNow catalog item (ticket schema) IDs. When set, only these schemas are offered, in the order given, "+
-			"and Catalog ID and Category ID are ignored. Leave empty to discover schemas using Catalog ID and Category ID. "+
+		field.WithDescription("Optional list of ServiceNow catalog item (ticket schema) IDs. When set, only these schemas are offered, in the order given. "+
+			"Cannot be combined with Catalog ID or Category ID: remove those filters before selecting IDs. Leave this field unset to discover schemas using Catalog ID and Category ID. "+
 			"C1 currently receives at most the first 100 schemas from the connector; this is a current transport limitation, not a limit of this field."),
 		// C1's list-field form renders the display name and placeholder, not the description, so the placeholder carries the key rules.
-		field.WithPlaceholder("Ignores Catalog/Category ID. C1 currently gets the first 100, in order"),
+		field.WithPlaceholder("Cannot be used with Catalog/Category ID. C1 currently gets the first 100, in order"),
 		field.WithDefaultValue([]string{}),
 	)
 	allowedDomainsField = field.StringSliceField("allowed-domains",
@@ -83,6 +83,9 @@ var configRelations = []field.SchemaFieldRelationship{
 		[]field.SchemaField{catalogField, categoryField, ticketSchemaIDsField, twoStepCheckoutField},
 		[]field.SchemaField{externalTicketField},
 	),
+	// Pairwise rather than one three-field group: Catalog ID and Category ID may still be combined with each other.
+	field.FieldsMutuallyExclusive(ticketSchemaIDsField, catalogField),
+	field.FieldsMutuallyExclusive(ticketSchemaIDsField, categoryField),
 }
 
 //go:generate go run ./gen
