@@ -26,14 +26,9 @@ var (
 		field.WithDescription("ServiceNow category id to filter catalog items to"))
 	ticketSchemaIDsField = field.StringSliceField("ticket-schema-ids",
 		field.WithDisplayName("Ticket schema IDs"),
-		field.WithDescription("Optional list of ServiceNow catalog item (ticket schema) IDs; when set, only these schemas are offered, in the order given. "+
-			"At most 100 distinct IDs (after trimming blanks and removing duplicates); a longer list is rejected, never truncated. "+
-			"An ID that is malformed, missing, inactive or not accessible is skipped with a warning in the connector logs and the rest are still offered; "+
-			"if none is usable, no schemas are offered. Other errors (authentication, rate limiting, timeouts, server errors) still fail the listing. "+
-			"Cannot be combined with Catalog ID or Category ID. Leave unset to discover schemas using Catalog ID and Category ID."),
-		// The hosted list-field form may show only the display name and placeholder; keep the key rule short.
-		field.WithPlaceholder("Max 100 IDs; cannot be used with Catalog/Category ID"),
-		field.WithDefaultValue([]string{}),
+		field.WithDescription("Optional ServiceNow catalog item (ticket schema) sys_IDs to offer as ticket schemas, in the order given; at most 100. "+
+			"Cannot be combined with Catalog ID or Category ID."),
+		field.WithPlaceholder("9de5069c5afe602b2ea0a04b66beb2c0"),
 	)
 	allowedDomainsField = field.StringSliceField("allowed-domains",
 		field.WithDisplayName("Allowed email domains"),

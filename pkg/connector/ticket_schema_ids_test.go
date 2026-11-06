@@ -705,3 +705,113 @@ func TestListTicketSchemas_AllSkippedWarnsSummary(t *testing.T) {
 	}
 	require.True(t, summary)
 }
+
+const skipMsg = "baton-servicenow: skipping configured ticket schema ID"
+
+// skipEntries returns the per-ID skip entries at the given level.
+func (c *capturedLogs) skipEntries(level zapcore.Level) []capturedEntry {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []capturedEntry
+	for _, e := range c.entries {
+		if e.level == level && e.msg == skipMsg {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func TestListTicketSchemas_SkipWarningsAreSampledPerPage(t *testing.T) {
+	// 12 unusable IDs interleaved with good ones, all on one page.
+	var ids, good []string
+	stub := &schemaStub{variablesStatus: map[string]stubResponse{}}
+	for i := 0; i < 12; i++ {
+		ids = append(ids, fmt.Sprintf("bad%02d", i))
+		g := fmt.Sprintf("good%02d", i)
+		ids = append(ids, g)
+		good = append(good, g)
+		stub.items = append(stub.items, g)
+	}
+	ids = append(ids, "good12")
+	good = append(good, "good12")
+	stub.items = append(stub.items, "good12")
+	// A known item whose variables call returns the vendor 400 is a build skip
+	// and counts with the lookup skips: 13 skips in total.
+	stub.variablesStatus["good12"] = stubResponse{http.StatusBadRequest, vendor400Body}
+	good = good[:12]
+
+	logs := &capturedLogs{}
+	s := newSchemaTestConnector(t, stub, nil, ids)
+	got, pages := listAll(t, logCtx(logs), s, 25)
+	require.Equal(t, 1, pages)
+	require.Equal(t, good, got, "sampling must not change which schemas are returned")
+
+	warns := logs.skipEntries(zapcore.WarnLevel)
+	require.Len(t, warns, 2, "Warn only at occurrences 1 and 10")
+	require.EqualValues(t, 1, warns[0].fields["total_occurrences"])
+	require.Equal(t, "bad00", warns[0].fields["ticket_schema_id"])
+	require.EqualValues(t, 10, warns[1].fields["total_occurrences"])
+	require.Equal(t, "bad09", warns[1].fields["ticket_schema_id"])
+
+	debugs := logs.skipEntries(zapcore.DebugLevel)
+	require.Len(t, debugs, 11, "every other skip stays visible at debug with its ID")
+	require.EqualValues(t, 13, debugs[len(debugs)-1].fields["total_occurrences"])
+	require.Equal(t, "good12", debugs[len(debugs)-1].fields["ticket_schema_id"], "build skips share the counter")
+
+	var summary *capturedEntry
+	for _, w := range logs.warnings() {
+		if strings.Contains(w.msg, "some configured ticket schema IDs on this page were skipped") {
+			w := w
+			summary = &w
+		}
+	}
+	require.NotNil(t, summary, "sampled page reports the true skip count")
+	require.EqualValues(t, 13, summary.fields["skipped"])
+	require.EqualValues(t, 12, summary.fields["listed"])
+}
+
+func TestListTicketSchemas_SingleSkipAmongSuccessesWarnsWithoutSummary(t *testing.T) {
+	stub := &schemaStub{items: []string{"a", "b"}}
+	logs := &capturedLogs{}
+	s := newSchemaTestConnector(t, stub, nil, []string{"a", "gone", "b"})
+	got, _ := listAll(t, logCtx(logs), s, 25)
+	require.Equal(t, []string{"a", "b"}, got)
+	warns := logs.skipEntries(zapcore.WarnLevel)
+	require.Len(t, warns, 1)
+	require.EqualValues(t, 1, warns[0].fields["total_occurrences"])
+	require.Empty(t, logs.skipEntries(zapcore.DebugLevel))
+	require.Len(t, logs.warnings(), 1, "no extra summary when nothing was suppressed")
+}
+
+func TestListTicketSchemas_SkipSamplingRestartsEachPage(t *testing.T) {
+	stub := &schemaStub{}
+	logs := &capturedLogs{}
+	// Two pages of 2 unusable IDs each: each page's first skip warns.
+	s := newSchemaTestConnector(t, stub, nil, []string{"x1", "x2", "x3", "x4"})
+	listAll(t, logCtx(logs), s, 2)
+	warns := logs.skipEntries(zapcore.WarnLevel)
+	require.Len(t, warns, 2)
+	require.Equal(t, "x1", warns[0].fields["ticket_schema_id"])
+	require.Equal(t, "x3", warns[1].fields["ticket_schema_id"])
+	for _, w := range warns {
+		require.EqualValues(t, 1, w.fields["total_occurrences"])
+	}
+	require.Len(t, logs.skipEntries(zapcore.DebugLevel), 2)
+}
+
+func TestListTicketSchemas_AllSkippedKeepsSamplingAndSummaryWarnings(t *testing.T) {
+	stub := &schemaStub{}
+	logs := &capturedLogs{}
+	s := newSchemaTestConnector(t, stub, nil, makeIDs(11))
+	got, _ := listAll(t, logCtx(logs), s, 25)
+	require.Empty(t, got)
+	require.Len(t, logs.skipEntries(zapcore.WarnLevel), 2)
+	var all bool
+	for _, w := range logs.warnings() {
+		if strings.Contains(w.msg, "every configured ticket schema ID on this page was skipped") {
+			all = true
+			require.EqualValues(t, 11, w.fields["skipped"])
+		}
+	}
+	require.True(t, all)
+}

@@ -145,15 +145,29 @@ func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *paginati
 	ticketStatuses := requestedItemStatesToTicketStatus(requestedItemStates)
 
 	ret := make([]*v2.TicketSchema, 0, len(pageIDs))
-	skipped := 0
+	// skipped counts item lookup and schema-build skips together. It is local to
+	// this page, so there is no shared mutable state; suppressed per-ID warnings
+	// are still logged at Debug and covered by the page summary below.
+	var skipped uint64
+	logSkip := func(id, reason string) {
+		skipped++
+		fields := []zap.Field{
+			zap.String("ticket_schema_id", loggableID(id)),
+			zap.String("reason", reason),
+			zap.Uint64("total_occurrences", skipped),
+		}
+		if shouldLogSample(skipped) {
+			l.Warn("baton-servicenow: skipping configured ticket schema ID", fields...)
+			return
+		}
+		l.Debug("baton-servicenow: skipping configured ticket schema ID", fields...)
+	}
 	for _, id := range pageIDs {
 		catalogItem, itemAnnos, err := s.client.GetCatalogItem(ctx, id)
 		servicenow.MergeAnnotations(&annos, itemAnnos)
 		if err != nil {
 			if reason, skip := itemSkipReason(err); skip {
-				skipped++
-				l.Warn("baton-servicenow: skipping configured ticket schema ID",
-					zap.String("ticket_schema_id", loggableID(id)), zap.String("reason", reason))
+				logSkip(id, reason)
 				continue
 			}
 			return nil, "", annos, fmt.Errorf("baton-servicenow: failed to fetch configured ticket schema ID %q: %w", id, err)
@@ -164,10 +178,7 @@ func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *paginati
 			// Only the vendor's item-specific 400 is treated as this item being
 			// unusable; any other failure while building the schema is operational.
 			if status.Code(err) == codes.InvalidArgument && isVendorItemUnavailable(err) {
-				skipped++
-				l.Warn("baton-servicenow: skipping configured ticket schema ID whose schema could not be built",
-					zap.String("ticket_schema_id", loggableID(id)),
-					zap.String("reason", "ServiceNow reported the item is not valid or not accessible (HTTP 400)"))
+				logSkip(id, "schema could not be built: ServiceNow reported the item is not valid or not accessible (HTTP 400)")
 				continue
 			}
 			return nil, "", annos, err
@@ -176,9 +187,15 @@ func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *paginati
 		ret = append(ret, schema)
 	}
 
+	if skipped > 1 && len(ret) > 0 {
+		// Sampling suppresses the Warn for skip #2 onward (apart from 10 and 100); say how many there were so the
+		// sampling cannot hide the extent of the problem.
+		l.Warn("baton-servicenow: some configured ticket schema IDs on this page were skipped; per-ID warnings are sampled (all are logged at debug level)",
+			zap.Uint64("skipped", skipped), zap.Int("listed", len(ret)), zap.Int("offset", offset))
+	}
 	if skipped > 0 && len(ret) == 0 {
 		l.Warn("baton-servicenow: every configured ticket schema ID on this page was skipped",
-			zap.Int("skipped", skipped), zap.Int("offset", offset), zap.Bool("last_page", nextPageToken == ""))
+			zap.Uint64("skipped", skipped), zap.Int("offset", offset), zap.Bool("last_page", nextPageToken == ""))
 	}
 
 	return ret, nextPageToken, annos, nil

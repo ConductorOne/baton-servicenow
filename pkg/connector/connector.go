@@ -157,12 +157,6 @@ func New(
 	if err := validateTicketSchemaIDCount(configuredIDs); err != nil {
 		return nil, err
 	}
-	// Config validation rejects ticket-schema-ids combined with catalog-id or
-	// category-id before New is called. This only guards direct callers that
-	// bypass it: explicit IDs still win and the filters stay ignored.
-	if len(configuredIDs) > 0 && len(ticketSchemaFilters) > 0 {
-		ctxzap.Extract(ctx).Warn("ticket-schema-ids is set; catalog-id and category-id are ignored")
-	}
 	// A malformed ID must not fail Validate or sync: warn once here and omit it.
 	// No remote lookup is made to check the rest.
 	schemaIDs, malformed := splitTicketSchemaIDs(configuredIDs)
