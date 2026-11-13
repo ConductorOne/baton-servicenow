@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -125,10 +126,11 @@ func normalizeTicketSchemaIDs(ids []string) []string {
 	return out
 }
 
-// MaxTicketSchemaIDs is the most distinct ticket-schema-ids entries accepted,
-// counted after trimming and removing blanks and duplicates. It keeps a
-// selection within the 100 schemas the SDK currently hands to C1, so the
-// connector never silently drops configured IDs.
+// MaxTicketSchemaIDs is the most distinct ticket-schema-ids entries that
+// ListTicketSchemas accepts, counted after trimming and removing blanks and
+// duplicates. It keeps a selection within the 100 schemas the SDK currently
+// hands to C1, so the connector never silently drops configured IDs; a larger
+// selection fails schema listing but not construction, Validate or sync.
 const MaxTicketSchemaIDs = 100
 
 // maxLoggedIDLength bounds how much of a configured ID is echoed into a log line.
@@ -149,6 +151,39 @@ func validateTicketSchemaIDCount(ids []string) error {
 	return status.Errorf(codes.InvalidArgument,
 		"baton-servicenow: ticket-schema-ids lists %d distinct IDs (after trimming blanks and removing duplicates) but at most %d are supported; remove at least %d",
 		len(ids), MaxTicketSchemaIDs, len(ids)-MaxTicketSchemaIDs)
+}
+
+// selectedTokenSucceededSuffix marks a selected-IDs page token issued after an
+// earlier page produced at least one schema.
+const selectedTokenSucceededSuffix = ":ok"
+
+// encodeSelectedPageToken builds the selected-IDs page token: the next offset
+// into the configured list, plus whether any schema was produced so far. A token
+// without the suffix is a plain offset, as issued before the flag existed.
+func encodeSelectedPageToken(offset int, succeeded bool) string {
+	token := strconv.Itoa(offset)
+	if succeeded {
+		token += selectedTokenSucceededSuffix
+	}
+	return token
+}
+
+// decodeSelectedPageToken parses a token from encodeSelectedPageToken. An empty
+// token is the first page. Anything else that is not a non-negative decimal
+// offset, optionally followed by the suffix, is rejected.
+func decodeSelectedPageToken(token string) (int, bool, error) {
+	if token == "" {
+		return 0, false, nil
+	}
+	digits, succeeded := strings.CutSuffix(token, selectedTokenSucceededSuffix)
+	if digits == "" || strings.TrimLeft(digits, "0123456789") != "" {
+		return 0, false, fmt.Errorf("malformed selected ticket schema page token")
+	}
+	offset, err := strconv.Atoi(digits)
+	if err != nil {
+		return 0, false, fmt.Errorf("malformed selected ticket schema page token: %w", err)
+	}
+	return offset, succeeded, nil
 }
 
 // splitTicketSchemaIDs separates IDs that are safe to place in a catalog item
@@ -190,18 +225,14 @@ func loggableID(id string) string {
 // accessible to the caller (observed live).
 const vendorItemUnavailableMessage = "catalog item is not valid or security constraints prevent access"
 
-// itemSkipReason reports whether err from a request scoped to one configured
-// catalog item means that item alone is unusable, and if so why. Only
-// confirmed item-specific responses qualify: 404 and the known vendor 400 body.
-// Anything else (401, 403, 429, timeouts, 5xx, transport errors, other 400s) is
-// operational and must be returned to the caller; 403 in particular may be a
-// systemic permission problem, so skipping it could turn into an empty listing.
+// itemSkipReason reports whether err from a catalog item lookup is the
+// recognized vendor 400 for an unavailable item, and if so why. Only that body
+// qualifies; 401, 403, 404, 429, timeouts, 5xx, transport errors and any other
+// 400 (a missing route is also 400, with a different body) are returned to the
+// caller. Whether a recognized 400 is then skipped depends on the rest of the
+// selection (see listSelectedTicketSchemas).
 func itemSkipReason(err error) (string, bool) {
-	code := status.Code(err)
-	if code == codes.NotFound {
-		return "not found (HTTP 404)", true
-	}
-	if code == codes.InvalidArgument && isVendorItemUnavailable(err) {
+	if status.Code(err) == codes.InvalidArgument && isVendorItemUnavailable(err) {
 		return "ServiceNow reported the item is not valid or not accessible (HTTP 400: it may not exist, be inactive, or be restricted)", true
 	}
 	return "", false

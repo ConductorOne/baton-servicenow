@@ -79,12 +79,7 @@ See [`docs/connector.mdx`](./docs/connector.mdx) for the customer-facing setup w
 
 ## Ticket schema IDs
 
-`--ticket-schema-ids` (`BATON_TICKET_SCHEMA_IDS`) takes catalog item sys_ids and offers exactly those ticket schemas, in the order given. For the setup walkthrough see [`docs/connector.mdx`](./docs/connector.mdx).
-
-- At most 100 distinct IDs (blanks and duplicates ignored). A longer list is rejected, not truncated.
-- Cannot be combined with `--catalog-id` or `--category-id`.
-- An ID that is malformed, missing (404), or that ServiceNow reports as not valid or not accessible (the 400 "Catalog Item is not valid or security constraints prevent access" body) is skipped with a warning and the rest are listed. If no ID is usable, no schemas are offered; the connector does not fall back to discovery.
-- Any other error fails the listing with its original status, including 403 (permission denied), 401, 429, timeouts and 5xx.
+`--ticket-schema-ids` takes catalog item sys_ids and offers only those items as ticket schemas, in the order given. It can't be combined with `--catalog-id` or `--category-id` and accepts at most 100 IDs. See [`docs/connector.mdx`](./docs/connector.mdx) for setup.
 
 ## Custom User Fields
 

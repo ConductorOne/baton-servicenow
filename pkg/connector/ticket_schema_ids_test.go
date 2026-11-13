@@ -40,6 +40,10 @@ type schemaStub struct {
 	itemStatus map[string]stubResponse
 	// variablesStatus overrides the response to GET of an item's variables.
 	variablesStatus map[string]stubResponse
+	// dropID, when set, makes GET of that item close the connection without a response.
+	dropID string
+	// hangID, when set, makes GET of that item wait until the client gives up.
+	hangID string
 	// statesStatus, when nonzero, is returned for the requested-item states call.
 	statesStatus int
 	// calls records every request path+query, in arrival order.
@@ -50,6 +54,10 @@ type stubResponse struct {
 	code int
 	body string
 }
+
+// variablesDenied400Body is what the item variables endpoint returns for an
+// unavailable item (observed live); it differs from the item endpoint's body.
+const variablesDenied400Body = `{"error":{"message":"Security constraints prevent accessing of the item","detail":""},"status":"failure"}`
 
 const vendor400Body = `{"error":{"message":"Either Catalog Item is not valid or security constraints prevent access","detail":""},"status":"failure"}`
 
@@ -115,6 +123,19 @@ func (s *schemaStub) handler(t *testing.T) http.HandlerFunc {
 			payload = servicenow.CatalogItemsResponse{Result: result}
 		case strings.Contains(path, "/servicecatalog/items/"):
 			_, id, _ := strings.Cut(path, "/items/")
+			if id == s.dropID && id != "" {
+				conn, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Errorf("failed to hijack connection: %v", err)
+					return
+				}
+				_ = conn.Close()
+				return
+			}
+			if id == s.hangID && id != "" {
+				<-r.Context().Done()
+				return
+			}
 			if resp, ok := s.itemStatus[id]; ok {
 				w.WriteHeader(resp.code)
 				_, _ = w.Write([]byte(resp.body))
@@ -310,11 +331,11 @@ func TestListTicketSchemas_ExplicitIDsPaging(t *testing.T) {
 
 	ids, next := schemaIDsOf(t, s, 3, "")
 	require.Equal(t, all[0:3], ids)
-	require.Equal(t, "3", next)
+	require.Equal(t, "3:ok", next, "offset plus the flag that a schema was already produced")
 
 	ids, next = schemaIDsOf(t, s, 3, next)
 	require.Equal(t, all[3:6], ids)
-	require.Equal(t, "6", next)
+	require.Equal(t, "6:ok", next)
 
 	ids, next = schemaIDsOf(t, s, 3, next)
 	require.Equal(t, all[6:], ids)
@@ -329,12 +350,12 @@ func TestListTicketSchemas_ExplicitIDsDefaultAndCappedPageSizes(t *testing.T) {
 	for _, size := range []int{0, -1, TicketSchemasPageSize, 100, 1000} {
 		ids, next := schemaIDsOf(t, s, size, "")
 		require.Len(t, ids, TicketSchemasPageSize, "size %d", size)
-		require.Equal(t, strconv.Itoa(TicketSchemasPageSize), next, "size %d", size)
+		require.Equal(t, strconv.Itoa(TicketSchemasPageSize)+":ok", next, "size %d", size)
 	}
 
 	ids, next := schemaIDsOf(t, s, 10, "")
 	require.Len(t, ids, 10)
-	require.Equal(t, "10", next)
+	require.Equal(t, "10:ok", next)
 }
 
 func TestListTicketSchemas_ExplicitIDsInvalidPageTokens(t *testing.T) {
@@ -342,15 +363,42 @@ func TestListTicketSchemas_ExplicitIDsInvalidPageTokens(t *testing.T) {
 	stub := &schemaStub{items: all}
 	s := newSchemaTestConnector(t, stub, nil, all)
 
-	for _, token := range []string{"abc", "-1", "6", "1.5", "99999"} {
+	for _, token := range []string{"abc", "-1", "6", "1.5", "99999", "+1", " 1", ":ok", "ok", "1:OK", "1:ok:ok", "1:", "6:ok"} {
 		_, _, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25, Token: token})
 		require.Error(t, err, "token %q", token)
 	}
 
 	// A token exactly at the end of the list is an empty final page, not an error.
-	ids, next := schemaIDsOf(t, s, 25, "5")
-	require.Empty(t, ids)
-	require.Empty(t, next)
+	for _, token := range []string{"5", "5:ok"} {
+		ids, next := schemaIDsOf(t, s, 25, token)
+		require.Empty(t, ids)
+		require.Empty(t, next)
+	}
+	require.Empty(t, stub.calls)
+}
+
+func TestSelectedPageToken(t *testing.T) {
+	for _, tc := range []struct {
+		offset    int
+		succeeded bool
+		token     string
+	}{{0, false, "0"}, {25, false, "25"}, {25, true, "25:ok"}, {100, true, "100:ok"}} {
+		require.Equal(t, tc.token, encodeSelectedPageToken(tc.offset, tc.succeeded))
+		offset, succeeded, err := decodeSelectedPageToken(tc.token)
+		require.NoError(t, err)
+		require.Equal(t, tc.offset, offset)
+		require.Equal(t, tc.succeeded, succeeded)
+	}
+
+	offset, succeeded, err := decodeSelectedPageToken("")
+	require.NoError(t, err)
+	require.Zero(t, offset)
+	require.False(t, succeeded, "first page starts with no success")
+
+	for _, bad := range []string{"abc", "-1", "+1", " 1", "1 ", "1.5", ":ok", "ok", "1:OK", "1:ok:ok", "1:", "1:no", "0x1", "99999999999999999999"} {
+		_, _, err := decodeSelectedPageToken(bad)
+		require.Error(t, err, "token %q", bad)
+	}
 }
 
 // A selection at the maximum is traversed to its end by small pages.
@@ -365,27 +413,48 @@ func TestListTicketSchemas_ExplicitIDsAtMaximumTraverse(t *testing.T) {
 	require.Zero(t, stub.count("/servicecatalog/items?"))
 }
 
-func TestNew_RejectsMoreThanMaximumDistinctIDs(t *testing.T) {
+// More than the maximum does not fail construction (so Validate and resource
+// sync still work); schema listing rejects it on every page, before any remote
+// call, and never truncates.
+func TestListTicketSchemas_RejectsMoreThanMaximumDistinctIDs(t *testing.T) {
 	over := makeIDs(MaxTicketSchemaIDs + 1)
 	stub := &schemaStub{items: over}
 
-	_, err := newViaNew(t, context.Background(), stub, nil, over)
-	require.Error(t, err, "never truncated silently")
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.Contains(t, err.Error(), "101")
-	require.Contains(t, err.Error(), "at most 100")
+	s, err := newViaNew(t, context.Background(), stub, nil, over)
+	require.NoError(t, err, "New must not fail on the count")
+	require.NotEmpty(t, s.ResourceSyncers(context.Background()), "resource sync is still wired")
+	require.Empty(t, stub.calls, "no remote call at construction")
+
+	for _, token := range []string{"", "25", "25:ok", "100"} {
+		schemas, next, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25, Token: token})
+		require.Error(t, err, "token %q: never truncated silently", token)
+		require.Equal(t, codes.InvalidArgument, status.Code(err))
+		require.Contains(t, err.Error(), "101")
+		require.Contains(t, err.Error(), "at most 100")
+		require.Nil(t, schemas)
+		require.Empty(t, next)
+	}
 	require.Empty(t, stub.calls, "no remote call is made to enforce the maximum")
 
 	// Blanks, whitespace and duplicates do not count toward the maximum.
 	padded := append(append([]string{" ", ""}, makeIDs(MaxTicketSchemaIDs)...), " id000 ", "id001")
-	s, err := newViaNew(t, context.Background(), stub, nil, padded)
+	s, err = newViaNew(t, context.Background(), stub, nil, padded)
 	require.NoError(t, err)
 	require.Len(t, s.ticketSchemaIDs, MaxTicketSchemaIDs)
+	got, pages := listAll(t, context.Background(), s, 0)
+	require.Equal(t, makeIDs(MaxTicketSchemaIDs), got)
+	require.Equal(t, 4, pages)
 
-	// Malformed entries still count: the maximum applies before format filtering.
+	// Malformed entries still count: the maximum applies before format filtering,
+	// even though only 100 well-formed IDs remain.
+	malformedStub := &schemaStub{items: over}
 	malformed := append(makeIDs(MaxTicketSchemaIDs), "bad/id")
-	_, err = newViaNew(t, context.Background(), stub, nil, malformed)
-	require.Error(t, err)
+	s, err = newViaNew(t, context.Background(), malformedStub, nil, malformed)
+	require.NoError(t, err)
+	require.Len(t, s.ticketSchemaIDs, MaxTicketSchemaIDs)
+	_, _, _, err = s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Empty(t, malformedStub.calls)
 }
 
 func TestListTicketSchemas_ExplicitIDOutsideDiscoveryFirstHundred(t *testing.T) {
@@ -402,7 +471,6 @@ func TestListTicketSchemas_ExplicitIDOutsideDiscoveryFirstHundred(t *testing.T) 
 func TestListTicketSchemas_ItemSpecificFailuresAreSkippedWithWarning(t *testing.T) {
 	cases := map[string]stubResponse{
 		"vendor400": {http.StatusBadRequest, vendor400Body},
-		"notfound":  {http.StatusNotFound, `{"error":{"message":"No Record found"}}`},
 	}
 	for name, resp := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -423,14 +491,13 @@ func TestListTicketSchemas_ItemSpecificFailuresAreSkippedWithWarning(t *testing.
 }
 
 func TestListTicketSchemas_SkipReasonsAreTruthful(t *testing.T) {
-	for code, want := range map[int]string{http.StatusNotFound: "404", http.StatusBadRequest: "HTTP 400"} {
-		body := vendor400Body
-		stub := &schemaStub{items: []string{"good"}, itemStatus: map[string]stubResponse{"bad": {code, body}}}
-		logs := &capturedLogs{}
-		s := newSchemaTestConnector(t, stub, nil, []string{"bad", "good"})
-		listAll(t, logCtx(logs), s, 25)
-		require.Contains(t, logs.warnings()[0].fields["reason"], want)
-	}
+	stub := &schemaStub{items: []string{"good"}, itemStatus: map[string]stubResponse{"bad": {http.StatusBadRequest, vendor400Body}}}
+	logs := &capturedLogs{}
+	s := newSchemaTestConnector(t, stub, nil, []string{"bad", "good"})
+	listAll(t, logCtx(logs), s, 25)
+	reason := logs.warnings()[0].fields["reason"].(string)
+	require.Contains(t, reason, "HTTP 400")
+	require.NotContains(t, reason, "404")
 }
 
 func TestListTicketSchemas_OperationalFailuresAreNotSkipped(t *testing.T) {
@@ -441,9 +508,12 @@ func TestListTicketSchemas_OperationalFailuresAreNotSkipped(t *testing.T) {
 		"401":        {stubResponse{http.StatusUnauthorized, `{"error":{"message":"User Not Authenticated"}}`}, codes.Unauthenticated},
 		"403":        {stubResponse{http.StatusForbidden, `{"error":{"message":"Insufficient rights"}}`}, codes.PermissionDenied},
 		"429":        {stubResponse{http.StatusTooManyRequests, ``}, codes.Unavailable},
-		"500":        {stubResponse{http.StatusInternalServerError, ``}, codes.Unknown},
+		"500":        {stubResponse{http.StatusInternalServerError, ``}, codes.Unavailable},
 		"503":        {stubResponse{http.StatusServiceUnavailable, ``}, codes.Unavailable},
 		"global 400": {stubResponse{http.StatusBadRequest, `{"error":{"message":"Invalid query parameter"}}`}, codes.InvalidArgument},
+		// ServiceNow answers a missing route with 400 and this body, not 404.
+		"missing route 400": {stubResponse{http.StatusBadRequest, `{"error":{"message":"Requested URI does not represent any resource","detail":null},"status":"failure"}`}, codes.InvalidArgument},
+		"404":               {stubResponse{http.StatusNotFound, `{"error":{"message":"No Record found"}}`}, codes.NotFound},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -455,34 +525,66 @@ func TestListTicketSchemas_OperationalFailuresAreNotSkipped(t *testing.T) {
 			require.Nil(t, schemas)
 			require.Contains(t, err.Error(), `"flaky"`)
 			require.NotContains(t, err.Error(), "not valid, inactive")
-			if tc.code != codes.Unknown {
-				require.Equal(t, tc.code, status.Code(err), "vendor status preserved")
-			}
+			require.Equal(t, tc.code, status.Code(err), "vendor status preserved")
 			require.Zero(t, stub.count("/items/good2"), "stops at the operational failure")
-			require.NotEmpty(t, annos, "annotations from calls made so far are returned on the error path")
+			require.True(t, hasRateLimit(annos), "annotations from calls made so far are returned on the error path")
 		})
 	}
+
+	// No HTTP response at all: never mistaken for an unavailable item.
+	t.Run("transport error", func(t *testing.T) {
+		stub := &schemaStub{items: []string{"good1", "good2"}, dropID: "flaky"}
+		s := newSchemaTestConnector(t, stub, nil, []string{"good1", "flaky", "good2"})
+		schemas, next, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
+		require.Error(t, err)
+		require.Nil(t, schemas)
+		require.Empty(t, next)
+		require.Contains(t, err.Error(), `"flaky"`)
+		require.Zero(t, stub.count("/items/good2"), "not skipped")
+	})
+	t.Run("client timeout", func(t *testing.T) {
+		stub := &schemaStub{items: []string{"good1", "good2"}, hangID: "flaky"}
+		s := newSchemaTestConnector(t, stub, nil, []string{"good1", "flaky", "good2"})
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		schemas, next, _, err := s.ListTicketSchemas(ctx, &pagination.Token{Size: 25})
+		require.Error(t, err)
+		require.Nil(t, schemas)
+		require.Empty(t, next)
+		require.Contains(t, err.Error(), `"flaky"`)
+		require.Zero(t, stub.count("/items/good2"), "not skipped")
+	})
 }
 
-func TestListTicketSchemas_SchemaBuildFailureClassification(t *testing.T) {
-	t.Run("vendor item 400 while building the schema is item-specific", func(t *testing.T) {
-		stub := &schemaStub{items: []string{"good", "gone"}, variablesStatus: map[string]stubResponse{"gone": {http.StatusBadRequest, vendor400Body}}}
-		s := newSchemaTestConnector(t, stub, nil, []string{"gone", "good"})
-		got, _ := schemaIDsOf(t, s, 25, "")
-		require.Equal(t, []string{"good"}, got)
-	})
-	for name, resp := range map[string]stubResponse{
-		"global 400": {http.StatusBadRequest, `{"error":{"message":"bad request"}}`},
-		"403":        {http.StatusForbidden, ``},
-		"404":        {http.StatusNotFound, ``},
-		"500":        {http.StatusInternalServerError, ``},
+// Schema building never calls the item endpoint, so no failure there is skipped,
+// including the vendor body text and the variables endpoint's own 400.
+func TestListTicketSchemas_SchemaBuildFailuresPropagate(t *testing.T) {
+	for name, tc := range map[string]struct {
+		resp stubResponse
+		code codes.Code
+		text string
+	}{
+		"variables endpoint 400":  {stubResponse{http.StatusBadRequest, variablesDenied400Body}, codes.InvalidArgument, "Security constraints prevent accessing of the item"},
+		"item endpoint body text": {stubResponse{http.StatusBadRequest, vendor400Body}, codes.InvalidArgument, "Catalog Item is not valid"},
+		"global 400":              {stubResponse{http.StatusBadRequest, `{"error":{"message":"bad request"}}`}, codes.InvalidArgument, "bad request"},
+		"403":                     {stubResponse{http.StatusForbidden, ``}, codes.PermissionDenied, ""},
+		"404":                     {stubResponse{http.StatusNotFound, ``}, codes.NotFound, ""},
+		"500":                     {stubResponse{http.StatusInternalServerError, ``}, codes.Unknown, ""},
 	} {
-		t.Run(name+" while building the schema is operational", func(t *testing.T) {
-			stub := &schemaStub{items: []string{"good", "x"}, variablesStatus: map[string]stubResponse{"x": resp}}
-			s := newSchemaTestConnector(t, stub, nil, []string{"x", "good"})
-			_, _, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
-			require.Error(t, err)
-			require.Contains(t, err.Error(), "x")
+		t.Run(name, func(t *testing.T) {
+			stub := &schemaStub{items: []string{"good", "x", "good2"}, variablesStatus: map[string]stubResponse{"x": tc.resp}}
+			s := newSchemaTestConnector(t, stub, nil, []string{"good", "x", "good2"})
+			schemas, next, annos, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
+			require.Error(t, err, "even though another configured ID produced a schema")
+			require.Nil(t, schemas)
+			require.Empty(t, next)
+			require.Contains(t, err.Error(), "catalog item x")
+			require.Contains(t, err.Error(), tc.text)
+			if tc.code != codes.Unknown {
+				require.Equal(t, tc.code, status.Code(err))
+			}
+			require.Zero(t, stub.count("/items/good2"))
+			require.True(t, hasRateLimit(annos))
 		})
 	}
 }
@@ -514,6 +616,7 @@ func TestListTicketSchemas_EmptyPageKeepsPaging(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, schemas)
 	require.Equal(t, "5", next, "next page remains reachable after an all-skipped page")
+	require.NotContains(t, next, selectedTokenSucceededSuffix, "no schema produced yet, so no success flag")
 
 	got, _ := schemaIDsOf(t, s, 5, next)
 	require.Equal(t, []string{"good"}, got)
@@ -728,20 +831,112 @@ func TestNew_UnsetSelectionKeepsDiscovery(t *testing.T) {
 	}
 }
 
-func TestListTicketSchemas_AllSkippedWarnsSummary(t *testing.T) {
-	stub := &schemaStub{itemStatus: map[string]stubResponse{
-		"a": {http.StatusBadRequest, vendor400Body}, "b": {http.StatusNotFound, ``}}}
-	logs := &capturedLogs{}
-	s := newSchemaTestConnector(t, stub, nil, []string{"a", "b"})
-	got, _ := listAll(t, logCtx(logs), s, 25)
-	require.Empty(t, got)
-	var summary bool
-	for _, w := range logs.warnings() {
-		if strings.Contains(w.msg, "every configured ticket schema ID on this page was skipped") {
-			summary = true
+func hasRateLimit(annos annotations.Annotations) bool {
+	for _, a := range annos {
+		if a.MessageIs(&v2.RateLimitDescription{}) {
+			return true
 		}
 	}
-	require.True(t, summary)
+	return false
+}
+
+// When no configured ID yields a schema, the recognized 400 is not tolerated:
+// listing fails with the original vendor error rather than an empty success.
+func TestListTicketSchemas_AllRecognized400OnSinglePageFails(t *testing.T) {
+	stub := &schemaStub{}
+	s := newSchemaTestConnector(t, stub, nil, []string{"a", "b", "c"})
+	schemas, next, annos, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 25})
+	require.Error(t, err)
+	require.Nil(t, schemas)
+	require.Empty(t, next)
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "original vendor status survives wrapping")
+	require.Contains(t, err.Error(), "Either Catalog Item is not valid or security constraints prevent access")
+	require.Contains(t, err.Error(), "none of the 3 configured ticket schema IDs")
+	require.Contains(t, err.Error(), `"a"`, "names the first skipped ID")
+	require.True(t, hasRateLimit(annos))
+	require.Equal(t, 3, stub.count("/servicecatalog/items/"))
+}
+
+func TestListTicketSchemas_AllRecognized400AcrossPagesFailsOnFinalPage(t *testing.T) {
+	stub := &schemaStub{}
+	logs := &capturedLogs{}
+	s := newSchemaTestConnector(t, stub, nil, makeIDs(5))
+
+	schemas, next, _, err := s.ListTicketSchemas(logCtx(logs), &pagination.Token{Size: 2})
+	require.NoError(t, err, "a non-final page never fails just because all its IDs were skipped")
+	require.Empty(t, schemas)
+	require.Equal(t, "2", next)
+
+	schemas, next, _, err = s.ListTicketSchemas(logCtx(logs), &pagination.Token{Size: 2, Token: next})
+	require.NoError(t, err)
+	require.Empty(t, schemas)
+	require.Equal(t, "4", next)
+
+	schemas, next, annos, err := s.ListTicketSchemas(logCtx(logs), &pagination.Token{Size: 2, Token: next})
+	require.Error(t, err)
+	require.Nil(t, schemas)
+	require.Empty(t, next)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Contains(t, err.Error(), "none of the 5 configured ticket schema IDs")
+	require.Contains(t, err.Error(), `"id004"`)
+	require.True(t, hasRateLimit(annos))
+
+	var allSkipped int
+	for _, w := range logs.warnings() {
+		if strings.Contains(w.msg, "every configured ticket schema ID on this page was skipped") {
+			allSkipped++
+			require.Equal(t, false, w.fields["last_page"])
+		}
+	}
+	require.Equal(t, 2, allSkipped, "summary warns on the non-final pages; the failing page reports through its error")
+}
+
+func TestListTicketSchemas_HybridAcrossPageBoundaries(t *testing.T) {
+	t.Run("first page all bad, later page good", func(t *testing.T) {
+		stub := &schemaStub{items: []string{"good1", "good2"}}
+		s := newSchemaTestConnector(t, stub, nil, []string{"bad1", "bad2", "good1", "bad3", "good2"})
+
+		ids, next := schemaIDsOf(t, s, 2, "")
+		require.Empty(t, ids)
+		require.Equal(t, "2", next)
+		ids, next = schemaIDsOf(t, s, 2, next)
+		require.Equal(t, []string{"good1"}, ids)
+		require.Equal(t, "4:ok", next)
+		ids, next = schemaIDsOf(t, s, 2, next)
+		require.Equal(t, []string{"good2"}, ids)
+		require.Empty(t, next)
+	})
+	t.Run("first page good, later pages including the final one all bad", func(t *testing.T) {
+		stub := &schemaStub{items: []string{"good1", "good2"}}
+		s := newSchemaTestConnector(t, stub, nil, []string{"good1", "good2", "bad1", "bad2", "bad3", "bad4"})
+		got, pages := listAll(t, context.Background(), s, 2)
+		require.Equal(t, []string{"good1", "good2"}, got)
+		require.Equal(t, 3, pages)
+	})
+	t.Run("final all-bad page trusts the token flag, with no state kept between calls", func(t *testing.T) {
+		stub := &schemaStub{items: []string{"good1"}}
+		// A fresh connector, as after a process restart, given a token from an
+		// earlier page that produced a schema.
+		s := newSchemaTestConnector(t, stub, nil, []string{"good1", "bad1", "bad2"})
+		got, next := schemaIDsOf(t, s, 1, "1:ok")
+		require.Empty(t, got)
+		require.Equal(t, "2:ok", next)
+		got, next = schemaIDsOf(t, s, 1, next)
+		require.Empty(t, got)
+		require.Empty(t, next)
+		require.Zero(t, stub.count("/items/good1"), "no extra vendor request to re-check earlier pages")
+
+		// The same final page without the flag fails.
+		_, _, _, err := s.ListTicketSchemas(context.Background(), &pagination.Token{Size: 1, Token: "2"})
+		require.Equal(t, codes.InvalidArgument, status.Code(err))
+	})
+	t.Run("good and bad within one page", func(t *testing.T) {
+		stub := &schemaStub{items: []string{"good1", "good2"}}
+		s := newSchemaTestConnector(t, stub, nil, []string{"bad1", "good1", "bad2", "good2", "bad3"})
+		got, pages := listAll(t, context.Background(), s, 25)
+		require.Equal(t, []string{"good1", "good2"}, got)
+		require.Equal(t, 1, pages)
+	})
 }
 
 const skipMsg = "baton-servicenow: skipping configured ticket schema ID"
@@ -770,13 +965,7 @@ func TestListTicketSchemas_SkipWarningsAreSampledPerPage(t *testing.T) {
 		good = append(good, g)
 		stub.items = append(stub.items, g)
 	}
-	ids = append(ids, "good12")
-	good = append(good, "good12")
-	stub.items = append(stub.items, "good12")
-	// A known item whose variables call returns the vendor 400 is a build skip
-	// and counts with the lookup skips: 13 skips in total.
-	stub.variablesStatus["good12"] = stubResponse{http.StatusBadRequest, vendor400Body}
-	good = good[:12]
+	ids = append(ids, "bad12") // 13 skips in total, one page of 25.
 
 	logs := &capturedLogs{}
 	s := newSchemaTestConnector(t, stub, nil, ids)
@@ -794,7 +983,7 @@ func TestListTicketSchemas_SkipWarningsAreSampledPerPage(t *testing.T) {
 	debugs := logs.skipEntries(zapcore.DebugLevel)
 	require.Len(t, debugs, 11, "every other skip stays visible at debug with its ID")
 	require.EqualValues(t, 13, debugs[len(debugs)-1].fields["total_occurrences"])
-	require.Equal(t, "good12", debugs[len(debugs)-1].fields["ticket_schema_id"], "build skips share the counter")
+	require.Equal(t, "bad12", debugs[len(debugs)-1].fields["ticket_schema_id"])
 
 	var summary *capturedEntry
 	for _, w := range logs.warnings() {
@@ -822,10 +1011,10 @@ func TestListTicketSchemas_SingleSkipAmongSuccessesWarnsWithoutSummary(t *testin
 }
 
 func TestListTicketSchemas_SkipSamplingRestartsEachPage(t *testing.T) {
-	stub := &schemaStub{}
+	stub := &schemaStub{items: []string{"x5"}}
 	logs := &capturedLogs{}
-	// Two pages of 2 unusable IDs each: each page's first skip warns.
-	s := newSchemaTestConnector(t, stub, nil, []string{"x1", "x2", "x3", "x4"})
+	// Two pages of 2 unusable IDs each, then a usable one: each page's first skip warns.
+	s := newSchemaTestConnector(t, stub, nil, []string{"x1", "x2", "x3", "x4", "x5"})
 	listAll(t, logCtx(logs), s, 2)
 	warns := logs.skipEntries(zapcore.WarnLevel)
 	require.Len(t, warns, 2)
@@ -838,11 +1027,12 @@ func TestListTicketSchemas_SkipSamplingRestartsEachPage(t *testing.T) {
 }
 
 func TestListTicketSchemas_AllSkippedKeepsSamplingAndSummaryWarnings(t *testing.T) {
-	stub := &schemaStub{}
+	// A non-final page of 11 unusable IDs, then a usable one.
+	stub := &schemaStub{items: []string{"good"}}
 	logs := &capturedLogs{}
-	s := newSchemaTestConnector(t, stub, nil, makeIDs(11))
-	got, _ := listAll(t, logCtx(logs), s, 25)
-	require.Empty(t, got)
+	s := newSchemaTestConnector(t, stub, nil, append(makeIDs(11), "good"))
+	got, _ := listAll(t, logCtx(logs), s, 11)
+	require.Equal(t, []string{"good"}, got)
 	require.Len(t, logs.skipEntries(zapcore.WarnLevel), 2)
 	var all bool
 	for _, w := range logs.warnings() {

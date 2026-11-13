@@ -49,6 +49,10 @@ type ServiceNow struct {
 	// if every entry was blank or malformed: an explicit selection that yields
 	// nothing must return no schemas, never fall back to broad discovery.
 	ticketSchemaIDsSelected bool
+	// ticketSchemaIDCountErr is the InvalidArgument error for a selection over
+	// MaxTicketSchemaIDs, or nil. Computed once in New and returned by the
+	// selected-IDs listing, so Validate and resource sync are not blocked by it.
+	ticketSchemaIDCountErr error
 }
 
 func (s *ServiceNow) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
@@ -153,10 +157,9 @@ func New(
 
 	configuredIDs := normalizeTicketSchemaIDs(ticketSchemaIDs)
 	// Counted before malformed entries are filtered: the limit applies to what
-	// the operator configured, and no remote call is needed to enforce it.
-	if err := validateTicketSchemaIDCount(configuredIDs); err != nil {
-		return nil, err
-	}
+	// the operator configured, and no remote call is needed to enforce it. It is
+	// enforced by ListTicketSchemas, not here, so Validate and sync still work.
+	countErr := validateTicketSchemaIDCount(configuredIDs)
 	// A malformed ID must not fail Validate or sync: warn once here and omit it.
 	// No remote lookup is made to check the rest.
 	schemaIDs, malformed := splitTicketSchemaIDs(configuredIDs)
@@ -171,10 +174,11 @@ func New(
 	}
 
 	return &ServiceNow{
-		client:                  servicenowClient,
-		ticketSchemaIDs:         schemaIDs,
+		client:          servicenowClient,
+		ticketSchemaIDs: schemaIDs,
 		// Judged on the slice as provided, before normalization, to match config
 		// validation: a blank entry counts as set, nil or empty as unset.
 		ticketSchemaIDsSelected: len(ticketSchemaIDs) > 0,
+		ticketSchemaIDCountErr:  countErr,
 	}, nil
 }

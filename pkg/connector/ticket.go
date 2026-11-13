@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"strconv"
 	"time"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -17,8 +16,6 @@ import (
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -81,29 +78,31 @@ func (s *ServiceNow) ListTicketSchemas(ctx context.Context, pt *pagination.Token
 }
 
 // listSelectedTicketSchemas serves the explicit ticket-schema-ids mode: the
-// configured IDs are the whole result set, paged by position in that list. Each
-// item is fetched directly, so ServiceNow's catalog discovery position does not
-// matter; the configured order does, as it decides which page an ID lands on
-// and which IDs fall within the SDK's first-100 cutoff. New caps the list at
-// 100 distinct IDs.
+// configured IDs are the whole result set, fetched directly and paged by
+// position in that list (a skipped item still consumes its position, so a page
+// can be empty while a next page token remains). A selection over
+// MaxTicketSchemaIDs is rejected here, before any remote call.
 //
-// Pagination advances by the configured positions attempted, not by schemas
-// returned: an item that is skipped still consumes its position, so a page can
-// be empty while a next page token remains.
-//
-// An item that is confirmed missing or inaccessible is warned about and
-// skipped. Every other failure (auth, rate limit, timeout, 5xx, unrecognized
-// 400) is returned with its status code, and annotations from every call made so
-// far are kept on both the success and error paths.
+// The recognized vendor 400 for an unavailable item is skipped only if some
+// configured ID yields a schema; if none does, the final page fails with that
+// error, so a credential that cannot see any item never looks like an empty
+// success. Whether an earlier page produced a schema travels in the page token,
+// so no state is kept between calls. Every other failure is returned with its
+// status code; annotations are kept on both the success and error paths.
 func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *pagination.Token) ([]*v2.TicketSchema, string, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
+	// Rejected before any remote call, on every page; never truncated.
+	if s.ticketSchemaIDCountErr != nil {
+		return nil, "", nil, s.ticketSchemaIDCountErr
+	}
+
 	total := len(s.ticketSchemaIDs)
-	offset, err := convertPageToken(pt.Token)
+	offset, succeededBefore, err := decodeSelectedPageToken(pt.Token)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("baton-servicenow: invalid page token %q: %w", pt.Token, err)
 	}
-	if offset < 0 || offset > total {
+	if offset > total {
 		return nil, "", nil, fmt.Errorf("baton-servicenow: invalid page token %q for %d configured ticket schema IDs", pt.Token, total)
 	}
 
@@ -116,21 +115,17 @@ func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *paginati
 		end = total
 	}
 	pageIDs := s.ticketSchemaIDs[offset:end]
-
-	var nextPageToken string
-	if end < total {
-		nextPageToken = strconv.Itoa(end)
-	}
+	lastPage := end >= total
 
 	l.Debug("listing selected ticket schemas",
 		zap.Int("configured_ids", total),
 		zap.Int("page_size", pageSize),
 		zap.Int("offset", offset),
-		zap.String("next_page_token", nextPageToken),
+		zap.Bool("last_page", lastPage),
 	)
 
 	if len(pageIDs) == 0 {
-		return nil, nextPageToken, nil, nil
+		return nil, "", nil, nil
 	}
 
 	var annos annotations.Annotations
@@ -142,14 +137,18 @@ func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *paginati
 	ticketStatuses := requestedItemStatesToTicketStatus(requestedItemStates)
 
 	ret := make([]*v2.TicketSchema, 0, len(pageIDs))
-	// skipped counts item lookup and schema-build skips together. It is local to
-	// this page (at most TicketSchemasPageSize IDs), so there is no shared mutable
-	// state and no need for the shared sampler's 100th/1000th thresholds. Within each
-	// page, only the 1st and 10th skip log at Warn; the rest log at Debug and the
-	// page summary below reports the true count.
+	// skipped is local to this page (at most TicketSchemasPageSize IDs), so there
+	// is no shared mutable state and no need for the shared sampler's 100th/1000th
+	// thresholds. Within each page, only the 1st and 10th skip log at Warn; the
+	// rest log at Debug and the page summary below reports the true count.
 	var skipped uint64
-	logSkip := func(id, reason string) {
+	var firstSkipID string
+	var firstSkipErr error
+	logSkip := func(id, reason string, err error) {
 		skipped++
+		if firstSkipErr == nil {
+			firstSkipID, firstSkipErr = id, err
+		}
 		fields := []zap.Field{
 			zap.String("ticket_schema_id", loggableID(id)),
 			zap.String("reason", reason),
@@ -166,7 +165,7 @@ func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *paginati
 		servicenow.MergeAnnotations(&annos, itemAnnos)
 		if err != nil {
 			if reason, skip := itemSkipReason(err); skip {
-				logSkip(id, reason)
+				logSkip(id, reason, err)
 				continue
 			}
 			return nil, "", annos, fmt.Errorf("baton-servicenow: failed to fetch configured ticket schema ID %q: %w", id, err)
@@ -174,16 +173,24 @@ func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *paginati
 		schema, schemaAnnos, err := s.schemaForCatalogItem(ctx, catalogItem)
 		servicenow.MergeAnnotations(&annos, schemaAnnos)
 		if err != nil {
-			// Only the vendor's item-specific 400 is treated as this item being
-			// unusable; any other failure while building the schema is operational.
-			if status.Code(err) == codes.InvalidArgument && isVendorItemUnavailable(err) {
-				logSkip(id, "schema could not be built: ServiceNow reported the item is not valid or not accessible (HTTP 400)")
-				continue
-			}
+			// Schema building calls only the item variables endpoint and Table
+			// APIs, never the item endpoint whose 400 is recognized above, so every
+			// failure here is returned.
 			return nil, "", annos, err
 		}
 		schema.Statuses = ticketStatuses
 		ret = append(ret, schema)
+	}
+
+	succeeded := succeededBefore || len(ret) > 0
+	if lastPage && !succeeded && firstSkipErr != nil {
+		return nil, "", annos, fmt.Errorf("baton-servicenow: none of the %d configured ticket schema IDs could be loaded; failed to fetch configured ticket schema ID %q: %w",
+			total, firstSkipID, firstSkipErr)
+	}
+
+	var nextPageToken string
+	if !lastPage {
+		nextPageToken = encodeSelectedPageToken(end, succeeded)
 	}
 
 	if skipped > 1 && len(ret) > 0 {
@@ -194,7 +201,7 @@ func (s *ServiceNow) listSelectedTicketSchemas(ctx context.Context, pt *paginati
 	}
 	if skipped > 0 && len(ret) == 0 {
 		l.Warn("baton-servicenow: every configured ticket schema ID on this page was skipped",
-			zap.Uint64("skipped", skipped), zap.Int("offset", offset), zap.Bool("last_page", nextPageToken == ""))
+			zap.Uint64("skipped", skipped), zap.Int("offset", offset), zap.Bool("last_page", lastPage))
 	}
 
 	return ret, nextPageToken, annos, nil
