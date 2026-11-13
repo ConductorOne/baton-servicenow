@@ -139,6 +139,13 @@
       "stringField": {}
     },
     {
+      "name": "ticket-schema-ids",
+      "displayName": "Ticket schema IDs",
+      "description": "Optional ServiceNow catalog item (ticket schema) sys_IDs to offer as ticket schemas, in the order given; at most 100. Cannot be combined with Catalog ID or Category ID.",
+      "placeholder": "9de5069c5afe602b2ea0a04b66beb2c0",
+      "stringSliceField": {}
+    },
+    {
       "name": "allowed-domains",
       "displayName": "Allowed email domains",
       "description": "Limit syncing to users whose email ends with one of the specified domains",
@@ -169,10 +176,25 @@
       "fieldNames": [
         "catalog-id",
         "category-id",
+        "ticket-schema-ids",
         "two-step-checkout"
       ],
       "secondaryFieldNames": [
         "ticketing"
+      ]
+    },
+    {
+      "kind": "CONSTRAINT_KIND_MUTUALLY_EXCLUSIVE",
+      "fieldNames": [
+        "ticket-schema-ids",
+        "catalog-id"
+      ]
+    },
+    {
+      "kind": "CONSTRAINT_KIND_MUTUALLY_EXCLUSIVE",
+      "fieldNames": [
+        "ticket-schema-ids",
+        "category-id"
       ]
     }
   ],
