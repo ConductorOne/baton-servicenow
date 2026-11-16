@@ -67,6 +67,7 @@ func getConnector(ctx context.Context, snc *config.ServiceNow) (types.ConnectorS
 		auth,
 		snc.Deployment,
 		ticketSchemaFilters,
+		snc.TicketSchemaIds,
 		snc.AllowedDomains,
 		snc.CustomUserFields,
 		snc.BaseUrl,

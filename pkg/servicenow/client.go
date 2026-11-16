@@ -852,13 +852,17 @@ func (c *Client) UpdateUserActiveStatus(ctx context.Context, userId string, acti
 
 // Includes variables that come from variable sets (Table API -> item_option_new) and choices for those set variables.
 func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID string) ([]CatalogItemVariable, annotations.Annotations, error) {
-	itemVars, annos, err := c.GetCatalogItemVariables(ctx, itemSysID)
+	// Annotations (rate-limit data) from every call are kept, not just the last one's.
+	var annos annotations.Annotations
+	itemVars, callAnnos, err := c.GetCatalogItemVariables(ctx, itemSysID)
+	MergeAnnotations(&annos, callAnnos)
 	if err != nil {
 		return nil, annos, fmt.Errorf("failed to get item variables: %w", err)
 	}
 
 	// Find attached variable sets
-	links, _, annos, err := c.GetVariableSetLinksForItem(ctx, itemSysID, PaginationVars{Limit: 200})
+	links, _, callAnnos, err := c.GetVariableSetLinksForItem(ctx, itemSysID, PaginationVars{Limit: 200})
+	MergeAnnotations(&annos, callAnnos)
 	if err != nil {
 		return nil, annos, fmt.Errorf("failed to get variable set links: %w", err)
 	}
@@ -872,7 +876,8 @@ func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID 
 	}
 
 	// Fetch variables that belong to those sets
-	setVars, _, annos, err := c.GetVariablesBySetIDs(ctx, setIDs, PaginationVars{Limit: 500})
+	setVars, _, callAnnos, err := c.GetVariablesBySetIDs(ctx, setIDs, PaginationVars{Limit: 500})
+	MergeAnnotations(&annos, callAnnos)
 	if err != nil {
 		return nil, annos, fmt.Errorf("failde to get variables by set ids: %w", err)
 	}
@@ -882,7 +887,8 @@ func (c *Client) GetCatalogItemVariablesPlusSets(ctx context.Context, itemSysID 
 	for _, v := range setVars {
 		varIDs = append(varIDs, v.SysID)
 	}
-	choices, _, annos, err := c.GetChoicesForVariables(ctx, varIDs, PaginationVars{Limit: 1000})
+	choices, _, callAnnos, err := c.GetChoicesForVariables(ctx, varIDs, PaginationVars{Limit: 1000})
+	MergeAnnotations(&annos, callAnnos)
 	if err != nil {
 		return nil, annos, fmt.Errorf("failed to get choices for set variables: %w", err)
 	}

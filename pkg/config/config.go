@@ -24,6 +24,12 @@ var (
 	categoryField = field.StringField("category-id",
 		field.WithDisplayName("Category ID"),
 		field.WithDescription("ServiceNow category id to filter catalog items to"))
+	ticketSchemaIDsField = field.StringSliceField("ticket-schema-ids",
+		field.WithDisplayName("Ticket schema IDs"),
+		field.WithDescription("Optional ServiceNow catalog item (ticket schema) sys_IDs to offer as ticket schemas, in the order given; at most 100. "+
+			"Cannot be combined with Catalog ID or Category ID."),
+		field.WithPlaceholder("9de5069c5afe602b2ea0a04b66beb2c0"),
+	)
 	allowedDomainsField = field.StringSliceField("allowed-domains",
 		field.WithDisplayName("Allowed email domains"),
 		field.WithDescription("Limit syncing to users whose email ends with one of the specified domains"),
@@ -60,6 +66,7 @@ var configurationFields = []field.SchemaField{
 	deploymentField,
 	catalogField,
 	categoryField,
+	ticketSchemaIDsField,
 	allowedDomainsField,
 	customUserFieldsField,
 	externalTicketField,
@@ -70,9 +77,12 @@ var configurationFields = []field.SchemaField{
 
 var configRelations = []field.SchemaFieldRelationship{
 	field.FieldsDependentOn(
-		[]field.SchemaField{catalogField, categoryField, twoStepCheckoutField},
+		[]field.SchemaField{catalogField, categoryField, ticketSchemaIDsField, twoStepCheckoutField},
 		[]field.SchemaField{externalTicketField},
 	),
+	// Pairwise rather than one three-field group: Catalog ID and Category ID may still be combined with each other.
+	field.FieldsMutuallyExclusive(ticketSchemaIDsField, catalogField),
+	field.FieldsMutuallyExclusive(ticketSchemaIDsField, categoryField),
 }
 
 //go:generate go run ./gen

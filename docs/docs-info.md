@@ -30,6 +30,14 @@ While developing the connector, please fill out this form. This information is n
 
    - Leaving the list empty (default) means **no domain filtering**—all users are synced.
 
+4. **Ticket schema IDs (external ticketing):**
+
+   - Configuration field: `ticket-schema-ids` (string slice, optional)
+   - Takes ServiceNow catalog item sys_ids and offers only those items as ticket schemas, in the order given.
+   - Accepts at most 100 IDs.
+   - Can't be combined with `catalog-id` or `category-id`.
+   - Only applies when ticketing is enabled (`--ticketing`).
+
 ## Connector credentials 
 
 1. What credentials or information are needed to set up the connector? (For example, API key, client ID and secret, domain, etc.)
