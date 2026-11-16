@@ -81,6 +81,11 @@ See [`docs/connector.mdx`](./docs/connector.mdx) for the customer-facing setup w
 
 `--ticket-schema-ids` takes catalog item sys_ids and offers only those items as ticket schemas, in the order given. It can't be combined with `--catalog-id` or `--category-id` and accepts at most 100 IDs. See [`docs/connector.mdx`](./docs/connector.mdx) for setup.
 
+- Each ID is trimmed and duplicates are dropped. A valid ID contains only letters, digits, `_` and `-`; any other entry is ignored and logged as a warning.
+- An explicit empty value (`--ticket-schema-ids ""`) is treated as not set, so ticket schemas are discovered as usual.
+- A value that contains no valid ID, such as `BATON_TICKET_SCHEMA_IDS=" , "`, offers no ticket schemas. The connector logs a warning and does not fall back to discovery.
+- ServiceNow returns the same HTTP 400 (`Either Catalog Item is not valid or security constraints prevent access`) for nonexistent, inactive and access-restricted catalog items, so all of them are skipped. If every listed item is unavailable, listing ticket schemas fails.
+
 ## Custom User Fields
 
 The connector supports syncing custom user attributes from ServiceNow. ServiceNow custom fields use the `u_` prefix (e.g., `u_type`, `u_department`). To include these fields in synced user profiles, use the `--custom-user-fields` flag or the `BATON_CUSTOM_USER_FIELDS` environment variable:
